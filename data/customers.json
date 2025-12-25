@@ -1,0 +1,56 @@
+[
+  {
+    "id": "2",
+    "name": "Pasar Mini Bestari",
+    "address": "45 Lorong Indah",
+    "outstandingBalance": 0,
+    "lat": 3.073,
+    "lon": 101.518
+  },
+  {
+    "id": "3",
+    "name": "Restoran Maju",
+    "address": "88 Taman Raya",
+    "outstandingBalance": 500.5,
+    "lat": 3.055,
+    "lon": 101.7
+  },
+  {
+    "outstandingBalance": 0,
+    "name": "Test Store 1 Updated",
+    "address": "123 Test St",
+    "sales_id": "u2",
+    "id": "1766634065508"
+  },
+  {
+    "name": "Fancoklow",
+    "address": "Lok kawi ",
+    "outstandingBalance": 2001,
+    "sales_id": "u2",
+    "lat": 2,
+    "lon": 3,
+    "id": "1766634932613"
+  },
+  {
+    "name": "cdm enterprices",
+    "address": "kampung inanam laut",
+    "outstandingBalance": 0,
+    "sales_id": "",
+    "id": "1766638824938"
+  },
+  {
+    "name": "hsaoa",
+    "address": "ad",
+    "outstandingBalance": 200,
+    "sales_id": "u2",
+    "id": "1766640533034"
+  },
+  {
+    "name": "enterprices",
+    "address": "lokkawi",
+    "outstandingBalance": 2000,
+    "sales_id": "u2",
+    "lat": 3,
+    "id": "1766641130009"
+  }
+]

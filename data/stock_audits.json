@@ -1,0 +1,19 @@
+[
+  {
+    "id": "791406ae-bbb3-41e6-819a-7496f52d7f92",
+    "customerId": "3",
+    "items": [
+      {
+        "productId": "p2",
+        "productName": "Meatball 800g",
+        "physicalStock": 4
+      },
+      {
+        "productId": "p3",
+        "productName": "Burger Ayam (10pcs)",
+        "physicalStock": 4
+      }
+    ],
+    "createdAt": "2025-12-25T06:45:28.008Z"
+  }
+]

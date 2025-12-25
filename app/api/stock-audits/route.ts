@@ -1,0 +1,25 @@
+import { NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { StockAudit } from '@/types';
+
+export async function GET() {
+  const audits = db.stockAudits.getAll();
+  return NextResponse.json(audits);
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const newAudit: StockAudit = {
+      id: crypto.randomUUID(),
+      ...body,
+      createdAt: new Date().toISOString(),
+    };
+    
+    db.stockAudits.save(newAudit);
+    return NextResponse.json(newAudit);
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: 'Failed to create audit' }, { status: 500 });
+  }
+}

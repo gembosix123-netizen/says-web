@@ -1,0 +1,21 @@
+[
+  {
+    "id": "o-1001",
+    "customerId": "1",
+    "items": [
+      { "id": "p1", "name": "Meatball 1kg", "unit": "pkt", "qty": 10, "price": 18.0 },
+      { "id": "p4", "name": "Burger Daging (10pcs)", "unit": "pkt", "qty": 8, "price": 13.5 },
+      { "id": "p7", "name": "Roti Burger (12s)", "unit": "pkt", "qty": 12, "price": 4.5 }
+    ],
+    "status": "assigned"
+  },
+  {
+    "id": "o-1002",
+    "customerId": "2",
+    "items": [
+      { "id": "p2", "name": "Meatball 800g", "unit": "pkt", "qty": 6, "price": 15.0 },
+      { "id": "p5", "name": "Sos Cili 1kg", "unit": "btl", "qty": 10, "price": 8.0 }
+    ],
+    "status": "assigned"
+  }
+]

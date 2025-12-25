@@ -1,0 +1,50 @@
+[
+  {
+    "id": "p1",
+    "name": "Meatball 1kg",
+    "price": 19,
+    "unit": "pkt"
+  },
+  {
+    "id": "p2",
+    "name": "Meatball 800g",
+    "price": 15,
+    "unit": "pkt"
+  },
+  {
+    "id": "p3",
+    "name": "Burger Ayam (10pcs)",
+    "price": 12,
+    "unit": "pkt"
+  },
+  {
+    "id": "p4",
+    "name": "Burger Daging (10pcs)",
+    "price": 13.5,
+    "unit": "pkt"
+  },
+  {
+    "id": "p5",
+    "name": "Sos Cili 1kg",
+    "price": 8,
+    "unit": "btl"
+  },
+  {
+    "id": "p6",
+    "name": "Mayonis 3L",
+    "price": 25,
+    "unit": "tub"
+  },
+  {
+    "id": "p7",
+    "name": "Roti Burger (12s)",
+    "price": 4.5,
+    "unit": "pkt"
+  },
+  {
+    "name": "kekera",
+    "price": 20,
+    "unit": "hs121",
+    "id": "p1766644105056"
+  }
+]
