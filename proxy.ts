@@ -2,35 +2,50 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function proxy(request: NextRequest) {
-  const session = request.cookies.get('session');
   const { pathname } = request.nextUrl;
 
-  // Paths that require authentication
-  const protectedPaths = ['/admin', '/sales'];
+  // 1. Exclude static assets, api, and _next folders from middleware logic
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/static') ||
+    pathname.includes('.') || // Exclude files with extensions (images, etc.)
+    pathname === '/favicon.ico'
+  ) {
+    return NextResponse.next();
+  }
+
+  const session = request.cookies.get('session');
+  const isLoginPage = pathname === '/login';
+
+  // 2. Auth Logic
   
-  const isProtected = protectedPaths.some(path => pathname.startsWith(path));
+  // If user is logged in and visits login page, redirect to home
+  if (isLoginPage && session) {
+    return NextResponse.redirect(new URL('/', request.url));
+  }
 
-  if (isProtected) {
-    if (!session) {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
+  // If user is NOT logged in and tries to access protected pages (anything other than login)
+  if (!isLoginPage && !session) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
 
+  // 3. Role-based access control for protected paths
+  if (session) {
     try {
       const sessionData = JSON.parse(session.value);
       const { role } = sessionData;
 
       if (pathname.startsWith('/admin') && role !== 'Admin') {
-         // Redirect unauthorized access to home or error
          return NextResponse.redirect(new URL('/', request.url));
       }
       
-      // Allow Sales to access /sales (and maybe admin to access sales? usually separate)
       if (pathname.startsWith('/sales') && role !== 'Sales' && role !== 'Admin') {
          return NextResponse.redirect(new URL('/', request.url));
       }
 
     } catch (e) {
-      // Invalid session
+      // Invalid session, force logout/login
       return NextResponse.redirect(new URL('/login', request.url));
     }
   }
@@ -39,5 +54,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/sales/:path*'],
+  // Matcher to run middleware on all paths except static assets
+  // This ensures our auth logic runs globally
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
