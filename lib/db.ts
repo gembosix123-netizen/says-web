@@ -1,3 +1,4 @@
+import { kv } from '@vercel/kv';
 import fs from 'fs';
 import path from 'path';
 
@@ -7,45 +8,47 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR);
 }
 
+const IS_PROD = process.env.NODE_ENV === 'production';
+
 export class DB<T extends { id: string }> {
   private filePath: string;
-  private cache: T[] | null = null;
-  private lastModified: number = 0;
+  private keyName: string;
 
   constructor(filename: string) {
     this.filePath = path.join(DATA_DIR, filename);
+    this.keyName = filename.replace('.json', '');
   }
 
-  getAll(): T[] {
-    if (!fs.existsSync(this.filePath)) return [];
-    
-    try {
-      const stats = fs.statSync(this.filePath);
-      // If cache exists and file hasn't changed, return cache
-      if (this.cache && stats.mtimeMs === this.lastModified) {
-        return this.cache;
+  async getAll(): Promise<T[]> {
+    if (IS_PROD) {
+      try {
+        const data = await kv.get<T[]>(this.keyName);
+        return data || [];
+      } catch (error) {
+        console.error(`KV Error reading ${this.keyName}:`, error);
+        return [];
       }
-
-      const data = fs.readFileSync(this.filePath, 'utf8');
-      this.cache = JSON.parse(data) as T[];
-      this.lastModified = stats.mtimeMs;
-      return this.cache;
-    } catch (error) {
-      console.error(`Error reading ${this.filePath}:`, error);
-      return [];
+    } else {
+      // Local fallback
+      if (!fs.existsSync(this.filePath)) return [];
+      try {
+        const data = fs.readFileSync(this.filePath, 'utf8');
+        return JSON.parse(data) as T[];
+      } catch (error) {
+        return [];
+      }
     }
   }
 
-  getById(id: string): T | undefined {
-    const items = this.getAll();
+  async getById(id: string): Promise<T | undefined> {
+    const items = await this.getAll();
     return items.find((item) => item.id === id);
   }
 
-  save(item: T): T {
-    const items = this.getAll();
+  async save(item: T): Promise<T> {
+    const items = await this.getAll();
     const index = items.findIndex((i) => i.id === item.id);
     
-    // Update in-memory first
     const newItems = [...items];
     if (index >= 0) {
       newItems[index] = { ...newItems[index], ...item };
@@ -53,49 +56,35 @@ export class DB<T extends { id: string }> {
       newItems.push(item);
     }
     
-    this.writeToFile(newItems);
-    
-    // Update cache immediately
-    this.cache = newItems;
-    // Update lastModified to match the file we just wrote
-    try {
-        const stats = fs.statSync(this.filePath);
-        this.lastModified = stats.mtimeMs;
-    } catch (e) {
-        // If stat fails, force reload next time
-        this.lastModified = 0;
+    if (IS_PROD) {
+      await kv.set(this.keyName, newItems);
+    } else {
+      fs.writeFileSync(this.filePath, JSON.stringify(newItems, null, 2));
     }
     
     return item;
   }
 
-  delete(id: string): boolean {
-    const items = this.getAll();
+  async delete(id: string): Promise<boolean> {
+    const items = await this.getAll();
     const newItems = items.filter((item) => item.id !== id);
     
     if (items.length === newItems.length) return false;
     
-    this.writeToFile(newItems);
-    
-    // Update cache
-    this.cache = newItems;
-    try {
-        const stats = fs.statSync(this.filePath);
-        this.lastModified = stats.mtimeMs;
-    } catch (e) {
-        this.lastModified = 0;
+    if (IS_PROD) {
+      await kv.set(this.keyName, newItems);
+    } else {
+      fs.writeFileSync(this.filePath, JSON.stringify(newItems, null, 2));
     }
 
     return true;
-  }
-
-  private writeToFile(data: T[]) {
-    fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2));
   }
 }
 
 import { Customer, Product, User, Order, Transaction, StockAudit } from '@/types';
 
+// We need to export instances. 
+// Note: methods are now async, so we need to update usage in API routes.
 export const db = {
   customers: new DB<Customer>('customers.json'),
   products: new DB<Product>('products.json'),

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 1. Exclude static assets, api, and _next folders from middleware logic
@@ -22,7 +22,16 @@ export function proxy(request: NextRequest) {
   
   // If user is logged in and visits login page, redirect to home
   if (isLoginPage && session) {
-    return NextResponse.redirect(new URL('/', request.url));
+    // Verify session validity before redirecting
+    try {
+        JSON.parse(session.value);
+        return NextResponse.redirect(new URL('/', request.url));
+    } catch (e) {
+        // Invalid session, let them stay on login page and maybe clear cookie
+        const response = NextResponse.next();
+        response.cookies.delete('session');
+        return response;
+    }
   }
 
   // If user is NOT logged in and tries to access protected pages (anything other than login)
@@ -46,7 +55,9 @@ export function proxy(request: NextRequest) {
 
     } catch (e) {
       // Invalid session, force logout/login
-      return NextResponse.redirect(new URL('/login', request.url));
+      const response = NextResponse.redirect(new URL('/login', request.url));
+      response.cookies.delete('session');
+      return response;
     }
   }
 

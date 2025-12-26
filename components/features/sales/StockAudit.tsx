@@ -3,12 +3,15 @@ import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Lock } from 'lucide-react';
 
 export default function StockAudit() {
-  const { products, saveStockAudit, setStep } = useSales();
+  const { products, saveStockAudit, setStep, userRole } = useSales();
   const { t } = useLanguage();
   const [auditData, setAuditData] = useState<{ [key: string]: number }>({});
   const [loading, setLoading] = useState(false);
+
+  const isAdmin = userRole === 'Admin';
 
   const handleStockChange = (productId: string, value: string) => {
     const numValue = parseInt(value);
@@ -23,6 +26,7 @@ export default function StockAudit() {
   };
 
   const handleSubmit = async () => {
+    if (!isAdmin) return;
     setLoading(true);
     const items = Object.entries(auditData).map(([productId, physicalStock]) => {
       const product = products.find(p => p.id === productId);
@@ -40,6 +44,25 @@ export default function StockAudit() {
 
   const handleSkip = () => {
       setStep(4);
+  }
+
+  if (!isAdmin) {
+      return (
+          <div className="flex flex-col items-center justify-center space-y-6 py-10">
+              <div className="bg-red-100 p-4 rounded-full">
+                  <Lock className="text-red-600" size={48} />
+              </div>
+              <div className="text-center space-y-2">
+                  <h2 className="text-xl font-bold text-slate-800">{t('stock_audit')}</h2>
+                  <p className="text-slate-500 max-w-xs mx-auto">
+                      {t('audit_restricted') || "Fungsi Pelarasan Stok hanya untuk Admin. Sila teruskan ke katalog produk."}
+                  </p>
+              </div>
+              <Button onClick={handleSkip} className="w-full max-w-xs">
+                  {t('continue_to_catalog') || "Teruskan ke Katalog"}
+              </Button>
+          </div>
+      );
   }
 
   return (

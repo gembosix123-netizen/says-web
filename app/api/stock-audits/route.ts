@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { StockAudit } from '@/types';
 
 export async function GET() {
-  const audits = db.stockAudits.getAll();
+  const audits = await db.stockAudits.getAll();
   return NextResponse.json(audits);
 }
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
     
-    db.stockAudits.save(newAudit);
+    await db.stockAudits.save(newAudit);
     return NextResponse.json(newAudit);
   } catch (error) {
     console.error(error);

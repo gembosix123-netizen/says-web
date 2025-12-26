@@ -1,20 +1,18 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
-import { FileText, Camera, Save } from 'lucide-react';
-import SignaturePad from 'react-signature-canvas';
+import { Camera, Save, Upload } from 'lucide-react';
 import Image from 'next/image';
 
 export default function OrderSummary() {
   const { 
     selectedCustomer, cart, payment, calculateGrandTotal, 
-    signatureUrl, setSignatureUrl, photoUrl, setPhotoUrl, 
+    photoUrl, setPhotoUrl, 
     checkInTime, gpsLocation, setVisitedCustomers, setStep
   } = useSales();
   const { t } = useLanguage();
-  const sigRef = useRef<SignaturePad | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   const handleSubmit = async () => {
@@ -32,7 +30,7 @@ export default function OrderSummary() {
       subtotal: calculateGrandTotal(), // Using same as total for now
       payment,
       total: calculateGrandTotal(),
-      signatureUrl,
+      signatureUrl: null, // Removed signature
       photoUrl,
     };
 
@@ -85,32 +83,18 @@ export default function OrderSummary() {
         </div>
       </div>
 
-      <div className={`p-3 rounded-xl border-2 ${signatureUrl ? 'border-green-500 bg-green-50' : 'border-slate-300 bg-slate-50'}`}>
-        {!signatureUrl && <div className="text-slate-700 text-sm mb-2 flex items-center"><FileText className="mr-2" /> {t('signature_title')}</div>}
-        <div className="bg-white rounded-lg overflow-hidden border border-slate-200">
-          <SignaturePad ref={sigRef} canvasProps={{ width: 350, height: 160, className: 'w-full h-40' }} />
+      <div className={`p-4 rounded-xl border-2 border-dashed ${photoUrl ? 'border-green-500 bg-green-50' : 'border-blue-300 bg-blue-50'} transition-all`}>
+        <div className="text-center mb-4">
+            <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-2">
+                <Camera size={24} />
+            </div>
+            <h3 className="font-bold text-slate-900">{t('proof_delivery') || "Bukti Penghantaran"}</h3>
+            <p className="text-xs text-slate-500">{t('upload_photo_desc') || "Ambil gambar stok atau premis pelanggan"}</p>
         </div>
-        <div className="flex justify-end gap-2 mt-2">
-          <button
-            onClick={() => { sigRef.current?.clear(); setSignatureUrl(null); }}
-            className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg font-bold"
-          >
-            {t('clear')}
-          </button>
-          <button
-            onClick={() => { if (sigRef.current && !sigRef.current.isEmpty()) { const url = sigRef.current.getTrimmedCanvas().toDataURL('image/png'); setSignatureUrl(url); } }}
-            className="px-3 py-2 bg-blue-600 text-white rounded-lg font-bold"
-          >
-            {t('save')}
-          </button>
-        </div>
-        {signatureUrl && <Image src={signatureUrl} alt="Signature" width={280} height={80} className="mt-2 h-20 object-contain" />}
-      </div>
-
-      <div className={`p-3 rounded-xl border-2 ${photoUrl ? 'border-green-500 bg-green-50' : 'border-slate-300 bg-slate-50'}`}>
-        <div className="text-slate-700 text-sm mb-2 flex items-center"><Camera className="mr-2" /> {t('proof_delivery')}</div>
+        
         <input
           type="file"
+          id="proof-upload"
           accept="image/*"
           capture="environment"
           onChange={(e) => {
@@ -123,26 +107,41 @@ export default function OrderSummary() {
               reader.readAsDataURL(file);
             }
           }}
-          className="w-full"
+          className="hidden"
         />
-        {photoUrl && <Image src={photoUrl} alt="Proof" width={400} height={300} className="mt-2 rounded-lg max-h-52 object-contain" />}
+        
+        {!photoUrl ? (
+            <label htmlFor="proof-upload" className="block w-full py-3 bg-white border border-blue-200 text-blue-700 font-bold rounded-lg text-center cursor-pointer hover:bg-blue-50 transition-colors shadow-sm">
+                <Upload className="inline-block mr-2 w-4 h-4" />
+                {t('take_photo') || "Ambil Gambar"}
+            </label>
+        ) : (
+            <div className="space-y-3">
+                <div className="relative rounded-lg overflow-hidden border border-slate-200 shadow-sm">
+                    <Image src={photoUrl} alt="Proof" width={400} height={300} className="w-full h-48 object-cover" />
+                </div>
+                <label htmlFor="proof-upload" className="block w-full py-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-lg text-center cursor-pointer hover:bg-slate-50 text-sm">
+                    {t('retake_photo') || "Ambil Semula"}
+                </label>
+            </div>
+        )}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200">
         <Button 
             onClick={handleSubmit} 
-            disabled={!signatureUrl || !selectedCustomer || cart.length === 0 || isSubmitting} 
-            className="w-full py-4 text-lg shadow-lg bg-green-600 hover:bg-green-700 disabled:bg-slate-300"
+            disabled={!photoUrl || !selectedCustomer || cart.length === 0 || isSubmitting} 
+            className="w-full py-4 text-lg shadow-lg bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all"
         >
           {isSubmitting ? (
-             <>
+             <div className="flex items-center justify-center">
                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
                Processing...
-             </>
+             </div>
           ) : (
-             <>
+             <div className="flex items-center justify-center">
                <Save className="mr-2" /> {t('confirm_submit')}
-             </>
+             </div>
           )}
         </Button>
       </div>

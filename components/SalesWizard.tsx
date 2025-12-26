@@ -65,9 +65,9 @@ function SalesWizardContent() {
   );
 }
 
-export default function SalesWizard() {
+export default function SalesWizard({ role }: { role?: string }) {
   return (
-    <SalesProvider>
+    <SalesProvider initialRole={role}>
       <SalesWizardContent />
     </SalesProvider>
   );

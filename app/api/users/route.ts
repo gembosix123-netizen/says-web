@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 
 export async function GET(request: Request) {
   try {
-    const users = db.users.getAll();
+    const users = await db.users.getAll();
     
     // Optional: Filter by role if query param exists
     const { searchParams } = new URL(request.url);

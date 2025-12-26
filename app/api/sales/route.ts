@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { Transaction } from '@/types';
 
 export async function GET() {
-  const transactions = db.transactions.getAll();
+  const transactions = await db.transactions.getAll();
   // Sort by createdAt desc
   const sorted = transactions.sort((a, b) => {
     const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
     };
-    db.transactions.save(newTransaction);
+    await db.transactions.save(newTransaction);
     return NextResponse.json({ success: true, id: newTransaction.id });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to save transaction' }, { status: 500 });
@@ -39,7 +39,7 @@ export async function PUT(request: Request) {
             return NextResponse.json({ error: 'ID required' }, { status: 400 });
         }
 
-        const existing = db.transactions.getById(id);
+        const existing = await db.transactions.getById(id);
         if (!existing) {
              return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
         }
@@ -50,7 +50,7 @@ export async function PUT(request: Request) {
             updatedAt: new Date().toISOString()
         };
 
-        db.transactions.save(updated);
+        await db.transactions.save(updated);
         return NextResponse.json({ success: true, data: updated });
     } catch (error) {
         return NextResponse.json({ error: 'Failed to update transaction' }, { status: 500 });

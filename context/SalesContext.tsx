@@ -42,11 +42,12 @@ interface SalesContextType {
   latestAudit: StockAudit | null;
   setLatestAudit: (audit: StockAudit | null) => void;
   loading: boolean;
+  userRole: string | null;
 }
 
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
-export function SalesProvider({ children }: { children: ReactNode }) {
+export function SalesProvider({ children, initialRole }: { children: ReactNode, initialRole?: string }) {
   const [step, setStep] = useState<number>(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -58,6 +59,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [latestAudit, setLatestAudit] = useState<StockAudit | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userRole] = useState<string | null>(initialRole || null);
 
   const [payment, setPayment] = useState<PaymentDetails>({
     method: 'cash',
@@ -214,7 +216,8 @@ export function SalesProvider({ children }: { children: ReactNode }) {
         saveStockAudit,
         latestAudit,
         setLatestAudit,
-        loading
+        loading,
+        userRole
       }}
     >
       {children}

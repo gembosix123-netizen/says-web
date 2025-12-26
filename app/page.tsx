@@ -23,5 +23,5 @@ export default async function Home() {
   }
 
   // Sales Role
-  return <SalesWizard />;
+  return <SalesWizard role={role} />;
 }
