@@ -10,6 +10,7 @@ import OrderManagement from '@/components/features/admin/OrderManagement';
 import AnalyticsDashboard from '@/components/features/admin/AnalyticsDashboard';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { LogOut } from 'lucide-react';
 
 export default function AdminPage() {
   const { t } = useLanguage();

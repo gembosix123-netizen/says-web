@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+// Standard Next.js Middleware
+// Note: Do not rename to proxy.ts unless strictly required by specific custom server configs.
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
