@@ -119,7 +119,7 @@ export default function LoginPage() {
             <div className="text-center text-xs text-slate-400 space-y-1">
                 <p>Demo Credentials:</p>
                 <div className="flex justify-center gap-4 font-mono">
-                    <span className="bg-slate-100 px-2 py-1 rounded">admin / password</span>
+                    <span className="bg-slate-100 px-2 py-1 rounded">Admin1 / password1</span>
                     <span className="bg-slate-100 px-2 py-1 rounded">sales1 / password</span>
                 </div>
             </div>

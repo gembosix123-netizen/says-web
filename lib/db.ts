@@ -73,19 +73,24 @@ export class DB<T extends { id: string }> {
         }
 
         // If file read failed or empty, and this is 'users', provide default admin
-        if (initialData.length === 0 && this.keyName === 'users') {
-          console.log('[DB] Seeding default admin user (Hardcoded).');
-          initialData = [
-            { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin" } as any,
-            { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as any
-          ];
-        }
+      if (initialData.length === 0 && this.keyName === 'users') {
+        console.log('[DB] Seeding default admin user (Hardcoded).');
+        initialData = [
+          { id: "u1", username: "Admin1", password: "password1", role: "Admin", name: "System Admin" } as any,
+          { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as any
+        ];
+      }
 
-        if (initialData.length > 0) {
-          console.log(`[DB] Seeding ${this.keyName} with ${initialData.length} items...`);
-          await redis.set(this.keyName, initialData);
-          return initialData;
+      if (initialData.length > 0) {
+        console.log(`[DB] Seeding ${this.keyName} with ${initialData.length} items...`);
+        // FORCE RESET: Always overwrite users key to ensure new password takes effect
+        if (this.keyName === 'users') {
+             console.log('[DB] Force resetting users key with new credentials.');
+             await redis.del(this.keyName);
         }
+        await redis.set(this.keyName, initialData);
+        return initialData;
+      }
 
         return [];
       } catch (error) {
