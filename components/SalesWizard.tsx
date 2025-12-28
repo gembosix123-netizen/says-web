@@ -20,6 +20,7 @@ function SalesWizardContent() {
   const { t } = useLanguage();
 
   const handleLogout = () => {
+    if (!confirm('Adakah anda pasti mahu log keluar?')) return;
     // Clear session cookie
     document.cookie = 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
     // Redirect to login
