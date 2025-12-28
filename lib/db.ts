@@ -1,6 +1,25 @@
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
 import fs from 'fs';
 import path from 'path';
+
+// Initialize Redis client explicitly with connection check logging
+// Prioritize KV_ (Vercel) but fallback to UPSTASH_ (Direct)
+const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+const redis = new Redis({
+  url: redisUrl || '',
+  token: redisToken || '',
+});
+
+if (process.env.NODE_ENV === 'production') {
+  console.log('[DB] Initializing Redis connection...');
+  if (!redisUrl || !redisToken) {
+    console.error('[DB] CRITICAL: Redis credentials missing! Check KV_REST_API_URL or UPSTASH_REDIS_REST_URL.');
+  } else {
+    console.log('[DB] Redis credentials found.');
+  }
+}
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 
@@ -22,7 +41,7 @@ export class DB<T extends { id: string }> {
   async getAll(): Promise<T[]> {
     if (IS_PROD) {
       try {
-        const data = await kv.get<T[]>(this.keyName);
+        const data = await redis.get<T[]>(this.keyName);
         if (data && Array.isArray(data) && data.length > 0) {
           return data;
         }
@@ -42,7 +61,7 @@ export class DB<T extends { id: string }> {
 
         // If file read failed or empty, and this is 'users', provide default admin
         if (initialData.length === 0 && this.keyName === 'users') {
-          console.log('[DB] Seeding default admin user.');
+          console.log('[DB] Seeding default admin user (Hardcoded).');
           initialData = [
             { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin" } as any,
             { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as any
@@ -50,7 +69,8 @@ export class DB<T extends { id: string }> {
         }
 
         if (initialData.length > 0) {
-          await kv.set(this.keyName, initialData);
+          console.log(`[DB] Seeding ${this.keyName} with ${initialData.length} items...`);
+          await redis.set(this.keyName, initialData);
           return initialData;
         }
 
@@ -88,7 +108,7 @@ export class DB<T extends { id: string }> {
     }
     
     if (IS_PROD) {
-      await kv.set(this.keyName, newItems);
+      await redis.set(this.keyName, newItems);
     } else {
       fs.writeFileSync(this.filePath, JSON.stringify(newItems, null, 2));
     }
@@ -103,7 +123,7 @@ export class DB<T extends { id: string }> {
     if (items.length === newItems.length) return false;
     
     if (IS_PROD) {
-      await kv.set(this.keyName, newItems);
+      await redis.set(this.keyName, newItems);
     } else {
       fs.writeFileSync(this.filePath, JSON.stringify(newItems, null, 2));
     }
