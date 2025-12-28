@@ -71,9 +71,18 @@ function SalesWizardContent() {
       </main>
 
       {step === 1 && (
-        <footer className="bg-slate-900 text-slate-400 p-5 text-center text-sm pb-safe">
-            <p>{t('developed_by')}</p>
-            <p className="text-xs mt-1 opacity-80">Enterprise Solutions v1.0</p>
+        <footer className="bg-slate-900 text-slate-400 p-5 text-center text-sm pb-safe space-y-4">
+            <button 
+                onClick={handleLogout}
+                className="w-full py-3 bg-slate-800 text-red-400 rounded-lg flex items-center justify-center gap-2 font-bold border border-slate-700"
+            >
+                <LogOut size={16} />
+                LOG KELUAR (LOGOUT)
+            </button>
+            <div>
+                <p>{t('developed_by')}</p>
+                <p className="text-xs mt-1 opacity-80">Enterprise Solutions v1.0</p>
+            </div>
         </footer>
       )}
     </div>
