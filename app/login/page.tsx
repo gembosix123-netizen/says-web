@@ -47,25 +47,25 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-black p-4 relative overflow-hidden">
       
       {/* Abstract Background Shapes */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-blue-600 rounded-full blur-[100px] opacity-20 animate-pulse" />
-        <div className="absolute top-[40%] right-[0%] w-[40%] h-[40%] bg-purple-600 rounded-full blur-[100px] opacity-20 animate-pulse delay-1000" />
+        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-red-900 rounded-full blur-[100px] opacity-20 animate-pulse" />
+        <div className="absolute top-[40%] right-[0%] w-[40%] h-[40%] bg-red-900 rounded-full blur-[100px] opacity-20 animate-pulse delay-1000" />
       </div>
 
       <div className="absolute top-4 right-4 z-20">
         <LanguageSwitcher />
       </div>
       
-      <Card className="w-full max-w-md space-y-8 p-10 border-slate-700/50 bg-white/95 backdrop-blur-sm shadow-2xl relative z-10 rounded-2xl">
+      <Card className="w-full max-w-md space-y-8 p-10 border-slate-800 bg-slate-900/95 backdrop-blur-sm shadow-2xl relative z-10 rounded-2xl">
         <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-purple-600 mb-4 shadow-lg">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-red-600 to-orange-600 mb-4 shadow-lg">
                 <span className="text-white font-bold text-2xl">S</span>
             </div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{t('login_title')}</h1>
-            <p className="text-slate-500">{t('login_subtitle')}</p>
+            <h1 className="text-3xl font-bold text-white tracking-tight">SISTEM SAYS 2.0</h1>
+            <p className="text-slate-400">{t('login_subtitle')}</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-6 mt-8">
