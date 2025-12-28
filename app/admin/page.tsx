@@ -119,6 +119,14 @@ export default function AdminPage() {
           <div className="flex gap-2 items-center">
             <LanguageSwitcher />
             <Button 
+                onClick={handleLogout}
+                variant="outline"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            >
+                <LogOut size={16} className="mr-2" />
+                Logout
+            </Button>
+            <Button 
                 onClick={() => setActiveTab('analytics')}
                 variant={activeTab === 'analytics' ? 'secondary' : 'outline'}
             >

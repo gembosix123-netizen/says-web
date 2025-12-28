@@ -4,7 +4,7 @@ import React from 'react';
 import { SalesProvider, useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
-import { Home } from 'lucide-react';
+import { Home, LogOut } from 'lucide-react';
 
 // Feature Components
 import SalesDashboard from './features/sales/SalesDashboard';
@@ -18,6 +18,13 @@ import StockAudit from './features/sales/StockAudit';
 function SalesWizardContent() {
   const { step, selectedCustomer } = useSales();
   const { t } = useLanguage();
+
+  const handleLogout = () => {
+    // Clear session cookie
+    document.cookie = 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+    // Redirect to login
+    window.location.href = '/login';
+  };
 
   const renderStep = () => {
     switch (step) {
@@ -42,6 +49,13 @@ function SalesWizardContent() {
           </div>
           <div className="flex items-center gap-3">
              <LanguageSwitcher />
+             <button 
+                onClick={handleLogout}
+                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                title="Log Keluar"
+             >
+                <LogOut size={20} />
+             </button>
              {step === 1 ? (
                  <Home size={20} className="text-blue-600" />
              ) : (
