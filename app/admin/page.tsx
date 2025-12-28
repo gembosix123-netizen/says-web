@@ -21,6 +21,13 @@ export default function AdminPage() {
   const [stockAudits, setStockAudits] = useState<StockAudit[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const handleLogout = () => {
+    // Clear session cookie
+    document.cookie = 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+    // Redirect to login
+    window.location.href = '/login';
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
