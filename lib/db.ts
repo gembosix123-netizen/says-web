@@ -92,11 +92,7 @@ export class DB<T extends { id: string }> {
         return initialData;
       }
 
-        return [];
-      } catch (error) {
-        console.error(`KV Error reading ${this.keyName}:`, error);
-        return [];
-      }
+      return [];
     } else {
       // Local fallback
       if (!fs.existsSync(this.filePath)) return [];
