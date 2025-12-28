@@ -40,15 +40,28 @@ export class DB<T extends { id: string }> {
 
   async getAll(): Promise<T[]> {
     if (IS_PROD) {
+      let data: T[] | null = null;
       try {
-        const data = await redis.get<T[]>(this.keyName);
-        if (data && Array.isArray(data) && data.length > 0) {
-          return data;
+        data = await redis.get<T[]>(this.keyName);
+      } catch (error: any) {
+        // Handle WRONGTYPE error (e.g. key exists but is not a JSON string)
+        if (error?.message?.includes('WRONGTYPE')) {
+          console.warn(`[DB] Detected WRONGTYPE for ${this.keyName}. resetting key...`);
+          await redis.del(this.keyName);
+          data = null; // Allow fall-through to seeding logic
+        } else {
+          console.error(`KV Error reading ${this.keyName}:`, error);
+          return [];
         }
+      }
 
-        // KV is empty. Try to seed from JSON file.
-        console.log(`[DB] KV empty for ${this.keyName}, attempting to seed...`);
-        let initialData: T[] = [];
+      if (data && Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+
+      // KV is empty or was reset. Try to seed from JSON file.
+      console.log(`[DB] KV empty/reset for ${this.keyName}, attempting to seed...`);
+      let initialData: T[] = [];
 
         try {
           if (fs.existsSync(this.filePath)) {
