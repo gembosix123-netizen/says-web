@@ -63,16 +63,16 @@ export class DB<T extends { id: string }> {
       console.log(`[DB] KV empty/reset for ${this.keyName}, attempting to seed...`);
       let initialData: T[] = [];
 
-        try {
-          if (fs.existsSync(this.filePath)) {
-            const fileContent = fs.readFileSync(this.filePath, 'utf8');
-            initialData = JSON.parse(fileContent);
-          }
-        } catch (e) {
-          console.warn(`[DB] Failed to read seed file for ${this.keyName}:`, e);
+      try {
+        if (fs.existsSync(this.filePath)) {
+          const fileContent = fs.readFileSync(this.filePath, 'utf8');
+          initialData = JSON.parse(fileContent);
         }
+      } catch (e) {
+        console.warn(`[DB] Failed to read seed file for ${this.keyName}:`, e);
+      }
 
-        // If file read failed or empty, and this is 'users', provide default admin
+      // If file read failed or empty, and this is 'users', provide default admin
       if (initialData.length === 0 && this.keyName === 'users') {
         console.log('[DB] Seeding default admin user (Hardcoded).');
         initialData = [
