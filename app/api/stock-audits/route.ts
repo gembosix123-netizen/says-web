@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const newAudit: StockAudit = {
-      id: crypto.randomUUID(),
+      id: body.id || `audit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       ...body,
       createdAt: new Date().toISOString(),
     };
