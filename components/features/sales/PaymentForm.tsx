@@ -61,10 +61,10 @@ export default function PaymentForm() {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 grid grid-cols-2 gap-3">
-        <Button variant="ghost" onClick={() => setStep(4)} className="bg-slate-100">
+        <Button variant="ghost" onClick={() => setStep(5)} className="bg-slate-100">
           {t('back')}
         </Button>
-        <Button onClick={() => setStep(6)} variant="secondary" className="shadow-lg">
+        <Button onClick={() => setStep(7)} variant="secondary" className="shadow-lg">
           {t('next')}
         </Button>
       </div>

@@ -2,8 +2,29 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Customer } from '@/types';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const session = (request as any).cookies.get('session');
+  let userRole = 'Guest';
+  let userId = '';
+
+  if (session) {
+    try {
+      const sessionData = JSON.parse(session.value);
+      userRole = sessionData.role;
+      userId = sessionData.id;
+    } catch (e) {
+      console.error('Invalid session', e);
+    }
+  }
+
   const customers = await db.customers.getAll();
+
+  if (userRole === 'Sales') {
+      // Security Filtering: Sales can only see their assigned stores
+      const filtered = customers.filter(c => c.sales_id === userId);
+      return NextResponse.json(filtered);
+  }
+
   return NextResponse.json(customers);
 }
 

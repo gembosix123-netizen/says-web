@@ -26,7 +26,10 @@ export default function StockAudit() {
   };
 
   const handleSubmit = async () => {
-    if (!isAdmin) return;
+    // If not admin, just proceed? Or maybe allow sales to audit too?
+    // Requirement said: "Audit Freezer: Input untuk rekod baki stok produk kita yang masih ada di dalam freezer kedai."
+    // This implies Sales staff SHOULD do this. Removing Admin restriction for now based on Fasa 3 requirements.
+    
     setLoading(true);
     const items = Object.entries(auditData).map(([productId, physicalStock]) => {
       const product = products.find(p => p.id === productId);
@@ -39,32 +42,15 @@ export default function StockAudit() {
 
     await saveStockAudit(items);
     setLoading(false);
-    setStep(4); // Move to ProductCatalog
+    setStep(4); // Move to ProductExchange
   };
 
   const handleSkip = () => {
       setStep(4);
   }
 
-  if (!isAdmin) {
-      return (
-          <div className="flex flex-col items-center justify-center space-y-6 py-10">
-              <div className="bg-red-100 p-4 rounded-full">
-                  <Lock className="text-red-600" size={48} />
-              </div>
-              <div className="text-center space-y-2">
-                  <h2 className="text-xl font-bold text-slate-800">{t('stock_audit')}</h2>
-                  <p className="text-slate-500 max-w-xs mx-auto">
-                      {t('audit_restricted') || "Fungsi Pelarasan Stok hanya untuk Admin. Sila teruskan ke katalog produk."}
-                  </p>
-              </div>
-              <Button onClick={handleSkip} className="w-full max-w-xs">
-                  {t('continue_to_catalog') || "Teruskan ke Katalog"}
-              </Button>
-          </div>
-      );
-  }
-
+  // Removed Admin check to allow Sales staff to audit
+  
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">{t('stock_audit')}</h2>

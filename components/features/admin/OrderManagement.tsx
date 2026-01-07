@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Transaction, Customer, OrderStatus } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { formatCurrency } from '@/lib/utils';
-import { Search, Edit, MapPin, Printer } from 'lucide-react';
+import { Search, Edit, MapPin, Printer, Filter } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -14,11 +14,11 @@ interface OrderManagementProps {
 }
 
 const statusColors: Record<OrderStatus, string> = {
-  Pending: 'bg-yellow-100 text-yellow-800',
-  Confirmed: 'bg-blue-100 text-blue-800',
-  Processing: 'bg-purple-100 text-purple-800',
-  Completed: 'bg-green-100 text-green-800',
-  Cancelled: 'bg-red-100 text-red-800',
+  Pending: 'bg-yellow-900/30 text-yellow-500 border-yellow-500/30',
+  Confirmed: 'bg-blue-900/30 text-blue-400 border-blue-500/30',
+  Processing: 'bg-purple-900/30 text-purple-400 border-purple-500/30',
+  Completed: 'bg-green-900/30 text-green-400 border-green-500/30',
+  Cancelled: 'bg-red-900/30 text-red-400 border-red-500/30',
 };
 
 export default function OrderManagement({ transactions, customers, onUpdateStatus }: OrderManagementProps) {
@@ -102,88 +102,93 @@ export default function OrderManagement({ transactions, customers, onUpdateStatu
   const currentTransaction = transactions.find(t => t.id === editingId);
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-        <h2 className="text-xl font-bold text-slate-800">{t('order_management')}</h2>
-        <div className="relative w-64">
-          <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-900/50 backdrop-blur-sm p-4 rounded-2xl border border-slate-800 shadow-xl">
+        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Filter size={20} className="text-slate-400" />
+            {t('order_management')}
+        </h2>
+        <div className="relative w-full md:w-64 group">
+          <Search className="absolute left-3 top-3 text-slate-500 group-focus-within:text-red-500 transition-colors" size={18} />
           <input
             type="text"
             placeholder={t('search_orders')}
-            className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-500"
+            className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-red-900/50 focus:border-red-900/50 transition-all"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-slate-50 border-b border-slate-200">
-            <tr>
-              <th className="p-4 font-semibold text-slate-600">ID</th>
-              <th className="p-4 font-semibold text-slate-600">{t('date')}</th>
-              <th className="p-4 font-semibold text-slate-600">{t('customer_label')}</th>
-              <th className="p-4 font-semibold text-slate-600">{t('total')}</th>
-              <th className="p-4 font-semibold text-slate-600">{t('status')}</th>
-              <th className="p-4 font-semibold text-slate-600">{t('assigned_shop')}</th>
-              <th className="p-4 font-semibold text-slate-600 text-right">{t('actions')}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filtered.map((trans) => (
-              <tr key={trans.id} className="hover:bg-slate-50">
-                <td className="p-4 font-mono text-sm text-slate-500 flex flex-col">
-                  <span>{trans.id.slice(-6)}</span>
-                  {trans.gps && (
-                     <a 
-                      href={`https://www.google.com/maps/search/?api=1&query=${trans.gps.lat},${trans.gps.lon}`} 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="text-blue-600 hover:underline text-xs flex items-center gap-1 mt-1"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MapPin size={12} /> {t('view_location')}
-                    </a>
-                  )}
-                </td>
-                <td className="p-4 text-sm text-slate-600">
-                  {new Date(trans.createdAt || trans.checkInTime || Date.now()).toLocaleDateString()}
-                </td>
-                <td className="p-4 font-medium text-slate-900">{trans.customer?.name}</td>
-                <td className="p-4 font-bold text-slate-700">{formatCurrency(trans.total)}</td>
-                <td className="p-4">
-                  <span className={`px-2 py-1 rounded-full text-xs font-bold ${statusColors[trans.status || 'Pending']}`}>
-                    {trans.status || 'Pending'}
-                  </span>
-                </td>
-                <td className="p-4 text-sm text-slate-600">
-                    {customers.find(c => c.id === (trans.assignedShopId || trans.customer?.id))?.name || '-'}
-                </td>
-                <td className="p-4 text-right">
-                  <Button variant="outline" size="sm" onClick={() => handleEdit(trans)}>
-                    <Edit size={16} className="mr-1" /> {t('manage')}
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="bg-slate-900/50 backdrop-blur-sm rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+        <div className="overflow-x-auto">
+            <table className="w-full text-left">
+            <thead className="bg-slate-950/50 border-b border-slate-800">
+                <tr>
+                <th className="p-4 font-semibold text-slate-400 text-xs uppercase tracking-wider">ID</th>
+                <th className="p-4 font-semibold text-slate-400 text-xs uppercase tracking-wider">{t('date')}</th>
+                <th className="p-4 font-semibold text-slate-400 text-xs uppercase tracking-wider">{t('customer_label')}</th>
+                <th className="p-4 font-semibold text-slate-400 text-xs uppercase tracking-wider">{t('total')}</th>
+                <th className="p-4 font-semibold text-slate-400 text-xs uppercase tracking-wider">{t('status')}</th>
+                <th className="p-4 font-semibold text-slate-400 text-xs uppercase tracking-wider">{t('assigned_shop')}</th>
+                <th className="p-4 font-semibold text-slate-400 text-xs uppercase tracking-wider text-right">{t('actions')}</th>
+                </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+                {filtered.map((trans) => (
+                <tr key={trans.id} className="hover:bg-slate-800/50 transition-colors group">
+                    <td className="p-4 font-mono text-sm text-slate-500 flex flex-col">
+                    <span className="text-slate-300 group-hover:text-white transition-colors">#{trans.id.slice(-6)}</span>
+                    {trans.gps && (
+                        <a 
+                        href={`https://www.google.com/maps/search/?api=1&query=${trans.gps.lat},${trans.gps.lon}`} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-blue-500/70 hover:text-blue-400 hover:underline text-xs flex items-center gap-1 mt-1"
+                        onClick={(e) => e.stopPropagation()}
+                        >
+                        <MapPin size={12} /> {t('view_location')}
+                        </a>
+                    )}
+                    </td>
+                    <td className="p-4 text-sm text-slate-400">
+                    {new Date(trans.createdAt || trans.checkInTime || Date.now()).toLocaleDateString()}
+                    </td>
+                    <td className="p-4 font-medium text-slate-200">{trans.customer?.name}</td>
+                    <td className="p-4 font-bold text-slate-200">{formatCurrency(trans.total)}</td>
+                    <td className="p-4">
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${statusColors[trans.status || 'Pending']}`}>
+                        {trans.status || 'Pending'}
+                    </span>
+                    </td>
+                    <td className="p-4 text-sm text-slate-400">
+                        {customers.find(c => c.id === (trans.assignedShopId || trans.customer?.id))?.name || '-'}
+                    </td>
+                    <td className="p-4 text-right">
+                    <Button variant="outline" size="sm" onClick={() => handleEdit(trans)} className="border-slate-700 hover:bg-slate-800 text-slate-300 hover:text-white">
+                        <Edit size={16} className="mr-1" /> {t('manage')}
+                    </Button>
+                    </td>
+                </tr>
+                ))}
+            </tbody>
+            </table>
+        </div>
         {filtered.length === 0 && (
-            <div className="p-8 text-center text-slate-500">{t('no_orders')}</div>
+            <div className="p-12 text-center text-slate-600 italic">{t('no_orders')}</div>
         )}
       </div>
 
       {editingId && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold mb-4 text-slate-900">{t('update_status')}</h3>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold mb-6 text-white">{t('update_status')}</h3>
             
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t('status')}</label>
+                <label className="block text-sm font-medium text-slate-400 mb-2">{t('status')}</label>
                 <select 
-                    className="w-full p-2 border border-slate-300 rounded-lg text-slate-900 bg-white"
+                    className="w-full p-3 border border-slate-700 rounded-xl text-slate-200 bg-slate-950 focus:outline-none focus:ring-2 focus:ring-red-900/50"
                     value={tempStatus}
                     onChange={(e) => setTempStatus(e.target.value as OrderStatus)}
                 >
@@ -194,9 +199,9 @@ export default function OrderManagement({ transactions, customers, onUpdateStatu
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t('assign_shop')}</label>
+                <label className="block text-sm font-medium text-slate-400 mb-2">{t('assign_shop')}</label>
                 <select 
-                    className="w-full p-2 border border-slate-300 rounded-lg text-slate-900 bg-white"
+                    className="w-full p-3 border border-slate-700 rounded-xl text-slate-200 bg-slate-950 focus:outline-none focus:ring-2 focus:ring-red-900/50"
                     value={tempAssignedShop}
                     onChange={(e) => setTempAssignedShop(e.target.value)}
                 >
@@ -212,7 +217,7 @@ export default function OrderManagement({ transactions, customers, onUpdateStatu
                   <div className="pt-2">
                       <Button 
                         variant="secondary" 
-                        className="w-full flex items-center justify-center gap-2"
+                        className="w-full flex items-center justify-center gap-2 py-6 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
                         onClick={() => generateInvoice(currentTransaction)}
                       >
                           <Printer size={18} /> {t('print_invoice')}
@@ -222,9 +227,9 @@ export default function OrderManagement({ transactions, customers, onUpdateStatu
 
             </div>
 
-            <div className="flex justify-end gap-2 mt-6">
-              <Button variant="outline" onClick={() => setEditingId(null)}>{t('cancel_button')}</Button>
-              <Button onClick={handleSave}>{t('save_changes')}</Button>
+            <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-slate-800">
+              <Button variant="outline" onClick={() => setEditingId(null)} className="border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-white">{t('cancel_button')}</Button>
+              <Button onClick={handleSave} className="bg-red-600 hover:bg-red-700 text-white border-0 shadow-lg shadow-red-900/20">{t('save_changes')}</Button>
             </div>
           </div>
         </div>

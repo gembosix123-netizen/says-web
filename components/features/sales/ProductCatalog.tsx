@@ -116,11 +116,11 @@ export default function ProductCatalog() {
                 })}
         </div>
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 grid grid-cols-4 gap-3">
-          <Button variant="ghost" onClick={() => setStep(3)} className="col-span-1 bg-slate-100">
+          <Button variant="ghost" onClick={() => setStep(4)} className="col-span-1 bg-slate-100">
             <ChevronLeft />
           </Button>
           <Button
-            onClick={() => setStep(5)}
+            onClick={() => setStep(6)}
             disabled={cart.length === 0}
             variant="secondary"
             className="col-span-3 py-4 text-lg shadow-lg"

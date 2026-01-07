@@ -4,7 +4,6 @@ import { useLanguage } from '@/context/LanguageContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Edit, Plus, Save, Trash2, User as UserIcon, MapPin, Map } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
 
 interface Props {
   customers: Customer[];
@@ -63,14 +62,16 @@ export default function CustomerManagement({ customers, salesUsers, onSave, onDe
 
   return (
     <div className="space-y-6">
-      <Card>
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold flex items-center text-slate-900">
-            {editingId ? <Edit className="mr-2" size={20} /> : <Plus className="mr-2" size={20} />}
+      <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold flex items-center text-white">
+            <div className={`p-2 rounded-lg mr-3 ${editingId ? 'bg-orange-500/20 text-orange-500' : 'bg-green-500/20 text-green-500'}`}>
+                {editingId ? <Edit size={20} /> : <Plus size={20} />}
+            </div>
             {editingId ? t('edit_customer') : t('add_customer')}
           </h2>
           {editingId && (
-            <button onClick={handleCancel} className="text-sm text-red-600 underline">
+            <button onClick={handleCancel} className="text-sm text-red-400 hover:text-red-300 underline transition-colors">
               {t('cancel')}
             </button>
           )}
@@ -81,12 +82,14 @@ export default function CustomerManagement({ customers, salesUsers, onSave, onDe
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             required
+            className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
           />
           <Input
             placeholder={t('address')}
             value={form.address}
             onChange={(e) => setForm({ ...form, address: e.target.value })}
             required
+            className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
           />
           <div className="flex gap-2">
              <Input
@@ -95,6 +98,7 @@ export default function CustomerManagement({ customers, salesUsers, onSave, onDe
                 step="any"
                 value={form.lat || ''}
                 onChange={(e) => setForm({ ...form, lat: parseFloat(e.target.value) })}
+                className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
              />
              <Input
                 placeholder={t('lon')}
@@ -102,6 +106,7 @@ export default function CustomerManagement({ customers, salesUsers, onSave, onDe
                 step="any"
                 value={form.lon || ''}
                 onChange={(e) => setForm({ ...form, lon: parseFloat(e.target.value) })}
+                className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
              />
           </div>
           <div className="flex items-center">
@@ -110,7 +115,7 @@ export default function CustomerManagement({ customers, salesUsers, onSave, onDe
                 variant="outline" 
                 onClick={getCurrentLocation}
                 disabled={loadingLoc}
-                className="w-full h-full"
+                className="w-full h-full border-slate-700 hover:bg-slate-800 text-slate-300 hover:text-white"
              >
                 <MapPin className="mr-2" size={18} />
                 {loadingLoc ? t('loading') : t('get_location')}
@@ -122,10 +127,11 @@ export default function CustomerManagement({ customers, salesUsers, onSave, onDe
             placeholder={t('debt_balance')}
             value={form.outstandingBalance || ''}
             onChange={(e) => setForm({ ...form, outstandingBalance: parseFloat(e.target.value) })}
+            className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
           />
           <div className="w-full">
             <select
-              className="w-full p-3 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900"
+              className="w-full p-3 border border-slate-800 rounded-lg text-slate-200 bg-slate-950 focus:outline-none focus:ring-2 focus:ring-red-900/50"
               value={form.sales_id || ''}
               onChange={(e) => setForm({ ...form, sales_id: e.target.value })}
             >
@@ -137,51 +143,59 @@ export default function CustomerManagement({ customers, salesUsers, onSave, onDe
               ))}
             </select>
           </div>
-          <Button type="submit" className={`md:col-span-2 ${editingId ? 'bg-orange-600' : 'bg-green-600'}`}>
-            <Save className="mr-2" /> {editingId ? t('update') : t('save')}
+          <Button type="submit" className={`md:col-span-2 text-white border-0 shadow-lg transition-all ${editingId ? 'bg-orange-600 hover:bg-orange-700 shadow-orange-900/20' : 'bg-green-600 hover:bg-green-700 shadow-green-900/20'}`}>
+            <Save className="mr-2" size={18} /> {editingId ? t('update') : t('save')}
           </Button>
         </form>
-      </Card>
+      </div>
 
-      <Card>
-        <h2 className="text-lg font-bold mb-4 text-slate-900">
-          {t('customer_list')} ({customers.length})
+      <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
+        <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
+          <span className="bg-slate-800 p-1.5 rounded-lg text-slate-400">
+            <UserIcon size={20} />
+          </span>
+          {t('customer_list')} 
+          <span className="text-slate-500 text-base font-normal ml-2">({customers.length})</span>
         </h2>
-        <div className="space-y-2">
+        <div className="space-y-3">
           {customers.map((c) => (
-            <div key={c.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
-              <div>
-                <h3 className="font-bold text-slate-900">{c.name}</h3>
-                <p className="text-sm text-slate-600">{c.address}</p>
-                {c.lat && c.lon && (
-                    <a 
-                        href={`https://www.google.com/maps/search/?api=1&query=${c.lat},${c.lon}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-blue-600 hover:underline flex items-center mt-1"
-                    >
-                        <Map size={12} className="mr-1" /> {t('map')} ({c.lat.toFixed(4)}, {c.lon.toFixed(4)})
-                    </a>
-                )}
-                {c.sales_id && (
-                  <span className="inline-flex items-center text-sm bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full mt-1">
-                    <UserIcon size={12} className="mr-1" /> {t('admin_sales_label')} {salesUsers.find((u) => u.id === c.sales_id)?.name || c.sales_id}
-                  </span>
-                )}
+            <div key={c.id} className="flex flex-col md:flex-row justify-between items-start md:items-center p-4 bg-slate-800/30 hover:bg-slate-800/60 transition-all rounded-xl border border-slate-700/50 group">
+              <div className="mb-3 md:mb-0">
+                <h3 className="font-bold text-slate-200 text-lg">{c.name}</h3>
+                <p className="text-sm text-slate-500">{c.address}</p>
+                <div className="flex gap-3 mt-2">
+                    {c.lat && c.lon && (
+                        <a 
+                            href={`https://www.google.com/maps/search/?api=1&query=${c.lat},${c.lon}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-blue-400 hover:text-blue-300 hover:underline flex items-center bg-blue-900/20 px-2 py-1 rounded-md border border-blue-900/30 transition-colors"
+                        >
+                            <Map size={12} className="mr-1" /> {t('map')}
+                        </a>
+                    )}
+                    {c.sales_id && (
+                    <span className="inline-flex items-center text-xs bg-purple-900/20 text-purple-400 px-2 py-1 rounded-md border border-purple-900/30">
+                        <UserIcon size={12} className="mr-1" /> {salesUsers.find((u) => u.id === c.sales_id)?.name || c.sales_id}
+                    </span>
+                    )}
+                </div>
               </div>
-              <div className="text-right flex items-center gap-3">
-                <span className="font-mono font-bold text-red-600 mr-2">RM {c.outstandingBalance}</span>
-                <button onClick={() => handleEdit(c)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-full">
-                  <Edit size={18} />
-                </button>
-                <button onClick={() => onDelete(c.id)} className="p-2 text-red-600 hover:bg-red-100 rounded-full">
-                  <Trash2 size={18} />
-                </button>
+              <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 border-slate-700/50 pt-3 md:pt-0">
+                <span className="font-mono font-bold text-red-400 text-lg bg-red-900/10 px-3 py-1 rounded-lg border border-red-900/20">RM {c.outstandingBalance}</span>
+                <div className="flex gap-2">
+                    <button onClick={() => handleEdit(c)} className="p-2 text-blue-400 hover:bg-blue-900/30 rounded-lg transition-colors border border-transparent hover:border-blue-900/50">
+                    <Edit size={18} />
+                    </button>
+                    <button onClick={() => onDelete(c.id)} className="p-2 text-red-400 hover:bg-red-900/30 rounded-lg transition-colors border border-transparent hover:border-red-900/50">
+                    <Trash2 size={18} />
+                    </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

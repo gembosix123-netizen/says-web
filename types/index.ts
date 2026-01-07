@@ -13,6 +13,7 @@ export interface Product {
   name: string;
   price: number;
   unit: string;
+  stock: number;
 }
 
 export interface Customer {
@@ -57,6 +58,7 @@ export interface Transaction {
   signatureUrl: string | null;
   photoUrl: string | null;
   status: OrderStatus;
+  exchangeItems?: { productId: string; quantity: number; reason: string }[];
   assignedShopId?: string;
   salesmanId?: string;
   createdAt?: string;
@@ -73,6 +75,30 @@ export interface StockAudit {
     physicalStock: number;
   }[];
   createdAt: string;
+}
+
+export interface VanInventory {
+  id: string; // usually userId
+  userId: string;
+  items: {
+    productId: string;
+    quantity: number;
+  }[];
+  updatedAt: string;
+}
+
+export interface Settlement {
+  id: string;
+  userId: string;
+  userName: string;
+  date: string;
+  totalCash: number;
+  totalCredit: number;
+  totalSales: number;
+  vanStock: { productId: string; quantity: number }[];
+  status: 'Pending' | 'Verified';
+  verifiedBy?: string;
+  verifiedAt?: string;
 }
 
 export interface ApiResponse<T> {

@@ -76,7 +76,7 @@ export class DB<T extends { id: string }> {
       if (initialData.length === 0 && this.keyName === 'users') {
         console.log('[DB] Seeding default admin user (Hardcoded).');
         initialData = [
-          { id: "u1", username: "Admin1", password: "password1", role: "Admin", name: "System Admin" } as any,
+          { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin" } as any,
           { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as any
         ];
       }
@@ -146,7 +146,7 @@ export class DB<T extends { id: string }> {
   }
 }
 
-import { Customer, Product, User, Order, Transaction, StockAudit } from '@/types';
+import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory } from '@/types';
 
 // We need to export instances. 
 // Note: methods are now async, so we need to update usage in API routes.
@@ -157,4 +157,6 @@ export const db = {
   orders: new DB<Order>('orders.json'),
   transactions: new DB<Transaction>('transactions.json'),
   stockAudits: new DB<StockAudit>('stock_audits.json'),
+  vanInventories: new DB<VanInventory>('van_inventories.json'),
+  settlements: new DB<Settlement>('settlements.json'),
 };

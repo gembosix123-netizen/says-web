@@ -13,18 +13,22 @@ import ProductCatalog from './features/sales/ProductCatalog';
 import PaymentForm from './features/sales/PaymentForm';
 import OrderSummary from './features/sales/OrderSummary';
 import SuccessScreen from './features/sales/SuccessScreen';
-import StockAudit from './features/sales/StockAudit';
+import ProductExchange from './features/sales/ProductExchange';
 
 function SalesWizardContent() {
   const { step, selectedCustomer } = useSales();
   const { t } = useLanguage();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (!confirm('Adakah anda pasti mahu log keluar?')) return;
-    // Clear session cookie
-    document.cookie = 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-    // Redirect to login
-    window.location.href = '/login';
+    
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      window.location.href = '/login';
+    }
   };
 
   const renderStep = () => {
@@ -32,10 +36,11 @@ function SalesWizardContent() {
       case 1: return <SalesDashboard />;
       case 2: return <CheckIn />;
       case 3: return <StockAudit />;
-      case 4: return <ProductCatalog />;
-      case 5: return <PaymentForm />;
-      case 6: return <OrderSummary />;
-      case 7: return <SuccessScreen />;
+      case 4: return <ProductExchange />;
+      case 5: return <ProductCatalog />;
+      case 6: return <PaymentForm />;
+      case 7: return <OrderSummary />;
+      case 8: return <SuccessScreen />;
       default: return <SalesDashboard />;
     }
   };
@@ -60,7 +65,7 @@ function SalesWizardContent() {
              {step === 1 ? (
                  <Home size={20} className="text-blue-600" />
              ) : (
-                 <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{t('step')} {step}/7</div>
+                 <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{t('step')} {step}/8</div>
              )}
           </div>
         </div>

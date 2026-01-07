@@ -43,6 +43,8 @@ interface SalesContextType {
   setLatestAudit: (audit: StockAudit | null) => void;
   loading: boolean;
   userRole: string | null;
+  exchangeItems: { productId: string; quantity: number; reason: string }[];
+  setExchangeItems: React.Dispatch<React.SetStateAction<{ productId: string; quantity: number; reason: string }[]>>;
 }
 
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
@@ -173,6 +175,7 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
     setGpsLocation(null);
     setCart([]);
     setPayment({ method: 'cash', returnAmount: 0, exchangeAmount: 0, focAmount: 0 });
+    setExchangeItems([]);
     setSignatureUrl(null);
     setPhotoUrl(null);
     setStep(1);

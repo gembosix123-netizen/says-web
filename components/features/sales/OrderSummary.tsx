@@ -27,6 +27,7 @@ export default function OrderSummary() {
       gps: gpsLocation,
       customer: selectedCustomer,
       items: cart.map((i) => ({ id: i.id, name: i.name, unit: i.unit, qty: i.quantity, price: i.price })),
+      exchangeItems: exchangeItems || [], // Add this
       subtotal: calculateGrandTotal(), // Using same as total for now
       payment,
       total: calculateGrandTotal(),
