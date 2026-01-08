@@ -30,8 +30,12 @@ input, select, textarea {
   border-color: var(--input-border);
   color: var(--input-text);
   /* Force visible text in both modes */
-  @apply text-slate-900 dark:text-white;
+  color: #0f172a; /* slate-900 */
 }
+.dark input, .dark select, .dark textarea {
+  color: #ffffff;
+}
+
 
 /* Force dark mode styles when .dark class is present */
 .dark input, .dark select, .dark textarea {
