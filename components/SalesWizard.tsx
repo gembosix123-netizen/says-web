@@ -14,6 +14,7 @@ import PaymentForm from './features/sales/PaymentForm';
 import OrderSummary from './features/sales/OrderSummary';
 import SuccessScreen from './features/sales/SuccessScreen';
 import ProductExchange from './features/sales/ProductExchange';
+import StockAudit from './features/sales/StockAudit';
 
 function SalesWizardContent() {
   const { step, selectedCustomer } = useSales();

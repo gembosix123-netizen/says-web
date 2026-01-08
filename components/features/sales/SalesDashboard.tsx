@@ -18,6 +18,7 @@ export default function SalesDashboard() {
   const [currentDate, setCurrentDate] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [showEndDay, setShowEndDay] = useState(false);
 
   useEffect(() => {
     setCurrentDate(new Date().toLocaleDateString('ms-MY', { weekday: 'long', day: 'numeric', month: 'long' }));

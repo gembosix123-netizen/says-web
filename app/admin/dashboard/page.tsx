@@ -8,13 +8,14 @@ import CustomerManagement from '@/components/features/admin/CustomerManagement';
 import ProductManagement from '@/components/features/admin/ProductManagement';
 import OrderManagement from '@/components/features/admin/OrderManagement';
 import AnalyticsDashboard from '@/components/features/admin/AnalyticsDashboard';
+import SettlementDashboard from '@/components/features/admin/SettlementDashboard';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { LogOut, LayoutDashboard, ShoppingCart, Users, Package, Menu, X } from 'lucide-react';
+import { LogOut, LayoutDashboard, ShoppingCart, Users, Package, Menu, X, DollarSign } from 'lucide-react';
 
 export default function AdminDashboardPage() {
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'analytics' | 'customers' | 'products' | 'orders'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'customers' | 'products' | 'orders' | 'settlements'>('analytics');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [salesUsers, setSalesUsers] = useState<User[]>([]);
@@ -125,6 +126,7 @@ export default function AdminDashboardPage() {
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
     { id: 'customers', label: t('customers'), icon: Users },
     { id: 'products', label: t('products'), icon: Package },
+    { id: 'settlements', label: 'Settlements', icon: DollarSign },
   ];
 
   return (

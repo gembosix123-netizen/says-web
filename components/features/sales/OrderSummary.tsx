@@ -10,7 +10,8 @@ export default function OrderSummary() {
   const { 
     selectedCustomer, cart, payment, calculateGrandTotal, 
     photoUrl, setPhotoUrl, 
-    checkInTime, gpsLocation, setVisitedCustomers, setStep
+    checkInTime, gpsLocation, setVisitedCustomers, setStep,
+    exchangeItems
   } = useSales();
   const { t } = useLanguage();
   const [isSubmitting, setIsSubmitting] = React.useState(false);

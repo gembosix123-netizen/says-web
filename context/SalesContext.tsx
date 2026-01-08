@@ -74,6 +74,7 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
   const [gpsLocation, setGpsLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [exchangeItems, setExchangeItems] = useState<{ productId: string; quantity: number; reason: string }[]>([]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -220,7 +221,9 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
         latestAudit,
         setLatestAudit,
         loading,
-        userRole
+        userRole,
+        exchangeItems,
+        setExchangeItems
       }}
     >
       {children}

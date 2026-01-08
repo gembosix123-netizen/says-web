@@ -146,7 +146,7 @@ export class DB<T extends { id: string }> {
   }
 }
 
-import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory } from '@/types';
+import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory, Settlement } from '@/types';
 
 // We need to export instances. 
 // Note: methods are now async, so we need to update usage in API routes.
