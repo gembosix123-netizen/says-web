@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useTheme } from '@/context/ThemeContext';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon } from '@/components/Icons';
 
 export default function ThemeSwitcher() {
   const { theme, toggleTheme } = useTheme();

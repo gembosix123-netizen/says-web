@@ -6,6 +6,7 @@ export interface User {
   password?: string;
   role: Role;
   name: string;
+  assignedShopId?: string | null;
 }
 
 export interface Product {

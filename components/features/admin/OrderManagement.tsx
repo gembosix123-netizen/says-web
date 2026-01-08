@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Transaction, Customer, OrderStatus } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { formatCurrency } from '@/lib/utils';
-import { Search, Edit, MapPin, Printer, Filter } from 'lucide-react';
+import { Search, Edit, MapPin, Printer, Filter } from '@/components/Icons';
 import { useLanguage } from '@/context/LanguageContext';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Product, VanInventory } from '@/types';
 import { useLanguage } from '@/context/LanguageContext';
-import { Package, RefreshCw } from 'lucide-react';
+import { Package, RefreshCw } from '@/components/Icons';
 
 interface Props {
   userId: string;

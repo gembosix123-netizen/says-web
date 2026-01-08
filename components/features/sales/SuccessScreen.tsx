@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { CheckCircle, Printer } from 'lucide-react';
+import { CheckCircle, Printer } from '@/components/Icons';
 import { Button } from '@/components/ui/Button';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';

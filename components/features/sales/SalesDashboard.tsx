@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { Search, List, History, Truck, LayoutDashboard, Lock, LogOut } from 'lucide-react';
+import { Search, List, History, Truck, LayoutDashboard, Lock, LogOut } from '@/components/Icons';
 import { formatCurrency } from '@/lib/utils';
 import { CartItem, Product, User } from '@/types';
 import OrderHistory from './OrderHistory';

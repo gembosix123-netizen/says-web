@@ -3,7 +3,7 @@ import { Product } from '@/types';
 import { useLanguage } from '@/context/LanguageContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Truck, Save, Plus, Trash2, Package } from 'lucide-react';
+import { Truck, Save, Plus, Trash2, Package } from '@/components/Icons';
 
 interface Props {
   products: Product[];

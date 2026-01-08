@@ -3,7 +3,7 @@ import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Lock } from 'lucide-react';
+import { Lock } from '@/components/Icons';
 
 export default function StockAudit() {
   const { products, saveStockAudit, setStep, userRole } = useSales();

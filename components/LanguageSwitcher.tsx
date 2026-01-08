@@ -1,7 +1,8 @@
 "use client";
 
+import React from 'react';
 import { useLanguage } from '@/context/LanguageContext';
-import { Globe } from 'lucide-react';
+import { Globe } from '@/components/Icons';
 
 export default function LanguageSwitcher() {
   const { lang, setLang } = useLanguage();

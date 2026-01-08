@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { MapPin, Navigation, Loader2 } from 'lucide-react';
+import { MapPin, Navigation, Loader2 } from '@/components/Icons';
 import { Button } from '@/components/ui/Button';
 
 export default function CheckIn() {

@@ -9,10 +9,11 @@ import ProductManagement from '@/components/features/admin/ProductManagement';
 import OrderManagement from '@/components/features/admin/OrderManagement';
 import AnalyticsDashboard from '@/components/features/admin/AnalyticsDashboard';
 import SettlementDashboard from '@/components/features/admin/SettlementDashboard';
+import UserManagement from '@/components/features/admin/UserManagement';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { LogOut, LayoutDashboard, ShoppingCart, Users, Package, Menu, X, DollarSign } from 'lucide-react';
+import { LogOut, LayoutDashboard, ShoppingCart, Users, Package, Menu, X, DollarSign } from '@/components/Icons';
 
 export default function AdminDashboardPage() {
   const { t } = useLanguage();
@@ -128,6 +129,7 @@ export default function AdminDashboardPage() {
     { id: 'customers', label: t('customers'), icon: Users },
     { id: 'products', label: t('products'), icon: Package },
     { id: 'settlements', label: 'Settlements', icon: DollarSign },
+    { id: 'users', label: 'User Management', icon: Users },
   ];
 
   return (

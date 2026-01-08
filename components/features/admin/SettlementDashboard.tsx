@@ -3,7 +3,7 @@ import { Settlement } from '@/types';
 import { useLanguage } from '@/context/LanguageContext';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
-import { CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronUp } from '@/components/Icons';
 
 export default function SettlementDashboard() {
   const { t } = useLanguage();

@@ -3,7 +3,7 @@ import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { Button } from '@/components/ui/Button';
 import { formatCurrency } from '@/lib/utils';
-import { Lock, CheckCircle, AlertTriangle, Truck } from 'lucide-react';
+import { Lock, CheckCircle, AlertTriangle, Truck } from '@/components/Icons';
 import { VanInventory } from '@/types';
 
 export default function EndDayModal({ isOpen, onClose, userId, userName }: { isOpen: boolean; onClose: () => void; userId: string; userName: string }) {

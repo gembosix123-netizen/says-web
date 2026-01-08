@@ -29,6 +29,8 @@ input, select, textarea {
   background-color: var(--input-bg);
   border-color: var(--input-border);
   color: var(--input-text);
+  /* Force visible text in both modes */
+  @apply text-slate-900 dark:text-white;
 }
 
 /* Force dark mode styles when .dark class is present */

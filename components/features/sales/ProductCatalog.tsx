@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import { Product, CartItem } from '@/types';
 import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
-import { Search, Plus, Minus, ChevronLeft, ArrowRight } from 'lucide-react';
+import { Search, Plus, Minus, ChevronLeft, ArrowRight } from '@/components/Icons';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 

@@ -5,7 +5,7 @@ import { SalesProvider, useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
 import ThemeSwitcher from './ThemeSwitcher';
-import { Home, LogOut } from 'lucide-react';
+import { Home, LogOut } from '@/components/Icons';
 
 // Feature Components
 import SalesDashboard from './features/sales/SalesDashboard';

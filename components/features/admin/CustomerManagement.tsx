@@ -3,7 +3,8 @@ import { Customer, User } from '@/types';
 import { useLanguage } from '@/context/LanguageContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Edit, Plus, Save, Trash2, User as UserIcon, MapPin, Map } from 'lucide-react';
+import { Edit, Plus, Save, Trash2, User as UserIcon, MapPin, Map } from '@/components/Icons';
+import { formatCurrency } from '@/lib/utils';
 
 interface Props {
   customers: Customer[];

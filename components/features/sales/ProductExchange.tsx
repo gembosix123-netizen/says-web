@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useSales } from '@/context/SalesContext';
+import { Product } from '@/types';
 import { useLanguage } from '@/context/LanguageContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { RefreshCw, Trash2, Plus } from 'lucide-react';
+import { RefreshCw, Trash2, Plus } from '@/components/Icons';
 
 export default function ProductExchange() {
   const { products, exchangeItems, setExchangeItems, setStep } = useSales();

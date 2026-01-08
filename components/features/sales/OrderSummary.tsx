@@ -3,7 +3,7 @@ import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
-import { Camera, Save, Upload } from 'lucide-react';
+import { Camera, Save, Upload } from '@/components/Icons';
 import Image from 'next/image';
 
 export default function OrderSummary() {

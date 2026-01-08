@@ -33,35 +33,60 @@ export async function POST(request: Request) {
         updatedAt: new Date().toISOString(),
     };
     
-    // 1. Save Transaction
-    await db.transactions.save(newTransaction);
-
-    // 2. Sync Inventory (Deduct Van Stock)
+    // 1. Validate and Deduct Van Stock
     if (userId) {
         let vanInv = await db.vanInventories.getById(userId);
-        if (vanInv) {
-            // Deduct Sales Items
-            for (const item of newTransaction.items) {
-                const invItem = vanInv.items.find(i => i.productId === item.id);
-                if (invItem) {
-                    invItem.quantity = Math.max(0, invItem.quantity - item.quantity);
-                }
-            }
-            
-            // Deduct Exchange Items (Replaced with new stock from van)
-            if (newTransaction.exchangeItems) {
-                for (const item of newTransaction.exchangeItems) {
-                    const invItem = vanInv.items.find(i => i.productId === item.productId);
-                    if (invItem) {
-                        invItem.quantity = Math.max(0, invItem.quantity - item.quantity);
-                    }
-                }
-            }
-
-            vanInv.updatedAt = new Date().toISOString();
-            await db.vanInventories.save(vanInv);
+        if (!vanInv) {
+             return NextResponse.json({ error: 'Van inventory not found for user' }, { status: 400 });
         }
+
+        // Verify stock availability
+        for (const item of newTransaction.items) {
+            const invItem = vanInv.items.find(i => i.productId === item.id);
+            if (!invItem || invItem.quantity < item.quantity) {
+                return NextResponse.json({ 
+                    error: `Insufficient van stock for product ID: ${item.id}. Available: ${invItem?.quantity || 0}` 
+                }, { status: 400 });
+            }
+        }
+
+        // Deduct Sales Items
+        for (const item of newTransaction.items) {
+            const invItem = vanInv.items.find(i => i.productId === item.id);
+            if (invItem) {
+                invItem.quantity -= item.quantity;
+            }
+        }
+        
+        // Deduct Exchange Items (Replaced with new stock from van)
+        if (newTransaction.exchangeItems) {
+            for (const item of newTransaction.exchangeItems) {
+                const invItem = vanInv.items.find(i => i.productId === item.productId);
+                // Exchange deduction logic:
+                // If we give a new item in exchange, we deduct from van.
+                // If we receive a bad item, we ideally add it to a "Bad Stock" inventory, 
+                // but for now, we just deduct the replacement given.
+                if (invItem) {
+                    if (invItem.quantity < item.quantity) {
+                         return NextResponse.json({ 
+                            error: `Insufficient van stock for exchange item ID: ${item.productId}` 
+                        }, { status: 400 });
+                    }
+                    invItem.quantity -= item.quantity;
+                } else {
+                     return NextResponse.json({ 
+                        error: `Exchange item not found in van: ${item.productId}` 
+                    }, { status: 400 });
+                }
+            }
+        }
+
+        vanInv.updatedAt = new Date().toISOString();
+        await db.vanInventories.save(vanInv);
     }
+
+    // 2. Save Transaction
+    await db.transactions.save(newTransaction);
 
     // 3. Update Customer Outstanding Balance (If credit/bill-to-bill or partial payment)
     if (newTransaction.customer) {
