@@ -19,5 +19,12 @@
     "password": "password",
     "role": "Store",
     "name": "Kedai Runcit Ali User"
+  },
+  {
+    "id": "u4",
+    "username": "ali_sales",
+    "password": "password123",
+    "role": "Sales",
+    "name": "Ali Sales"
   }
 ]

@@ -3,6 +3,17 @@
 :root {
   --background: #f8fafc; /* slate-50 */
   --foreground: #0f172a; /* slate-900 */
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1; /* slate-300 */
+  --input-text: #0f172a;
+}
+
+.dark {
+  --background: #020617; /* slate-950 */
+  --foreground: #f8fafc; /* slate-50 */
+  --input-bg: #1e293b; /* slate-800 */
+  --input-border: #334155; /* slate-700 */
+  --input-text: #f8fafc;
 }
 
 body {
@@ -11,4 +22,26 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure inputs have high contrast in both modes */
+input, select, textarea {
+  background-color: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--input-text);
+}
+
+/* Force dark mode styles when .dark class is present */
+.dark input, .dark select, .dark textarea {
+  background-color: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--input-text);
+}
+
+/* Placeholder contrast */
+::placeholder {
+  color: #94a3b8; /* slate-400 */
+}
+.dark ::placeholder {
+  color: #64748b; /* slate-500 */
 }

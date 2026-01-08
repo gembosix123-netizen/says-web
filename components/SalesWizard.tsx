@@ -4,6 +4,7 @@ import React from 'react';
 import { SalesProvider, useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
+import ThemeSwitcher from './ThemeSwitcher';
 import { Home, LogOut } from 'lucide-react';
 
 // Feature Components
@@ -55,6 +56,7 @@ function SalesWizardContent() {
             <p className="text-base font-semibold text-slate-900">{step === 1 ? t('system_title') : selectedCustomer?.name}</p>
           </div>
           <div className="flex items-center gap-3">
+             <ThemeSwitcher />
              <LanguageSwitcher />
              <button 
                 onClick={handleLogout}

@@ -9,6 +9,7 @@ import ProductManagement from '@/components/features/admin/ProductManagement';
 import OrderManagement from '@/components/features/admin/OrderManagement';
 import AnalyticsDashboard from '@/components/features/admin/AnalyticsDashboard';
 import SettlementDashboard from '@/components/features/admin/SettlementDashboard';
+import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LogOut, LayoutDashboard, ShoppingCart, Users, Package, Menu, X, DollarSign } from 'lucide-react';
@@ -228,6 +229,7 @@ export default function AdminDashboardPage() {
               </h2>
            </div>
            <div className="flex items-center gap-4">
+              <ThemeSwitcher />
               <LanguageSwitcher />
            </div>
         </header>
