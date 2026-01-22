@@ -31,6 +31,7 @@ export {
   Minus,
   ChevronLeft,
   ArrowRight,
+  ArrowLeft,
   Navigation,
   Loader2,
   ShoppingCart,

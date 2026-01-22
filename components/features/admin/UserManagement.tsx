@@ -1,13 +1,22 @@
-"use client";
-
+'use client';
 import React, { useState, useEffect } from 'react';
-import { User, Customer } from '@/types';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Plus, Save, Trash2, Users, Lock, Store } from '@/components/Icons';
+import { Plus, Save, Trash2, Users, Store } from 'lucide-react';
+
+interface UserType {
+  id: string;
+  username: string;
+  name: string;
+  role: string;
+  assignedShopId?: string;
+}
+
+interface Customer {
+  id: string;
+  name: string;
+}
 
 export default function UserManagement() {
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<UserType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
@@ -90,7 +99,7 @@ export default function UserManagement() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-7xl mx-auto">
       <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
         <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
           <span className="bg-blue-500/20 text-blue-500 p-2 rounded-lg">
@@ -100,26 +109,26 @@ export default function UserManagement() {
         </h2>
         
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input
+          <input
             placeholder="Username (e.g., sales_ali)"
             value={form.username}
             onChange={(e) => setForm({ ...form, username: e.target.value })}
-            className="bg-slate-950 border-slate-800 text-slate-200"
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             required
           />
-          <Input
+          <input
             type="password"
             placeholder="Password"
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
-            className="bg-slate-950 border-slate-800 text-slate-200"
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             required
           />
-          <Input
+          <input
             placeholder="Full Name"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="bg-slate-950 border-slate-800 text-slate-200"
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             required
           />
           
@@ -145,9 +154,9 @@ export default function UserManagement() {
               </select>
           )}
 
-          <Button type="submit" className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 shadow-lg shadow-blue-900/20">
-            <Save className="mr-2" /> Create User
-          </Button>
+          <button type="submit" className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 transition-all">
+            <Save size={18} /> Create User
+          </button>
         </form>
       </div>
 
@@ -160,42 +169,46 @@ export default function UserManagement() {
           <span className="text-slate-500 text-base font-normal ml-2">({users.length})</span>
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {users.map((user) => (
-            <div key={user.id} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800/60 transition-all group">
-              <div className="flex justify-between items-start mb-3">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${user.role === 'Admin' ? 'bg-red-600' : 'bg-blue-600'}`}>
-                    {user.username.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white">{user.name}</h3>
-                    <p className="text-xs text-slate-400">@{user.username}</p>
-                  </div>
+        {loading ? (
+             <div className="text-center text-slate-500 py-8">Loading users...</div>
+        ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {users.map((user) => (
+                <div key={user.id} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800/60 transition-all group">
+                <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${user.role === 'Admin' ? 'bg-red-600' : 'bg-blue-600'}`}>
+                        {user.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-white">{user.name}</h3>
+                        <p className="text-xs text-slate-400">@{user.username}</p>
+                    </div>
+                    </div>
+                    <div className={`px-2 py-1 rounded text-xs font-bold ${user.role === 'Admin' ? 'bg-red-900/30 text-red-400' : 'bg-blue-900/30 text-blue-400'}`}>
+                    {user.role}
+                    </div>
                 </div>
-                <div className={`px-2 py-1 rounded text-xs font-bold ${user.role === 'Admin' ? 'bg-red-900/30 text-red-400' : 'bg-blue-900/30 text-blue-400'}`}>
-                  {user.role}
+                
+                {user.assignedShopId && (
+                    <div className="mb-4 flex items-center gap-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg">
+                        <Store size={14} />
+                        Assigned: {customers.find(c => c.id === user.assignedShopId)?.name || 'Unknown Shop'}
+                    </div>
+                )}
+                <div className="flex justify-end pt-2 border-t border-slate-700/50">
+                    <button 
+                        onClick={() => handleDelete(user.id)}
+                        className="text-red-400 hover:text-red-300 hover:bg-red-900/20 p-2 rounded-lg transition-colors"
+                        title="Delete User"
+                    >
+                        <Trash2 size={18} />
+                    </button>
                 </div>
-              </div>
-              
-              {user.assignedShopId && (
-                  <div className="mb-4 flex items-center gap-2 text-xs text-slate-400 bg-slate-900/50 p-2 rounded-lg">
-                      <Store size={14} />
-                      Assigned: {customers.find(c => c.id === user.assignedShopId)?.name || 'Unknown Shop'}
-                  </div>
-              )}
-              <div className="flex justify-end pt-2 border-t border-slate-700/50">
-                  <button 
-                    onClick={() => handleDelete(user.id)}
-                    className="text-red-400 hover:text-red-300 hover:bg-red-900/20 p-2 rounded-lg transition-colors"
-                    title="Delete User"
-                  >
-                      <Trash2 size={18} />
-                  </button>
-              </div>
+                </div>
+            ))}
             </div>
-          ))}
-        </div>
+        )}
       </div>
     </div>
   );

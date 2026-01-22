@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     }
 
     // Create a simple session cookie
-    const response = NextResponse.json({ success: true, role: user.role, name: user.name });
+    const response = NextResponse.json({ success: true, role: user.role, name: user.name, id: user.id });
     
     // In a real app, use a secure token (JWT). For this prototype, we store user info in a cookie.
     const sessionData = JSON.stringify({ id: user.id, role: user.role, name: user.name });

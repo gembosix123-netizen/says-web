@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { Transaction } from '@/types';
+import { Transaction, VanInventory, Customer } from '@/types';
 
 export async function GET() {
-  const transactions = await db.transactions.getAll();
+  const transactions = (await db.transactions.getAll()) as Transaction[];
   // Sort by createdAt desc
   const sorted = transactions.sort((a, b) => {
     const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
@@ -13,9 +13,9 @@ export async function GET() {
   return NextResponse.json(sorted);
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     let userId = '';
     if (session) {
       try {
@@ -35,53 +35,50 @@ export async function POST(request: Request) {
     
     // 1. Validate and Deduct Van Stock
     if (userId) {
-        let vanInv = await db.vanInventories.getById(userId);
+        // Fetch User to get Branch info
+        const user = await db.users.getById(userId);
+        if (user && user.branch) {
+            newTransaction.branch = user.branch;
+        }
+
+        // Fix: Use correct ID format 'van_userId'
+        const vanInv = (await db.vanInventories.getById(`van_${userId}`)) as VanInventory | null;
         if (!vanInv) {
              return NextResponse.json({ error: 'Van inventory not found for user' }, { status: 400 });
         }
 
         // Verify stock availability
         for (const item of newTransaction.items) {
-            const invItem = vanInv.items.find(i => i.productId === item.id);
-            if (!invItem || invItem.quantity < item.quantity) {
+            // Fix: Access items as Record<string, number>
+            const currentQty = vanInv.items[item.id] || 0;
+            if (currentQty < item.quantity) {
                 return NextResponse.json({ 
-                    error: `Insufficient van stock for product ID: ${item.id}. Available: ${invItem?.quantity || 0}` 
+                    error: `Insufficient van stock for product ID: ${item.id}. Available: ${currentQty}` 
                 }, { status: 400 });
             }
         }
 
         // Deduct Sales Items
         for (const item of newTransaction.items) {
-            const invItem = vanInv.items.find(i => i.productId === item.id);
-            if (invItem) {
-                invItem.quantity -= item.quantity;
-            }
+            const currentQty = vanInv.items[item.id] || 0;
+            vanInv.items[item.id] = Math.max(0, currentQty - item.quantity);
         }
         
         // Deduct Exchange Items (Replaced with new stock from van)
         if (newTransaction.exchangeItems) {
             for (const item of newTransaction.exchangeItems) {
-                const invItem = vanInv.items.find(i => i.productId === item.productId);
-                // Exchange deduction logic:
-                // If we give a new item in exchange, we deduct from van.
-                // If we receive a bad item, we ideally add it to a "Bad Stock" inventory, 
-                // but for now, we just deduct the replacement given.
-                if (invItem) {
-                    if (invItem.quantity < item.quantity) {
-                         return NextResponse.json({ 
-                            error: `Insufficient van stock for exchange item ID: ${item.productId}` 
-                        }, { status: 400 });
-                    }
-                    invItem.quantity -= item.quantity;
-                } else {
-                     return NextResponse.json({ 
-                        error: `Exchange item not found in van: ${item.productId}` 
+                const currentQty = vanInv.items[item.productId] || 0;
+                
+                if (currentQty < item.quantity) {
+                        return NextResponse.json({ 
+                        error: `Insufficient van stock for exchange item ID: ${item.productId}` 
                     }, { status: 400 });
                 }
+                vanInv.items[item.productId] = Math.max(0, currentQty - item.quantity);
             }
         }
 
-        vanInv.updatedAt = new Date().toISOString();
+        vanInv.lastUpdated = new Date().toISOString();
         await db.vanInventories.save(vanInv);
     }
 
@@ -90,7 +87,7 @@ export async function POST(request: Request) {
 
     // 3. Update Customer Outstanding Balance (If credit/bill-to-bill or partial payment)
     if (newTransaction.customer) {
-        const customer = await db.customers.getById(newTransaction.customer.id);
+        const customer = (await db.customers.getById(newTransaction.customer.id)) as Customer | null;
         if (customer) {
             // Logic: Outstanding += Total - PaidAmount
             // Assuming 'payment.method' handles logic elsewhere, but here we can track debt
@@ -115,7 +112,7 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
     try {
         const data = await request.json();
         const { id, ...updates } = data;
@@ -124,12 +121,12 @@ export async function PUT(request: Request) {
             return NextResponse.json({ error: 'ID required' }, { status: 400 });
         }
 
-        const existing = await db.transactions.getById(id);
+        const existing = (await db.transactions.getById(id)) as Transaction | null;
         if (!existing) {
              return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
         }
 
-        const updated = {
+        const updated: Transaction = {
             ...existing,
             ...updates,
             updatedAt: new Date().toISOString()

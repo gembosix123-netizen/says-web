@@ -1,200 +1,167 @@
-import React, { useState } from 'react';
-import { Customer, User } from '@/types';
-import { useLanguage } from '@/context/LanguageContext';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Edit, Plus, Save, Trash2, User as UserIcon, MapPin, Map } from '@/components/Icons';
-import { formatCurrency } from '@/lib/utils';
+'use client';
+import React, { useState, useEffect } from 'react';
+import { Store, Plus, Save, Trash2, Search, Edit, MapPin } from 'lucide-react';
 
-interface Props {
-  customers: Customer[];
-  salesUsers: User[];
-  onSave: (customer: Partial<Customer>, isEdit: boolean) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  location?: string;
 }
 
-export default function CustomerManagement({ customers, salesUsers, onSave, onDelete }: Props) {
-  const { t } = useLanguage();
-  const [form, setForm] = useState<Partial<Customer>>({ name: '', address: '', outstandingBalance: 0, sales_id: '', lat: undefined, lon: undefined });
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [loadingLoc, setLoadingLoc] = useState(false);
+export default function CustomerManagement() {
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [filter, setFilter] = useState('');
+  const [isEditing, setIsEditing] = useState<Customer | null>(null);
+  const [form, setForm] = useState({ name: '', phone: '', address: '' });
+
+  const fetchCustomers = async () => {
+    try {
+      const res = await fetch('/api/customers');
+      const data = await res.json();
+      setCustomers(data);
+    } catch (error) {
+      console.error('Failed to fetch customers', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSave({ ...form, id: editingId || undefined }, !!editingId);
-    setForm({ name: '', address: '', outstandingBalance: 0, sales_id: '', lat: undefined, lon: undefined });
-    setEditingId(null);
-  };
+    const url = '/api/customers';
+    const method = isEditing ? 'PUT' : 'POST';
+    const body = isEditing 
+        ? { ...form, id: isEditing.id }
+        : { ...form, id: `c${Date.now()}` };
 
-  const handleEdit = (c: Customer) => {
-    setForm(c);
-    setEditingId(c.id);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+    try {
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
 
-  const handleCancel = () => {
-    setForm({ name: '', address: '', outstandingBalance: 0, sales_id: '', lat: undefined, lon: undefined });
-    setEditingId(null);
-  };
-
-  const getCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      alert(t('gps_unavailable'));
-      return;
+        if (res.ok) {
+            alert(isEditing ? 'Shop updated' : 'Shop created');
+            setIsEditing(null);
+            setForm({ name: '', phone: '', address: '' });
+            fetchCustomers();
+        } else {
+            alert('Failed to save shop');
+        }
+    } catch (error) {
+        console.error(error);
+        alert('Error saving shop');
     }
-    setLoadingLoc(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setForm(prev => ({
-          ...prev,
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude
-        }));
-        alert(t('location_found'));
-        setLoadingLoc(false);
-      },
-      (err) => {
-        console.error(err);
-        alert(t('location_error'));
-        setLoadingLoc(false);
-      }
-    );
   };
+
+  const handleDelete = async (id: string) => {
+      if (!confirm('Delete this shop?')) return;
+      try {
+          await fetch(`/api/customers?id=${id}`, { method: 'DELETE' });
+          fetchCustomers();
+      } catch (error) {
+          console.error(error);
+      }
+  };
+
+  const handleEdit = (customer: Customer) => {
+      setIsEditing(customer);
+      setForm({ name: customer.name, phone: customer.phone, address: customer.address || '' });
+  };
+
+  const filteredCustomers = customers.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-7xl mx-auto">
+      {/* Form Section */}
       <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold flex items-center text-white">
-            <div className={`p-2 rounded-lg mr-3 ${editingId ? 'bg-orange-500/20 text-orange-500' : 'bg-green-500/20 text-green-500'}`}>
-                {editingId ? <Edit size={20} /> : <Plus size={20} />}
-            </div>
-            {editingId ? t('edit_customer') : t('add_customer')}
-          </h2>
-          {editingId && (
-            <button onClick={handleCancel} className="text-sm text-red-400 hover:text-red-300 underline transition-colors">
-              {t('cancel')}
-            </button>
-          )}
-        </div>
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input
-            placeholder={t('shop_name')}
+        <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
+          <span className="bg-green-500/20 text-green-500 p-2 rounded-lg">
+            {isEditing ? <Edit size={20} /> : <Plus size={20} />}
+          </span>
+          {isEditing ? 'Edit Shop' : 'Add New Shop'}
+        </h2>
+        
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <input
+            placeholder="Shop Name"
             value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            onChange={e => setForm({ ...form, name: e.target.value })}
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
             required
-            className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
           />
-          <Input
-            placeholder={t('address')}
-            value={form.address}
-            onChange={(e) => setForm({ ...form, address: e.target.value })}
+          <input
+            placeholder="Phone Number"
+            value={form.phone}
+            onChange={e => setForm({ ...form, phone: e.target.value })}
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
             required
-            className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
+          />
+          <input
+            placeholder="Address"
+            value={form.address}
+            onChange={e => setForm({ ...form, address: e.target.value })}
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
           />
           <div className="flex gap-2">
-             <Input
-                placeholder={t('lat')}
-                type="number"
-                step="any"
-                value={form.lat || ''}
-                onChange={(e) => setForm({ ...form, lat: parseFloat(e.target.value) })}
-                className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
-             />
-             <Input
-                placeholder={t('lon')}
-                type="number"
-                step="any"
-                value={form.lon || ''}
-                onChange={(e) => setForm({ ...form, lon: parseFloat(e.target.value) })}
-                className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
-             />
+            <button type="submit" className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2">
+                <Save size={18} /> {isEditing ? 'Update' : 'Save'}
+            </button>
+            {isEditing && (
+                <button 
+                    type="button" 
+                    onClick={() => { setIsEditing(null); setForm({ name: '', phone: '', address: '' }); }}
+                    className="px-4 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700"
+                >
+                    Cancel
+                </button>
+            )}
           </div>
-          <div className="flex items-center">
-             <Button 
-                type="button" 
-                variant="outline" 
-                onClick={getCurrentLocation}
-                disabled={loadingLoc}
-                className="w-full h-full border-slate-700 hover:bg-slate-800 text-slate-300 hover:text-white"
-             >
-                <MapPin className="mr-2" size={18} />
-                {loadingLoc ? t('loading') : t('get_location')}
-             </Button>
-          </div>
-
-          <Input
-            type="number"
-            placeholder={t('debt_balance')}
-            value={form.outstandingBalance || ''}
-            onChange={(e) => setForm({ ...form, outstandingBalance: parseFloat(e.target.value) })}
-            className="bg-slate-950 border-slate-800 text-slate-200 focus:border-red-900/50 focus:ring-red-900/50"
-          />
-          <div className="w-full">
-            <select
-              className="w-full p-3 border border-slate-800 rounded-lg text-slate-200 bg-slate-950 focus:outline-none focus:ring-2 focus:ring-red-900/50"
-              value={form.sales_id || ''}
-              onChange={(e) => setForm({ ...form, sales_id: e.target.value })}
-            >
-              <option value="">{t('select_sales')}</option>
-              {salesUsers.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button type="submit" className={`md:col-span-2 text-white border-0 shadow-lg transition-all ${editingId ? 'bg-orange-600 hover:bg-orange-700 shadow-orange-900/20' : 'bg-green-600 hover:bg-green-700 shadow-green-900/20'}`}>
-            <Save className="mr-2" size={18} /> {editingId ? t('update') : t('save')}
-          </Button>
         </form>
       </div>
 
+      {/* List Section */}
       <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
-        <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
-          <span className="bg-slate-800 p-1.5 rounded-lg text-slate-400">
-            <UserIcon size={20} />
-          </span>
-          {t('customer_list')} 
-          <span className="text-slate-500 text-base font-normal ml-2">({customers.length})</span>
-        </h2>
-        <div className="space-y-3">
-          {customers.map((c) => (
-            <div key={c.id} className="flex flex-col md:flex-row justify-between items-start md:items-center p-4 bg-slate-800/30 hover:bg-slate-800/60 transition-all rounded-xl border border-slate-700/50 group">
-              <div className="mb-3 md:mb-0">
-                <h3 className="font-bold text-slate-200 text-lg">{c.name}</h3>
-                <p className="text-sm text-slate-500">{c.address}</p>
-                <div className="flex gap-3 mt-2">
-                    {c.lat && c.lon && (
-                        <a 
-                            href={`https://www.google.com/maps/search/?api=1&query=${c.lat},${c.lon}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs text-blue-400 hover:text-blue-300 hover:underline flex items-center bg-blue-900/20 px-2 py-1 rounded-md border border-blue-900/30 transition-colors"
-                        >
-                            <Map size={12} className="mr-1" /> {t('map')}
-                        </a>
-                    )}
-                    {c.sales_id && (
-                    <span className="inline-flex items-center text-xs bg-purple-900/20 text-purple-400 px-2 py-1 rounded-md border border-purple-900/30">
-                        <UserIcon size={12} className="mr-1" /> {salesUsers.find((u) => u.id === c.sales_id)?.name || c.sales_id}
-                    </span>
-                    )}
-                </div>
-              </div>
-              <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 border-slate-700/50 pt-3 md:pt-0">
-                <span className="font-mono font-bold text-red-400 text-lg bg-red-900/10 px-3 py-1 rounded-lg border border-red-900/20">RM {c.outstandingBalance}</span>
-                <div className="flex gap-2">
-                    <button onClick={() => handleEdit(c)} className="p-2 text-blue-400 hover:bg-blue-900/30 rounded-lg transition-colors border border-transparent hover:border-blue-900/50">
-                    <Edit size={18} />
-                    </button>
-                    <button onClick={() => onDelete(c.id)} className="p-2 text-red-400 hover:bg-red-900/30 rounded-lg transition-colors border border-transparent hover:border-red-900/50">
-                    <Trash2 size={18} />
-                    </button>
-                </div>
-              </div>
+        <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Store className="text-green-500" /> Shop List
+            </h2>
+            <div className="relative w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                <input 
+                    value={filter}
+                    onChange={e => setFilter(e.target.value)}
+                    placeholder="Search shops..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-white text-sm"
+                />
             </div>
-          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredCustomers.map(customer => (
+                <div key={customer.id} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 flex justify-between items-center group hover:bg-slate-800/60 transition-all">
+                    <div>
+                        <h3 className="font-bold text-white">{customer.name}</h3>
+                        <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
+                            <MapPin size={12} /> {customer.address || 'No Address'}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">Tel: {customer.phone}</p>
+                    </div>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleEdit(customer)} className="p-2 text-blue-400 hover:bg-blue-900/20 rounded-lg">
+                            <Edit size={16} />
+                        </button>
+                        <button onClick={() => handleDelete(customer.id)} className="p-2 text-red-400 hover:bg-red-900/20 rounded-lg">
+                            <Trash2 size={16} />
+                        </button>
+                    </div>
+                </div>
+            ))}
         </div>
       </div>
     </div>

@@ -1,3 +1,4 @@
+'use client';
 import React, { useMemo } from 'react';
 import { Transaction, Product, User, StockAudit, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
@@ -17,8 +18,8 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
   // Top 5 Products
   const topProducts = useMemo(() => {
     const productSales: Record<string, number> = {};
-    transactions.forEach(t => {
-      t.items.forEach(item => {
+    transactions?.forEach(t => {
+      t.items?.forEach(item => {
         productSales[item.id] = (productSales[item.id] || 0) + item.quantity;
       });
     });
@@ -35,7 +36,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
   // Top Sales Agent
   const topAgents = useMemo(() => {
     const agentSales: Record<string, number> = {};
-    transactions.forEach(t => {
+    transactions?.forEach(t => {
       if (t.salesmanId) {
           agentSales[t.salesmanId] = (agentSales[t.salesmanId] || 0) + t.total;
       }
@@ -53,8 +54,8 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
   // Stock Alerts (Latest audit for each product < 10)
   const lowStockAlerts = useMemo(() => {
      const alerts: any[] = [];
-     stockAudits.forEach(audit => {
-         audit.items.forEach(item => {
+     stockAudits?.forEach(audit => {
+         audit.items?.forEach(item => {
              if (item.physicalStock < 10) {
                  const customer = customers.find(c => c.id === audit.customerId);
                  alerts.push({
@@ -77,7 +78,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
           return { date: d.toISOString().split('T')[0], total: 0 };
       });
       
-      transactions.forEach(t => {
+      transactions?.forEach(t => {
           if (t.createdAt) {
               const date = t.createdAt.split('T')[0];
               const dayData = data.find(d => d.date === date);
@@ -94,7 +95,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
   // Exchange/Return Tracking
   const exchangeReport = useMemo(() => {
     const report: { productName: string; quantity: number; reason: string }[] = [];
-    transactions.forEach(t => {
+    transactions?.forEach(t => {
       if (t.exchangeItems) {
         t.exchangeItems.forEach(item => {
             const product = products.find(p => p.id === item.productId);

@@ -7,6 +7,19 @@ export interface User {
   role: Role;
   name: string;
   assignedShopId?: string | null;
+  commissionRate?: number; // 0.05 for 5%
+}
+
+export interface CommissionPayout {
+  id: string;
+  userId: string;
+  userName: string;
+  amount: number;
+  periodStart?: string;
+  periodEnd?: string;
+  paidAt: string;
+  paidBy?: string;
+  notes?: string;
 }
 
 export interface Product {
@@ -64,6 +77,7 @@ export interface Transaction {
   salesmanId?: string;
   createdAt?: string;
   updatedAt?: string;
+  branch?: Branch;
 }
 
 export interface StockAudit {
@@ -79,13 +93,10 @@ export interface StockAudit {
 }
 
 export interface VanInventory {
-  id: string; // usually userId
+  id: string; // usually van_userId
   userId: string;
-  items: {
-    productId: string;
-    quantity: number;
-  }[];
-  updatedAt: string;
+  items: Record<string, number>; // productId -> quantity
+  lastUpdated: string;
 }
 
 export interface Settlement {

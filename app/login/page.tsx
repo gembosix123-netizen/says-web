@@ -1,20 +1,16 @@
-"use client";
+'use client';
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useLanguage } from '@/context/LanguageContext';
-import LanguageSwitcher from '@/components/LanguageSwitcher';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Card } from '@/components/ui/Card';
+import { Store, Lock, User as UserIcon } from 'lucide-react';
+import Image from 'next/image';
 
-export default function LoginPage() {
-  const { t } = useLanguage();
+export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const router = useRouter();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,109 +18,119 @@ export default function LoginPage() {
     setError('');
 
     try {
-        const res = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
-        });
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
 
-        const data = await res.json();
+      const data = await res.json();
 
-        if (res.ok) {
-            if (data.role === 'Admin') {
-                router.push('/admin');
-            } else {
-                router.push('/');
-            }
+      if (res.ok) {
+        // Store user info (but not sensitive tokens if using httpOnly cookies)
+        localStorage.setItem('user', JSON.stringify({ 
+          id: data.id,
+          name: data.name, 
+          role: data.role 
+        }));
+        
+        // Redirect based on role
+        if (data.role === 'Admin') {
+            router.push('/admin'); 
         } else {
-            setError(data.error || 'Invalid credentials');
+            router.push('/');
         }
+      } else {
+        setError(data.error || 'Invalid credentials');
+      }
     } catch (err) {
-        setError('Something went wrong');
+      console.error(err);
+      setError('Connection failed. Ensure backend is running.');
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black p-4 relative overflow-hidden">
-      
-      {/* Abstract Background Shapes */}
+      {/* Background Effects */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-red-900 rounded-full blur-[100px] opacity-20 animate-pulse" />
-        <div className="absolute top-[40%] right-[0%] w-[40%] h-[40%] bg-red-900 rounded-full blur-[100px] opacity-20 animate-pulse delay-1000" />
+        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-blue-900/20 rounded-full blur-[100px] animate-pulse" />
+        <div className="absolute top-[40%] right-[0%] w-[40%] h-[40%] bg-indigo-900/20 rounded-full blur-[100px] animate-pulse delay-1000" />
       </div>
 
-      <div className="absolute top-4 right-4 z-20">
-        <LanguageSwitcher />
-      </div>
-      
-      <Card className="w-full max-w-md space-y-8 p-10 border-slate-800 bg-slate-900/95 backdrop-blur-sm shadow-2xl relative z-10 rounded-2xl">
-        <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-red-600 to-orange-600 mb-4 shadow-lg">
-                <span className="text-white font-bold text-2xl">S</span>
-            </div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">SISTEM SAYS 2.0</h1>
-            <p className="text-slate-400">{t('login_subtitle')}</p>
+      <div className="w-full max-w-md bg-slate-900/95 backdrop-blur-sm border border-slate-800 p-8 rounded-2xl shadow-2xl relative z-10">
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-6">
+             <div className="w-32 h-32 relative flex items-center justify-center">
+                 <Image 
+                    src="/logo.svg" 
+                    alt="Yanong's Logo" 
+                    width={150} 
+                    height={150} 
+                    className="object-contain"
+                    priority
+                 />
+             </div>
+          </div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">SISTEM SAYS</h1>
+          <p className="text-slate-400 mt-2">Sales & Audit Management System</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-6 mt-8">
-            <div className="space-y-5">
-                <Input 
-                    label={t('username')}
-                    placeholder={t('enter_username')}
-                    value={username} 
-                    onChange={e => setUsername(e.target.value)}
-                    required
-                    className="bg-slate-50 border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+        <form onSubmit={handleLogin} className="space-y-6">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-1 ml-1">Username</label>
+              <div className="relative">
+                <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
+                <input 
+                  type="text" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full pl-12 h-12 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
+                  placeholder="Enter username"
+                  required
                 />
-                <div className="space-y-1">
-                    <Input 
-                        label={t('password')}
-                        type="password" 
-                        placeholder={t('enter_password')}
-                        value={password} 
-                        onChange={e => setPassword(e.target.value)}
-                        required
-                        className="bg-slate-50 border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                    />
-                </div>
+              </div>
             </div>
 
-            {error && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-100 flex items-center gap-2 text-red-600 text-sm animate-in fade-in slide-in-from-top-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 flex-shrink-0">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
-                    </svg>
-                    {error}
-                </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-1 ml-1">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-12 h-12 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
+                  placeholder="Enter password"
+                  required
+                />
+              </div>
+            </div>
+          </div>
 
-            <Button 
-                type="submit" 
-                className="w-full py-3.5 text-lg font-bold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all"
-                variant="secondary"
-                disabled={loading}
-            >
-                {loading ? (
-                    <div className="flex items-center gap-2">
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        {t('loading')}
-                    </div>
-                ) : t('login_button')}
-            </Button>
+          {error && (
+            <div className="p-3 rounded-lg bg-red-900/20 border border-red-900/50 text-red-400 text-sm text-center">
+              {error}
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
         </form>
-        
-        <div className="mt-8 pt-6 border-t border-slate-100">
-            <div className="text-center text-xs text-slate-400 space-y-1">
-                <p>Demo Credentials:</p>
-                <div className="flex justify-center gap-4 font-mono">
-                    <span className="bg-slate-100 px-2 py-1 rounded">Admin1 / password1</span>
-                    <span className="bg-slate-100 px-2 py-1 rounded">sales1 / password</span>
-                </div>
-            </div>
+
+        <div className="mt-8 pt-6 border-t border-slate-800 text-center">
+          <p className="text-xs text-slate-500">
+            Demo: <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">sales1</span> / <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">password</span>
+          </p>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

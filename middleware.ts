@@ -6,19 +6,37 @@ import type { NextRequest } from 'next/server';
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 1. Exclude static assets, api, and _next folders from middleware logic
+  // 1. Exclude static assets and _next folders from middleware logic
   if (
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/api') ||
     pathname.startsWith('/static') ||
-    pathname.includes('.') || // Exclude files with extensions (images, etc.)
-    pathname === '/favicon.ico'
+    pathname === '/favicon.ico' ||
+    /\.(png|jpg|jpeg|gif|svg|ico|css|js)$/.test(pathname) // Better static file check
   ) {
     return NextResponse.next();
   }
 
   const session = request.cookies.get('session');
   const isLoginPage = pathname === '/login';
+
+  // 2. API Protection
+  if (pathname.startsWith('/api')) {
+    // Public API routes
+    if (
+      pathname.startsWith('/api/auth/login') ||
+      pathname.startsWith('/api/auth/logout')
+    ) {
+        return NextResponse.next();
+    }
+
+    // Protect other API routes
+    if (!session) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    // Allow request to proceed if session exists
+    return NextResponse.next();
+  }
 
   // 2. Auth Logic
   

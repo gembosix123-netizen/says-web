@@ -81,3 +81,30 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 });
     }
 }
+
+export async function PUT(request: Request) {
+    try {
+        const body = await request.json();
+        const { id, commissionRate } = body;
+
+        if (!id) {
+            return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+        }
+
+        const user = await db.users.getById(id);
+        if (!user) {
+            return NextResponse.json({ error: 'User not found' }, { status: 404 });
+        }
+
+        // Update fields
+        if (commissionRate !== undefined) user.commissionRate = commissionRate;
+        
+        // Save updated user
+        await db.users.save(user);
+
+        return NextResponse.json({ success: true, user: { ...user, password: undefined } });
+    } catch (error) {
+        console.error('Error updating user:', error);
+        return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
+    }
+}

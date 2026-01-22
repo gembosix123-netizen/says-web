@@ -5,7 +5,8 @@
     "address": "45 Lorong Indah",
     "outstandingBalance": 0,
     "lat": 3.073,
-    "lon": 101.518
+    "lon": 101.518,
+    "phone": "0135469885"
   },
   {
     "id": "3",
@@ -52,5 +53,52 @@
     "sales_id": "u2",
     "lat": 3,
     "id": "1766641130009"
+  },
+  {
+    "id": "c1768103214125",
+    "name": "abx",
+    "phone": "0123654789",
+    "location": "",
+    "address": "Registered via App"
+  },
+  {
+    "id": "c1768108694078",
+    "name": "asd",
+    "phone": "0132654566",
+    "location": "",
+    "address": "Registered via App"
+  },
+  {
+    "id": "c1768110060302",
+    "name": "54684",
+    "phone": "3215156561",
+    "location": "",
+    "address": "Registered via App"
+  },
+  {
+    "id": "c1768111046878",
+    "name": "+6+65",
+    "phone": "98444984",
+    "location": "",
+    "address": "Registered via App"
+  },
+  {
+    "id": "c1768276511857",
+    "name": "Restoran Era",
+    "phone": "01621212",
+    "location": "",
+    "address": "Registered via App"
+  },
+  {
+    "name": "lorong maju enterpices",
+    "phone": "01212211121",
+    "address": "kk",
+    "id": "c1768278023167"
+  },
+  {
+    "name": "salam enterprise",
+    "phone": "0145158954",
+    "address": "kgf sampouan",
+    "id": "c1768464431020"
   }
 ]

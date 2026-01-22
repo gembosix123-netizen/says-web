@@ -31,7 +31,7 @@ export default function VanDashboard({ userId, products, refreshTrigger }: Props
     if (userId) fetchInventory();
   }, [userId, refreshTrigger]);
 
-  if (!inventory || inventory.items.length === 0) {
+  if (!inventory || Object.keys(inventory.items).length === 0) {
     return (
         <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800 text-center py-8">
             <Package className="mx-auto text-slate-600 mb-2" size={32} />
@@ -55,16 +55,16 @@ export default function VanDashboard({ userId, products, refreshTrigger }: Props
       </div>
 
       <div className="space-y-3">
-        {inventory.items.map((item) => {
-            const product = products.find(p => p.id === item.productId);
+        {Object.entries(inventory.items).map(([productId, quantity]) => {
+            const product = products.find(p => p.id === productId);
             return (
-                <div key={item.productId} className="flex justify-between items-center p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
+                <div key={productId} className="flex justify-between items-center p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
                     <div>
                         <p className="font-bold text-slate-200">{product?.name || 'Unknown Product'}</p>
                         <p className="text-xs text-slate-500">{product?.unit}</p>
                     </div>
                     <span className="font-mono font-bold text-blue-400 bg-blue-900/20 px-3 py-1 rounded-lg border border-blue-900/30">
-                        {item.quantity}
+                        {quantity}
                     </span>
                 </div>
             );

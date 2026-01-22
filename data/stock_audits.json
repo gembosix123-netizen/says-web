@@ -15,5 +15,39 @@
       }
     ],
     "createdAt": "2025-12-25T06:45:28.008Z"
+  },
+  {
+    "id": "audit_1768103844189_zsv2lfh53",
+    "customerId": "2",
+    "date": "2026-01-11T03:57:23.372Z",
+    "counts": {},
+    "notes": "Mobile Wizard Audit",
+    "createdAt": "2026-01-11T03:57:24.189Z"
+  },
+  {
+    "id": "audit_1768103869464_9kthwdzyx",
+    "customerId": "3",
+    "date": "2026-01-11T03:57:49.444Z",
+    "counts": {
+      "p1": 2
+    },
+    "notes": "Mobile Wizard Audit",
+    "createdAt": "2026-01-11T03:57:49.464Z"
+  },
+  {
+    "id": "audit_1768111302377_1voh7xire",
+    "customerId": "1766634932613",
+    "date": "2026-01-11T06:01:41.983Z",
+    "counts": {
+      "p1": 5
+    },
+    "notes": "Mobile Wizard Audit",
+    "createdAt": "2026-01-11T06:01:42.377Z"
+  },
+  {
+    "id": "audit_1768713778082_5qj9kfure",
+    "customerId": "1766634932613",
+    "items": [],
+    "createdAt": "2026-01-18T05:22:58.082Z"
   }
 ]

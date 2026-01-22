@@ -11,20 +11,14 @@
     "username": "sales1",
     "password": "password",
     "role": "Sales",
-    "name": "Sales Ali"
+    "name": "Sales Ali",
+    "commissionRate": 0.04
   },
   {
     "id": "u3",
-    "username": "store1",
-    "password": "password",
-    "role": "Store",
-    "name": "Kedai Runcit Ali User"
-  },
-  {
-    "id": "u4",
-    "username": "ali_sales",
-    "password": "password123",
+    "username": "allan",
+    "password": "Allan123",
     "role": "Sales",
-    "name": "Ali Sales"
+    "name": "Allan"
   }
 ]

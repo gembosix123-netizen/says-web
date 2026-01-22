@@ -46,7 +46,7 @@ export default function EndDayModal({ isOpen, onClose, userId, userName }: { isO
                   totalCash,
                   totalCredit,
                   totalSales,
-                  vanStock: vanStock?.items || []
+                  vanStock: vanStock ? Object.entries(vanStock.items).map(([id, qty]) => ({ productId: id, quantity: qty })) : []
               })
           });
 
@@ -101,16 +101,16 @@ export default function EndDayModal({ isOpen, onClose, userId, userName }: { isO
                               <Truck size={16} /> {t('van_stock_balance')}
                           </h4>
                           <div className="max-h-32 overflow-y-auto space-y-1 text-sm">
-                              {vanStock.items.map(item => {
-                                  const p = products.find(prod => prod.id === item.productId);
+                              {Object.entries(vanStock.items).map(([productId, quantity]) => {
+                                  const p = products.find(prod => prod.id === productId);
                                   return (
-                                      <div key={item.productId} className="flex justify-between">
-                                          <span className="text-slate-600">{p?.name}</span>
-                                          <span className="font-mono font-bold">{item.quantity}</span>
+                                      <div key={productId} className="flex justify-between">
+                                          <span className="text-slate-600">{p?.name || productId}</span>
+                                          <span className="font-mono font-bold">{quantity}</span>
                                       </div>
                                   );
                               })}
-                              {vanStock.items.length === 0 && <p className="text-slate-400 italic">Empty van</p>}
+                              {Object.keys(vanStock.items).length === 0 && <p className="text-slate-400 italic">Empty van</p>}
                           </div>
                       </div>
                   )}

@@ -21,6 +21,8 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
+export const redisClient = redis;
+
 const DATA_DIR = path.join(process.cwd(), 'data');
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -77,7 +79,8 @@ export class DB<T extends { id: string }> {
         console.log('[DB] Seeding default admin user (Hardcoded).');
         initialData = [
           { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin" } as any,
-          { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as any
+          { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as any,
+          { id: "u3", username: "allan", password: "Allan123", role : "Sales", name: "Allan"} as any
         ];
       }
 
@@ -146,7 +149,7 @@ export class DB<T extends { id: string }> {
   }
 }
 
-import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory, Settlement } from '@/types';
+import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory, Settlement, CommissionPayout } from '@/types';
 
 // We need to export instances. 
 // Note: methods are now async, so we need to update usage in API routes.
@@ -159,4 +162,5 @@ export const db = {
   stockAudits: new DB<StockAudit>('stock_audits.json'),
   vanInventories: new DB<VanInventory>('van_inventories.json'),
   settlements: new DB<Settlement>('settlements.json'),
+  payouts: new DB<CommissionPayout>('payouts.json'),
 };

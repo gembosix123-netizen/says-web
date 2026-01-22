@@ -50,7 +50,7 @@ export default function OrderSummary() {
         if (selectedCustomer) {
             setVisitedCustomers(prev => [...prev, selectedCustomer.id]);
         }
-        setStep(7); // Success Screen
+        setStep(8); // Success Screen
     } catch (error) {
         console.error("Submit error:", error);
         alert(t('error_submit_failed') || "Gagal menyimpan pesanan. Sila cuba lagi.");

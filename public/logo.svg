@@ -1,0 +1,16 @@
+<svg width="400" height="300" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+  <!-- Yellow Background Removed -->
+  
+  <!-- Red Oval -->
+  <ellipse cx="200" cy="150" rx="180" ry="100" fill="#D60000"/>
+  
+  <!-- "Yanong's" Text -->
+  <text x="200" y="180" font-family="Brush Script MT, cursive, serif" font-size="120" fill="white" text-anchor="middle" font-style="italic" font-weight="bold">Yanong's</text>
+  
+  <!-- Registered Trademark (R) -->
+  <text x="360" y="80" font-family="Arial, sans-serif" font-size="40" fill="white" font-weight="bold">®</text>
+  
+  <!-- Bottom Text -->
+  <text x="200" y="270" font-family="Arial, sans-serif" font-size="16" fill="white" text-anchor="middle" font-weight="bold">KILANG MEMPROSES HASILAN MAKANAN</text>
+  <text x="200" y="290" font-family="Arial, sans-serif" font-size="16" fill="white" text-anchor="middle" font-weight="bold">SEJUK BEKU</text>
+</svg>

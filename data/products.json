@@ -3,7 +3,8 @@
     "id": "p1",
     "name": "Meatball 1kg",
     "price": 19,
-    "unit": "pkt"
+    "unit": "pkt",
+    "code": "MB1KG"
   },
   {
     "id": "p2",
@@ -46,5 +47,11 @@
     "price": 20,
     "unit": "hs121",
     "id": "p1766644105056"
+  },
+  {
+    "name": "kakaaka",
+    "price": 1000,
+    "code": "saas77",
+    "id": "p1768277987841"
   }
 ]
