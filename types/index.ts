@@ -77,7 +77,7 @@ export interface Transaction {
   salesmanId?: string;
   createdAt?: string;
   updatedAt?: string;
-  branch?: Branch;
+  branch?: string;
 }
 
 export interface StockAudit {
