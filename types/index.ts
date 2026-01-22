@@ -38,6 +38,7 @@ export interface Customer {
   lat?: number;
   lon?: number;
   sales_id?: string;
+  branch?: string;
 }
 
 export interface CartItem extends Product {
