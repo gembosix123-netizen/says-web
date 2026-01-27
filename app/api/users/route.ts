@@ -13,9 +13,9 @@ const hashPassword = (password: string) => {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { username, password, role, name, assignedShopId } = body;
+    const { username, password, role, name, assignedShopId, branch } = body;
 
-    if (!username || !password || !role || !name) {
+    if (!username || !password || !role || !name || !branch) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       role,
       name,
       assignedShopId: assignedShopId || null,
+      branch,
     };
 
     await db.users.save(newUser);
@@ -54,12 +55,12 @@ export async function GET(request: Request) {
     if (role) {
         const filtered = users
           .filter((u) => u.role === role)
-          .map((u) => ({ id: u.id, username: u.username, role: u.role, name: u.name, assignedShopId: u.assignedShopId }));
+          .map((u) => ({ id: u.id, username: u.username, role: u.role, name: u.name, assignedShopId: u.assignedShopId, branch: u.branch }));
         return NextResponse.json(filtered);
     }
 
     // Return all users (exclude passwords for security)
-    const safeUsers = users.map((u) => ({ id: u.id, username: u.username, role: u.role, name: u.name, assignedShopId: u.assignedShopId }));
+    const safeUsers = users.map((u) => ({ id: u.id, username: u.username, role: u.role, name: u.name, assignedShopId: u.assignedShopId, branch: u.branch }));
     return NextResponse.json(safeUsers);
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });

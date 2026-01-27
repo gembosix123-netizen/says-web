@@ -1,4 +1,4 @@
-export type Role = 'Admin' | 'Sales' | 'Store';
+export type Role = 'Super Admin' | 'Admin' | 'Sales';
 
 export interface User {
   id: string;
@@ -8,7 +8,7 @@ export interface User {
   name: string;
   assignedShopId?: string | null;
   commissionRate?: number; // 0.05 for 5%
-  branch?: string;
+  branch: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
 }
 
 export interface CommissionPayout {

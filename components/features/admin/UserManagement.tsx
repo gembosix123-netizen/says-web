@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Plus, Save, Trash2, Users, Store } from 'lucide-react';
+import { Plus, Save, Trash2, Users, Store, Globe } from 'lucide-react';
 
 interface UserType {
   id: string;
@@ -8,6 +8,7 @@ interface UserType {
   name: string;
   role: string;
   assignedShopId?: string;
+  branch: string;
 }
 
 interface Customer {
@@ -15,7 +16,11 @@ interface Customer {
   name: string;
 }
 
-export default function UserManagement() {
+interface UserManagementProps {
+  enableCreation?: boolean;
+}
+
+export default function UserManagement({ enableCreation = true }: UserManagementProps) {
   const [users, setUsers] = useState<UserType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,7 +29,8 @@ export default function UserManagement() {
     password: '',
     name: '',
     role: 'Sales',
-    assignedShopId: ''
+    assignedShopId: '',
+    branch: ''
   });
 
   const fetchUsers = async () => {
@@ -57,7 +63,7 @@ export default function UserManagement() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.username || !form.password || !form.name) {
+    if (!form.username || !form.password || !form.name || !form.branch) {
       alert('Please fill in all required fields');
       return;
     }
@@ -71,7 +77,7 @@ export default function UserManagement() {
 
       if (res.ok) {
         alert('User created successfully');
-        setForm({ username: '', password: '', name: '', role: 'Sales', assignedShopId: '' });
+        setForm({ username: '', password: '', name: '', role: 'Sales', assignedShopId: '', branch: '' });
         fetchUsers();
       } else {
         const err = await res.json();
@@ -100,6 +106,7 @@ export default function UserManagement() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      {enableCreation && (
       <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
         <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
           <span className="bg-blue-500/20 text-blue-500 p-2 rounded-lg">
@@ -133,12 +140,25 @@ export default function UserManagement() {
           />
           
           <select
+            value={form.branch}
+            onChange={(e) => setForm({ ...form, branch: e.target.value })}
+            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          >
+            <option value="">Select Branch (Required)</option>
+            <option value="Kota Kinabalu">Kota Kinabalu</option>
+            <option value="Kinabatangan">Kinabatangan</option>
+            <option value="HQ">HQ</option>
+          </select>
+
+          <select
             value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
             className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="Sales">Sales</option>
             <option value="Admin">Admin</option>
+            <option value="Super Admin">Super Admin</option>
           </select>
 
           {form.role === 'Sales' && (
@@ -159,6 +179,7 @@ export default function UserManagement() {
           </button>
         </form>
       </div>
+      )}
 
       <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
         <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">

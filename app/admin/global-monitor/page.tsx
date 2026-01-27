@@ -3,6 +3,8 @@ import { Transaction, User, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { Globe, TrendingUp, Users, ShoppingBag } from 'lucide-react';
 
+import UserManagement from '@/components/features/admin/UserManagement';
+
 export const dynamic = 'force-dynamic';
 
 export default async function GlobalMonitorPage() {
