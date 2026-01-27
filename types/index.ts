@@ -8,6 +8,7 @@ export interface User {
   name: string;
   assignedShopId?: string | null;
   commissionRate?: number; // 0.05 for 5%
+  branch?: string;
 }
 
 export interface CommissionPayout {
