@@ -129,6 +129,8 @@ export default async function GlobalMonitorPage() {
               <span className="text-emerald-400">Kinabatangan</span>
           </div>
       </div>
+      {/* Centralized User Management */}
+      <UserManagement enableCreation={true} />
     </div>
   );
 }
