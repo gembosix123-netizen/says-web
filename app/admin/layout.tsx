@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, Sun, ShoppingCart, Store, Truck, FileText, Banknote } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, Sun, ShoppingCart, Store, Truck, FileText, Banknote, Globe } from 'lucide-react';
 import clsx from 'clsx';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
