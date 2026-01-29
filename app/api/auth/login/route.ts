@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import crypto from 'crypto';
+
+// Hash password using SHA-256
+function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
 
 export async function POST(request: Request) {
   try {
@@ -7,7 +13,8 @@ export async function POST(request: Request) {
     const { username, password } = body;
 
     const users = await db.users.getAll();
-    const user = users.find((u) => u.username === username && u.password === password);
+    const hashedPassword = hashPassword(password);
+    const user = users.find((u) => u.username === username && u.password === hashedPassword);
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });

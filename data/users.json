@@ -1,12 +1,5 @@
 [
   {
-    "id": "u1",
-    "username": "admin",
-    "password": "password",
-    "role": "Admin",
-    "name": "System Admin"
-  },
-  {
     "id": "u2",
     "username": "sales1",
     "password": "password",
@@ -20,5 +13,14 @@
     "password": "Allan123",
     "role": "Sales",
     "name": "Allan"
+  },
+  {
+    "id": "u1769659646010",
+    "username": "admin",
+    "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+    "role": "Admin",
+    "name": "admn kk",
+    "assignedShopId": null,
+    "branch": "HQ"
   }
 ]
