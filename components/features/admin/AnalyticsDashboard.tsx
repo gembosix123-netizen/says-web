@@ -15,41 +15,55 @@ interface AnalyticsDashboardProps {
 export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
   const { t } = useLanguage();
 
+  // Agent mapping for role-based access
+  const agentMapping: { [key: string]: string } = {
+    "u2": "Kota Kinabalu",
+    "u3": "Kinabatangan"
+  };
+
+  // Filter transactions based on current user's location (if applicable)
+  const filteredTransactions = useMemo(() => {
+    // For now, show all transactions in admin dashboard
+    // In future, we can add user context to filter by location
+    return transactions || [];
+  }, [transactions]);
+
   // Top 5 Products
   const topProducts = useMemo(() => {
     const productSales: Record<string, number> = {};
-    transactions?.forEach(t => {
+    filteredTransactions?.forEach(t => {
       t.items?.forEach(item => {
-        productSales[item.id] = (productSales[item.id] || 0) + item.quantity;
+        productSales[item.id] = (productSales[item.id] || 0) + Number(item.quantity || 0);
       });
     });
     return Object.entries(productSales)
       .map(([id, qty]) => ({
         product: products.find(p => p.id === id),
-        qty
+        qty: Number(qty) || 0
       }))
       .filter(item => item.product)
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 5);
-  }, [transactions, products]);
+  }, [filteredTransactions, products]);
 
-  // Top Sales Agent
+  // Top Sales Agent with location mapping
   const topAgents = useMemo(() => {
     const agentSales: Record<string, number> = {};
-    transactions?.forEach(t => {
+    filteredTransactions?.forEach(t => {
       if (t.salesmanId) {
-          agentSales[t.salesmanId] = (agentSales[t.salesmanId] || 0) + t.total;
+          agentSales[t.salesmanId] = (agentSales[t.salesmanId] || 0) + Number(t.total || 0);
       }
     });
     return Object.entries(agentSales)
       .map(([id, total]) => ({
         user: salesUsers.find(u => u.id === id),
-        total
+        total: Number(total) || 0,
+        location: agentMapping[id] || 'Unknown'
       }))
       .filter(item => item.user)
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
-  }, [transactions, salesUsers]);
+  }, [filteredTransactions, salesUsers]);
 
   // Stock Alerts (Latest audit for each product < 10)
   const lowStockAlerts = useMemo(() => {
@@ -83,7 +97,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
               const date = t.createdAt.split('T')[0];
               const dayData = data.find(d => d.date === date);
               if (dayData) {
-                  dayData.total += t.total;
+                  dayData.total += Number(t.total || 0);
               }
           }
       });
@@ -119,7 +133,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Total Revenue</p>
-                        <p className="text-2xl font-bold text-green-400">{formatCurrency(transactions.reduce((acc, t) => acc + t.total, 0))}</p>
+                        <p className="text-2xl font-bold text-green-400">{formatCurrency(transactions.reduce((acc, t) => acc + Number(t.total || 0), 0))}</p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Total Transactions</p>
@@ -128,7 +142,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Avg. Order Value</p>
                         <p className="text-2xl font-bold text-purple-400">
-                            {formatCurrency(transactions.length > 0 ? transactions.reduce((acc, t) => acc + t.total, 0) / transactions.length : 0)}
+                            {formatCurrency(transactions.length > 0 ? transactions.reduce((acc, t) => acc + Number(t.total || 0), 0) / transactions.length : 0)}
                         </p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">

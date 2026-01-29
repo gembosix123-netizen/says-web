@@ -13,8 +13,14 @@ export async function POST(request: Request) {
     const { username, password } = body;
 
     const users = await db.users.getAll();
+    console.log('[LOGIN] Available users:', users.map(u => ({ id: u.id, username: u.username })));
+    
+    // Try both plain text and hashed password for compatibility
     const hashedPassword = hashPassword(password);
-    const user = users.find((u) => u.username === username && u.password === hashedPassword);
+    const user = users.find((u) => u.username === username && (u.password === password || u.password === hashedPassword));
+
+    console.log('[LOGIN] Login attempt:', { username, password, hashedPassword });
+    console.log('[LOGIN] User found:', user ? { id: user.id, username: user.username } : 'None');
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });

@@ -41,21 +41,38 @@ export default function CommissionWidget({ user }: CommissionWidgetProps) {
   }, [user.id]);
 
   const stats = useMemo(() => {
-    // 1. Calculate Total Earned
-    const mySales = transactions.filter(t => t.salesmanId === user.id && t.status === 'Completed');
-    const totalSales = mySales.reduce((sum, t) => sum + t.total, 0);
-    const rate = user.commissionRate || 0.05;
+    // Role-based filtering: Only show data for user's location
+    let filteredTransactions = transactions;
+    
+    // Import agent mapping
+    const agentMapping: { [key: string]: string } = {
+      "u2": "Kota Kinabalu",
+      "u3": "Kinabatangan"
+    };
+    
+    // If user has a location mapping, filter transactions by salesmanId
+    const userLocation = agentMapping[user.id];
+    if (userLocation) {
+      // Only show transactions from salesmen in the same location
+      const locationSalesmen = Object.keys(agentMapping).filter(id => agentMapping[id] === userLocation);
+      filteredTransactions = transactions.filter(t => t.salesmanId && locationSalesmen.includes(t.salesmanId));
+    }
+
+    // 1. Calculate Total Earned - Fix NaN issues
+    const mySales = filteredTransactions.filter(t => t.salesmanId === user.id && t.status === 'Completed');
+    const totalSales = mySales.reduce((sum, t) => sum + Number(t.total || 0), 0);
+    const rate = Number(user.commissionRate || 0.05);
     const totalEarned = totalSales * rate;
 
-    // 2. Calculate Paid
+    // 2. Calculate Paid - Fix NaN issues
     const myPayouts = payouts.filter(p => p.userId === user.id);
-    const totalPaid = myPayouts.reduce((sum, p) => sum + p.amount, 0);
+    const totalPaid = myPayouts.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     return {
-      totalSales,
-      totalEarned,
-      totalPaid,
-      pending: totalEarned - totalPaid,
+      totalSales: Number(totalSales) || 0,
+      totalEarned: Number(totalEarned) || 0,
+      totalPaid: Number(totalPaid) || 0,
+      pending: Number(totalEarned - totalPaid) || 0,
       recentSales: mySales.sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime()).slice(0, 3)
     };
   }, [transactions, payouts, user]);
