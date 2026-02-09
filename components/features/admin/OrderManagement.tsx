@@ -107,7 +107,7 @@ export default function OrderManagement() {
                                     <span className="text-center">Qty</span>
                                     <span className="text-right">Total</span>
                                 </div>
-                                {order.items.map((item, idx) => (
+                                {(order.items || []).map((item, idx) => (
                                     <div key={idx} className="grid grid-cols-3 gap-2 text-sm py-1">
                                         <span className="text-slate-300 truncate">{getProductName(item.id)}</span>
                                         <span className="text-slate-400 text-center">x{item.quantity}</span>

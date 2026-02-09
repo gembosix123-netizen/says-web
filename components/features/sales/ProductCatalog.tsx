@@ -96,20 +96,20 @@ export default function ProductCatalog() {
                             </p>
                         )}
                       </div>
-                      <div className="flex items-center space-x-3 bg-slate-50 rounded-lg p-1">
+                      <div className="grid grid-cols-3 gap-2 items-center bg-slate-50 rounded-lg p-2 min-w-[140px]">
                         <button
                           onClick={() => updateCart(product, -1)}
-                          className={`p-3 rounded-lg ${canDecrement ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-400'}`}
+                          className={`w-10 h-10 rounded-lg flex items-center justify-center ${canDecrement ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-slate-200 text-slate-400'}`}
                           disabled={!canDecrement}
                         >
-                          <Minus size={20} />
+                          <Minus size={18} />
                         </button>
-                        <span className="w-10 text-center font-bold text-lg">{qty}</span>
+                        <span className="text-center font-bold text-lg text-slate-900">{qty}</span>
                         <button
                           onClick={() => updateCart(product, 1)}
-                          className="p-3 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-200"
+                          className="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-200 flex items-center justify-center"
                         >
-                          <Plus size={20} />
+                          <Plus size={18} />
                         </button>
                       </div>
                     </div>

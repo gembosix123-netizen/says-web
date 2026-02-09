@@ -11,6 +11,8 @@ export default function SalesDashboard() {
   const { customers, visitedCustomers, setSelectedCustomer, setStep, setLatestAudit, orders, setCart } = useSales();
   const [search, setSearch] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [newShop, setNewShop] = useState({ name: '', address: '', phone: '' });
 
   useEffect(() => {
     // Fetch current user
@@ -30,6 +32,33 @@ export default function SalesDashboard() {
         // ... (restoring existing logic for re-selecting a customer)
     }
     setStep(2); // Move to CheckIn
+  };
+
+  const handleRegisterShop = async () => {
+    if (!newShop.name.trim()) return;
+    
+    try {
+      const response = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: `c${Date.now()}`,
+          name: newShop.name,
+          address: newShop.address,
+          phone: newShop.phone,
+          createdAt: new Date().toISOString()
+        })
+      });
+      
+      if (response.ok) {
+        setShowRegisterModal(false);
+        setNewShop({ name: '', address: '', phone: '' });
+        // Refresh customers list
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error('Failed to register shop:', error);
+    }
   };
 
   return (
@@ -52,7 +81,7 @@ export default function SalesDashboard() {
           
           <button 
             className="w-full py-3 bg-white/5 border border-dashed border-white/20 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 hover:border-white/40 flex items-center justify-center gap-2 transition-all"
-            onClick={() => alert('New Shop Registration - Coming Soon')}
+            onClick={() => setShowRegisterModal(true)}
           >
             <Plus size={18} /> Register New Shop
           </button>
@@ -90,6 +119,53 @@ export default function SalesDashboard() {
               )}
           </div>
       </div>
+
+      {/* Register Shop Modal */}
+      {showRegisterModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-white mb-4">Register New Shop</h3>
+            <div className="space-y-4">
+              <input
+                type="text"
+                placeholder="Shop Name *"
+                value={newShop.name}
+                onChange={(e) => setNewShop({...newShop, name: e.target.value})}
+                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Address"
+                value={newShop.address}
+                onChange={(e) => setNewShop({...newShop, address: e.target.value})}
+                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Phone Number"
+                value={newShop.phone}
+                onChange={(e) => setNewShop({...newShop, phone: e.target.value})}
+                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-slate-400"
+              />
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowRegisterModal(false)}
+                className="flex-1 py-3 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRegisterShop}
+                disabled={!newShop.name.trim()}
+                className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                Register
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
