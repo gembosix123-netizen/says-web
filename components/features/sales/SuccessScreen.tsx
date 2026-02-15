@@ -13,17 +13,41 @@ export default function SuccessScreen() {
   const { t } = useLanguage();
   const router = useRouter();
 
-  const handlePrintReceipt = () => {
+  const handlePrintReceipt = async () => {
     const doc = new jsPDF();
     const total = calculateGrandTotal();
     
-    // Header
+    // Load and add logo
+    try {
+      const logoImg = new Image();
+      logoImg.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => {
+        logoImg.onload = resolve;
+        logoImg.onerror = reject;
+        logoImg.src = '/unnamed.png';
+      });
+      
+      // Create canvas to get base64
+      const canvas = document.createElement('canvas');
+      canvas.width = logoImg.width;
+      canvas.height = logoImg.height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(logoImg, 0, 0);
+      const logoBase64 = canvas.toDataURL('image/png');
+      
+      // Add logo to PDF (x, y, width, height)
+      doc.addImage(logoBase64, 'PNG', 14, 10, 25, 25);
+    } catch (error) {
+      console.log('Logo not loaded, continuing without it');
+    }
+    
+    // Header (shifted right to accommodate logo)
     doc.setFontSize(22);
-    doc.text(t('brand_client') || 'HAJA YANONS INDUSTRIES', 14, 20);
+    doc.text(t('brand_client') || 'HAJA YANONS INDUSTRIES', 45, 20);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text('Your Business Address Here', 14, 28);
+    doc.text('Your Business Address Here', 45, 28);
     
     // Receipt details
     doc.setTextColor(0);

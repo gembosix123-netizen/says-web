@@ -4,54 +4,70 @@
     "name": "Meatball 1kg",
     "price": 19,
     "unit": "pkt",
-    "code": "MB1KG"
+    "code": "MB1KG",
+    "stock": 150
   },
   {
     "id": "p2",
     "name": "Meatball 800g",
     "price": 15,
-    "unit": "pkt"
+    "unit": "pkt",
+    "stock": 85
   },
   {
     "id": "p3",
     "name": "Burger Ayam (10pcs)",
     "price": 12,
-    "unit": "pkt"
+    "unit": "pkt",
+    "stock": 200
   },
   {
     "id": "p4",
     "name": "Burger Daging (10pcs)",
     "price": 13.5,
-    "unit": "pkt"
+    "unit": "pkt",
+    "stock": 8
   },
   {
     "id": "p5",
     "name": "Sos Cili 1kg",
     "price": 8,
-    "unit": "btl"
+    "unit": "btl",
+    "stock": 45
   },
   {
     "id": "p6",
     "name": "Mayonis 3L",
     "price": 25,
-    "unit": "tub"
+    "unit": "tub",
+    "stock": 0
   },
   {
     "id": "p7",
     "name": "Roti Burger (12s)",
     "price": 4.5,
-    "unit": "pkt"
+    "unit": "pkt",
+    "stock": 120
   },
   {
-    "name": "kekera",
-    "price": 20,
-    "unit": "hs121",
-    "id": "p1766644105056"
+    "id": "p8",
+    "name": "Nugget Ayam 1kg",
+    "price": 22,
+    "unit": "pkt",
+    "stock": 65
   },
   {
-    "name": "kakaaka",
-    "price": 1000,
-    "code": "saas77",
-    "id": "p1768277987841"
+    "id": "p9",
+    "name": "Sosej Ayam (500g)",
+    "price": 9.5,
+    "unit": "pkt",
+    "stock": 5
+  },
+  {
+    "id": "p10",
+    "name": "Keropok Ikan",
+    "price": 15,
+    "unit": "pkt",
+    "stock": 30
   }
 ]

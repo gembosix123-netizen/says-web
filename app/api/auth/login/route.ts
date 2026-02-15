@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase';
 import crypto from 'crypto';
 
 // Hash password using SHA-256
@@ -9,15 +9,29 @@ function hashPassword(password: string): string {
 
 export async function POST(request: Request) {
   try {
+    if (!supabaseAdmin) {
+      console.error('Supabase admin client not available');
+      return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
+    }
+
     const body = await request.json();
     const { username, password } = body;
 
-    const users = await db.users.getAll();
-    console.log('[LOGIN] Available users:', users.map(u => ({ id: u.id, username: u.username })));
+    const { data: users, error } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('username', username);
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+
+    console.log('[LOGIN] Available users:', users?.map(u => ({ id: u.id, username: u.username })));
     
     // Try both plain text and hashed password for compatibility
     const hashedPassword = hashPassword(password);
-    const user = users.find((u) => u.username === username && (u.password === password || u.password === hashedPassword));
+    const user = users?.find((u) => u.username === username && (u.password === password || u.password === hashedPassword));
 
     console.log('[LOGIN] Login attempt:', { username, password, hashedPassword });
     console.log('[LOGIN] User found:', user ? { id: user.id, username: user.username } : 'None');
@@ -27,10 +41,10 @@ export async function POST(request: Request) {
     }
 
     // Create a simple session cookie
-    const response = NextResponse.json({ success: true, role: user.role, name: user.name, id: user.id });
+    const response = NextResponse.json({ success: true, role: user.role, name: user.name, id: user.id, branch: user.branch });
     
     // In a real app, use a secure token (JWT). For this prototype, we store user info in a cookie.
-    const sessionData = JSON.stringify({ id: user.id, role: user.role, name: user.name });
+    const sessionData = JSON.stringify({ id: user.id, role: user.role, name: user.name, branch: user.branch });
     
     response.cookies.set('session', sessionData, {
       httpOnly: true,

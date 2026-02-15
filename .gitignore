@@ -33,6 +33,14 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Firebase security files - NEVER commit
+firebase-service-account.json
+firebase-key.json
+
+# Firestore backups
+firestore-backup/
+backups/
+
 # vercel
 .vercel
 

@@ -43,13 +43,14 @@ interface SalesContextType {
   setLatestAudit: (audit: StockAudit | null) => void;
   loading: boolean;
   userRole: string | null;
+  userBranch: string | null;
   exchangeItems: { productId: string; quantity: number; reason: string }[];
   setExchangeItems: React.Dispatch<React.SetStateAction<{ productId: string; quantity: number; reason: string }[]>>;
 }
 
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
-export function SalesProvider({ children, initialRole }: { children: ReactNode, initialRole?: string }) {
+export function SalesProvider({ children, initialRole, initialBranch }: { children: ReactNode, initialRole?: string, initialBranch?: string }) {
   const [step, setStep] = useState<number>(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -62,6 +63,7 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
   const [latestAudit, setLatestAudit] = useState<StockAudit | null>(null);
   const [loading, setLoading] = useState(true);
   const [userRole] = useState<string | null>(initialRole || null);
+  const [userBranch] = useState<string | null>(initialBranch || null);
 
   const [payment, setPayment] = useState<PaymentDetails>({
     method: 'cash',
@@ -76,6 +78,12 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [exchangeItems, setExchangeItems] = useState<{ productId: string; quantity: number; reason: string }[]>([]);
 
+  const readJson = async (res: Response) => {
+    const text = await res.text();
+    if (!text) return null;
+    return JSON.parse(text);
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -85,11 +93,23 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
         fetch('/api/orders'),
         fetch('/api/sales')
       ]);
-      
-      if (custRes.ok) setCustomers(await custRes.json());
-      if (prodRes.ok) setProducts(await prodRes.json());
-      if (ordRes.ok) setOrders(await ordRes.json());
-      if (transRes.ok) setTransactions(await transRes.json());
+
+      if (custRes.ok) {
+        const data = await readJson(custRes);
+        setCustomers(Array.isArray(data) ? data : []);
+      }
+      if (prodRes.ok) {
+        const data = await readJson(prodRes);
+        setProducts(Array.isArray(data) ? data : []);
+      }
+      if (ordRes.ok) {
+        const data = await readJson(ordRes);
+        setOrders(Array.isArray(data) ? data : []);
+      }
+      if (transRes.ok) {
+        const data = await readJson(transRes);
+        setTransactions(Array.isArray(data) ? data : []);
+      }
     } catch (error) {
       console.error("Failed to fetch data", error);
     } finally {
@@ -101,13 +121,19 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
     fetchData();
     // Poll for status updates every 10 seconds
     const interval = setInterval(() => {
-        fetch('/api/sales').then(res => res.json()).then(setTransactions).catch(console.error);
+        fetch('/api/sales')
+          .then(async (res) => (res.ok ? await readJson(res) : null))
+          .then((data) => setTransactions(Array.isArray(data) ? data : []))
+          .catch(console.error);
     }, 10000);
     return () => clearInterval(interval);
   }, []);
 
   const refreshTransactions = () => {
-      fetch('/api/sales').then(res => res.json()).then(setTransactions).catch(console.error);
+      fetch('/api/sales')
+        .then(async (res) => (res.ok ? await readJson(res) : null))
+        .then((data) => setTransactions(Array.isArray(data) ? data : []))
+        .catch(console.error);
   };
 
   const saveStockAudit = async (items: { productId: string; productName: string; physicalStock: number }[]) => {
@@ -222,6 +248,7 @@ export function SalesProvider({ children, initialRole }: { children: ReactNode, 
         setLatestAudit,
         loading,
         userRole,
+        userBranch,
         exchangeItems,
         setExchangeItems
       }}

@@ -26,8 +26,16 @@ export default function VanLoadingManagement() {
       fetch('/api/users?role=Sales').then(res => res.json()),
       fetch('/api/products').then(res => res.json())
     ]).then(([userData, productData]) => {
-      setUsers(userData);
-      setProducts(productData);
+      // Ensure data is array, handle API response wrapping
+      const users = Array.isArray(userData) ? userData : (userData?.data || []);
+      const products = Array.isArray(productData) ? productData : (productData?.data || []);
+      
+      setUsers(users);
+      setProducts(products);
+    }).catch(err => {
+      console.error('Error loading data:', err);
+      setUsers([]);
+      setProducts([]);
     });
   }, []);
 
@@ -91,7 +99,14 @@ export default function VanLoadingManagement() {
             <Truck className="text-orange-500" /> Van Stock Loading
         </h2>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {users.length === 0 || products.length === 0 ? (
+          <div className="p-6 bg-slate-800/50 rounded-lg border border-slate-700 text-center text-slate-300">
+            <p>Loading staff and products...</p>
+            {users.length === 0 && <p className="text-sm text-slate-400">Available staff: {users.length}</p>}
+            {products.length === 0 && <p className="text-sm text-slate-400">Available products: {products.length}</p>}
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-6">
             {/* User Selection */}
             <div>
                 <label className="block text-sm text-slate-400 mb-2">Select Sales Staff</label>
@@ -139,6 +154,7 @@ export default function VanLoadingManagement() {
                             <Trash2 size={18} />
                         </button>
                     </div>
+
                 ))}
             </div>
 
@@ -146,6 +162,7 @@ export default function VanLoadingManagement() {
                 <Save size={20} /> Confirm Load
             </button>
         </form>
+        )}
       </div>
     </div>
   );

@@ -1,22 +1,51 @@
-import { db } from '@/lib/db';
+'use client';
+
+import { useState, useEffect } from 'react';
 import { Transaction, User, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
-import { Globe, TrendingUp, Users, ShoppingBag } from 'lucide-react';
+import { TrendingUp, Users, ShoppingBag, Globe, Filter } from 'lucide-react';
 
 import UserManagement from '@/components/features/admin/UserManagement';
 
-export const dynamic = 'force-dynamic';
+export default function GlobalMonitorPage() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [, setUsers] = useState<User[]>([]);
+  const [, setCustomers] = useState<Customer[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<'all' | 'Kota Kinabalu' | 'Kinabatangan'>('all');
+  const [loading, setLoading] = useState(true);
 
-export default async function GlobalMonitorPage() {
-  const transactions = (await db.transactions.getAll()) as Transaction[];
-  const users = (await db.users.getAll()) as User[];
-  const customers = (await db.customers.getAll()) as Customer[];
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [txRes, usersRes, customersRes] = await Promise.all([
+          fetch('/api/sales?branch=all'),
+          fetch('/api/users'),
+          fetch('/api/customers')
+        ]);
 
+        const txData = await txRes.json();
+        const usersData = await usersRes.json();
+        const customersData = await customersRes.json();
+
+        setTransactions(txData || []);
+        setUsers(usersData || []);
+        setCustomers(customersData || []);
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
+
+  // Calculate branch-specific metrics
   const kkTransactions = transactions.filter(t => t.branch === 'Kota Kinabalu');
   const kbTransactions = transactions.filter(t => t.branch === 'Kinabatangan');
 
-  const kkRevenue = kkTransactions.reduce((acc, t) => acc + t.total, 0);
-  const kbRevenue = kbTransactions.reduce((acc, t) => acc + t.total, 0);
+  const kkRevenue = kkTransactions.reduce((acc, t) => acc + (t.total || 0), 0);
+  const kbRevenue = kbTransactions.reduce((acc, t) => acc + (t.total || 0), 0);
 
   const kkOrders = kkTransactions.length;
   const kbOrders = kbTransactions.length;
@@ -25,17 +54,48 @@ export default async function GlobalMonitorPage() {
   const kbAgents = new Set(kbTransactions.map(t => t.salesmanId)).size;
 
   const totalRevenue = kkRevenue + kbRevenue;
+  
   const kkPercentage = totalRevenue > 0 ? (kkRevenue / totalRevenue) * 100 : 0;
   const kbPercentage = totalRevenue > 0 ? (kbRevenue / totalRevenue) * 100 : 0;
 
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="animate-pulse">
+          <div className="h-8 bg-slate-800 rounded w-1/3 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="h-64 bg-slate-800 rounded-3xl"></div>
+            <div className="h-64 bg-slate-800 rounded-3xl"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Globe className="text-blue-400" size={32} />
-            Global Monitor (Super Admin)
-        </h1>
-        <p className="text-slate-400">Comparative performance analysis: Kota Kinabalu vs Kinabatangan</p>
+      <div className="mb-8 flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+              <Globe className="text-blue-400" size={32} />
+              Global Monitor (Main Admin)
+          </h1>
+          <p className="text-slate-400">Comparative performance analysis: Kota Kinabalu vs Kinabatangan</p>
+        </div>
+        
+        {/* Branch Filter Toggle */}
+        <div className="flex items-center gap-2 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
+          <Filter className="text-slate-400" size={16} />
+          <select
+            value={selectedBranch}
+            onChange={(e) => setSelectedBranch(e.target.value as 'all' | 'Kota Kinabalu' | 'Kinabatangan')}
+            className="bg-transparent text-white text-sm border-none outline-none cursor-pointer"
+          >
+            <option value="all">All Branches</option>
+            <option value="Kota Kinabalu">Kota Kinabalu Only</option>
+            <option value="Kinabatangan">Kinabatangan Only</option>
+          </select>
+        </div>
       </div>
 
       {/* Main Stats Cards */}

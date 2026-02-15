@@ -1,0 +1,96 @@
+'use client';
+
+import React from 'react';
+import { LucideIcon } from 'lucide-react';
+import clsx from 'clsx';
+
+interface MetricCardProps {
+  title: string;
+  value: string | number;
+  unit?: string;
+  icon?: LucideIcon;
+  trend?: {
+    direction: 'up' | 'down' | 'neutral';
+    percentage: number;
+  };
+  status?: 'success' | 'warning' | 'danger' | 'neutral';
+  onClick?: () => void;
+  isLoading?: boolean;
+}
+
+export default function MetricCard({
+  title,
+  value,
+  unit,
+  icon: Icon,
+  trend,
+  status = 'neutral',
+  onClick,
+  isLoading = false,
+}: MetricCardProps) {
+  const statusColors = {
+    success: 'border-green-500/20 bg-green-500/5',
+    warning: 'border-yellow-500/20 bg-yellow-500/5',
+    danger: 'border-red-500/20 bg-red-500/5',
+    neutral: 'border-slate-700/50 bg-gradient-to-br from-slate-800/40 to-slate-900/40',
+  };
+
+  const trendColors = {
+    up: 'text-green-400',
+    down: 'text-red-400',
+    neutral: 'text-slate-400',
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      className={clsx(
+        'relative p-6 rounded-2xl border backdrop-blur-glass transition-all duration-300 overflow-hidden group',
+        statusColors[status],
+        onClick && 'cursor-pointer hover:border-slate-600 hover:-translate-y-1 hover:shadow-glass'
+      )}
+    >
+      {/* Glassmorphism effect background */}
+      <div className="absolute inset-0 bg-glass-effect pointer-events-none" />
+
+      {/* Gradient accent on hover */}
+      <div className="absolute -inset-1 bg-gradient-accent opacity-0 group-hover:opacity-5 blur transition-opacity duration-300 -z-10" />
+
+      <div className="relative z-10">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex-1">
+            <p className="text-sm font-medium text-slate-400 mb-2">{title}</p>
+            <div className="flex items-baseline gap-2">
+              {isLoading ? (
+                <div className="h-8 w-24 bg-slate-700/50 rounded animate-pulse" />
+              ) : (
+                <>
+                  <span className="text-3xl font-bold text-white">{value}</span>
+                  {unit && <span className="text-sm text-slate-500">{unit}</span>}
+                </>
+              )}
+            </div>
+          </div>
+
+          {Icon && (
+            <div className="p-3 rounded-xl bg-slate-700/30 group-hover:bg-says-accent/20 transition-colors duration-200">
+              <Icon size={24} className="text-says-accent" />
+            </div>
+          )}
+        </div>
+
+        {/* Trend */}
+        {trend && (
+          <div className={clsx('flex items-center gap-1 text-sm font-medium', trendColors[trend.direction])}>
+            <span>{trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '–'}</span>
+            <span>{Math.abs(trend.percentage)}%</span>
+          </div>
+        )}
+      </div>
+
+      {/* Hover border glow effect */}
+      <div className="absolute inset-0 rounded-2xl border border-says-accent/0 group-hover:border-says-accent/30 transition-all duration-300 pointer-events-none" />
+    </div>
+  );
+}

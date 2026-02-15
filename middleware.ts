@@ -44,9 +44,22 @@ export function middleware(request: NextRequest) {
   if (isLoginPage && session) {
     // Verify session validity before redirecting
     try {
-        JSON.parse(session.value);
+        // Try to decode if URL-encoded
+        let sessionValue = session.value;
+        try {
+          sessionValue = decodeURIComponent(session.value);
+        } catch (decodeError) {
+          // Not URL-encoded, use as is
+        }
+        
+        const sessionData = JSON.parse(sessionValue);
+        // Redirect founder (Main Admin) to /admin  
+        if (sessionData.role === 'Main Admin') {
+          return NextResponse.redirect(new URL('/admin', request.url));
+        }
         return NextResponse.redirect(new URL('/', request.url));
     } catch (e) {
+        console.error('[MIDDLEWARE] Invalid session on login page:', e);
         // Invalid session, let them stay on login page and maybe clear cookie
         const response = NextResponse.next();
         response.cookies.delete('session');
@@ -62,19 +75,48 @@ export function middleware(request: NextRequest) {
   // 3. Role-based access control for protected paths
   if (session) {
     try {
-      const sessionData = JSON.parse(session.value);
-      const { role } = sessionData;
-
-      if (pathname.startsWith('/admin') && role !== 'Admin') {
-         return NextResponse.redirect(new URL('/', request.url));
+      // Try to decode if URL-encoded
+      let sessionValue = session.value;
+      try {
+        sessionValue = decodeURIComponent(session.value);
+      } catch (decodeError) {
+        // Not URL-encoded, use as is
       }
       
-      if (pathname.startsWith('/sales') && role !== 'Sales' && role !== 'Admin') {
+      const sessionData = JSON.parse(sessionValue);
+      const { role, branch } = sessionData;
+
+      // Redirect Main Admin (founder) to /admin
+      if (role === 'Main Admin' && (pathname === '/' || pathname === '/dashboard')) {
+        return NextResponse.redirect(new URL('/admin', request.url));
+      }
+
+      if (pathname.startsWith('/admin')) {
+        if (role !== 'Admin' && role !== 'Main Admin') {
+          return NextResponse.redirect(new URL('/', request.url));
+        }
+
+        // Branch restrictions for Admins
+        if (role === 'Admin' && branch === 'Kinabatangan' && pathname.startsWith('/admin/kota-kinabalu')) {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+        if (role === 'Admin' && branch === 'Kota Kinabalu' && pathname.startsWith('/admin/kinabatangan')) {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+
+        // Global monitor only for Main Admin
+        if (pathname.startsWith('/admin/global-monitor') && role !== 'Main Admin') {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+      }
+      
+      if (pathname.startsWith('/sales') && role !== 'Sales' && role !== 'Admin' && role !== 'Main Admin') {
          return NextResponse.redirect(new URL('/', request.url));
       }
 
     } catch (e) {
       // Invalid session, force logout/login
+      console.error('[MIDDLEWARE] Invalid session error:', e);
       const response = NextResponse.redirect(new URL('/login', request.url));
       response.cookies.delete('session');
       return response;

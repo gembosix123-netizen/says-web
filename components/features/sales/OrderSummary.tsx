@@ -1,3 +1,4 @@
+"use client";
 import React from 'react';
 import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -5,13 +6,14 @@ import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Camera, Save, Upload } from '@/components/Icons';
 import Image from 'next/image';
+import { supabase } from '@/lib/supabase';
 
 export default function OrderSummary() {
   const { 
     selectedCustomer, cart, payment, calculateGrandTotal, 
     photoUrl, setPhotoUrl, 
     checkInTime, gpsLocation, setVisitedCustomers, setStep,
-    exchangeItems
+    exchangeItems, userBranch
   } = useSales();
   const { t } = useLanguage();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -23,17 +25,54 @@ export default function OrderSummary() {
     }
 
     setIsSubmitting(true);
-    const payload = {
+    let proofPhotoUrl = null;
+
+    // Upload photo to Supabase Storage if exists
+    if (photoUrl && photoUrl.startsWith('data:')) {
+      try {
+        const response = await fetch(photoUrl);
+        const blob = await response.blob();
+        const filename = `proof_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('sales-receipts')
+          .upload(filename, blob, { cacheControl: '3600', upsert: false });
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw new Error('Failed to upload image');
+        }
+
+        // Get public URL
+        const { data: publicUrlData } = supabase.storage
+          .from('sales-receipts')
+          .getPublicUrl(filename);
+        
+        proofPhotoUrl = publicUrlData.publicUrl;
+      } catch (error) {
+        console.error('Image upload failed:', error);
+        alert(t('error_image_upload') || 'Failed to upload proof photo. Sale will be saved without image.');
+      }
+    }
+
+    const payload: Record<string, unknown> = {
+      branch: userBranch || 'Unknown',
+      total_amount: calculateGrandTotal(),
+      amount: calculateGrandTotal(),
       checkInTime: checkInTime?.toISOString() || null,
-      gps: gpsLocation,
-      customer: selectedCustomer,
-      items: cart.map((i) => ({ id: i.id, name: i.name, unit: i.unit, qty: i.quantity, price: i.price })),
-      exchangeItems: exchangeItems || [], // Add this
-      subtotal: calculateGrandTotal(), // Using same as total for now
-      payment,
-      total: calculateGrandTotal(),
-      signatureUrl: null, // Removed signature
-      photoUrl,
+      gps_lat: gpsLocation?.lat || null,
+      gps_long: gpsLocation?.lon || null,
+      customer_id: selectedCustomer?.id || null,
+      customer_name: selectedCustomer?.name || null,
+      items: cart.map((i) => ({ id: i.id, name: i.name, unit: i.unit, quantity: i.quantity, price: i.price })),
+      exchangeItems: exchangeItems || [],
+      subtotal: calculateGrandTotal(),
+      payment_method: payment.method,
+      return_amount: payment.returnAmount || 0,
+      exchange_amount: payment.exchangeAmount || 0,
+      foc_amount: payment.focAmount || 0,
+      receipt_url: proofPhotoUrl,
+      proof_photo_url: proofPhotoUrl,
     };
 
     try {

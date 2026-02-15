@@ -49,5 +49,27 @@
     "customerId": "1766634932613",
     "items": [],
     "createdAt": "2026-01-18T05:22:58.082Z"
+  },
+  {
+    "id": "audit_1770532083401_bn40dmq3r",
+    "customerId": "c1768276511857",
+    "items": [
+      {
+        "productId": "p1",
+        "productName": "Meatball 1kg",
+        "physicalStock": 45345
+      },
+      {
+        "productId": "p2",
+        "productName": "Meatball 800g",
+        "physicalStock": 45346
+      },
+      {
+        "productId": "p4",
+        "productName": "Burger Daging (10pcs)",
+        "physicalStock": 3.4534534533543455e+25
+      }
+    ],
+    "createdAt": "2026-02-08T06:28:03.401Z"
   }
 ]

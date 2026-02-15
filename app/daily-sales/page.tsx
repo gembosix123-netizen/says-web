@@ -9,21 +9,31 @@ import { Transaction } from '@/types';
 export default function DailySalesPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userBranch, setUserBranch] = useState('');
+  const [userRole, setUserRole] = useState('');
 
   useEffect(() => {
-    async function fetchTransactions() {
+    async function fetchData() {
       try {
-        const response = await fetch('/api/sales');
+        // Get user info first
+        const userResponse = await fetch('/api/auth/me');
+        const userData = await userResponse.json();
+        setUserBranch(userData.branch);
+        setUserRole(userData.role);
+
+        // Fetch transactions with branch filtering
+        const branchParam = userData.role === 'Main Admin' ? 'all' : userData.branch;
+        const response = await fetch(`/api/sales?branch=${branchParam}`);
         const data = await response.json();
-        setTransactions(data.data || []);
+        setTransactions(data || []);
       } catch (error) {
-        console.error('Failed to fetch transactions:', error);
+        console.error('Failed to fetch data:', error);
       } finally {
         setLoading(false);
       }
     }
     
-    fetchTransactions();
+    fetchData();
   }, []);
 
   // Calculate real-time stats

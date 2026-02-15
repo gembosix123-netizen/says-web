@@ -1,43 +1,239 @@
-import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { Product } from '@/types';
+/**
+ * Products API Endpoint
+ * ====================
+ * 
+ * GET  /api/products     - Get all products
+ * POST /api/products     - Create product (Admin+)
+ * PUT  /api/products/:id - Update product (Admin+)
+ * DELETE /api/products/:id - Delete product (Main Admin only)
+ */
 
-export async function GET() {
-  const products = await db.products.getAll();
-  return NextResponse.json(products);
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase';
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+function validateProductData(data: any): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!data.name || typeof data.name !== 'string') {
+    errors.push('Product name is required');
+  }
+
+  if (data.price === undefined || typeof data.price !== 'number' || data.price < 0) {
+    errors.push('Valid product price is required');
+  }
+
+  if (!data.sku || typeof data.sku !== 'string') {
+    errors.push('SKU is required');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
 }
 
-export async function POST(request: Request) {
+// ============================================================================
+// GET HANDLER
+// ============================================================================
+
+export async function GET(request: NextRequest) {
   try {
-    const data = await request.json();
-    const newProduct: Product = {
-        ...data,
-        id: data.id || 'p' + Date.now().toString(),
-    };
-    await db.products.save(newProduct);
-    return NextResponse.json({ success: true, product: newProduct });
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
+    const searchParams = request.nextUrl.searchParams;
+    const id = searchParams.get('id');
+
+    // Get single product
+    if (id) {
+      const { data: product, error } = await supabaseAdmin
+        .from('products')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error || !product) {
+        return NextResponse.json(
+          { error: 'Product not found' },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json(product);
+    }
+
+    // Get all products
+    const { data: products, error } = await supabaseAdmin
+      .from('products')
+      .select('*')
+      .eq('is_active', true);
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch products' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(products || []);
+
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to save product' }, { status: 500 });
+    console.error('Error fetching products:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
 
-export async function PUT(request: Request) {
-    try {
-        const data = await request.json();
-        await db.products.save(data);
-        return NextResponse.json({ success: true, product: data });
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to update product' }, { status: 500 });
+// ============================================================================
+// POST HANDLER (Create)
+// ============================================================================
+
+export async function POST(request: NextRequest) {
+  try {
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
+
+    const body = await request.json();
+
+    // Validate product data
+    const validation = validateProductData(body);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      );
+    }
+
+    // Create product
+    const { data, error } = await supabaseAdmin
+      .from('products')
+      .insert([
+        {
+          id: body.id || `prod_${Date.now()}`,
+          name: body.name,
+          code: body.code || body.sku,
+          price: body.price,
+          unit: body.unit || 'pkt',
+          is_active: true,
+        },
+      ])
+      .select();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json(
+        { error: 'Failed to create product' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        message: 'Product created successfully',
+        productId: data?.[0]?.id,
+      },
+      { status: 201 }
+    );
+
+  } catch (error) {
+    console.error('Error creating product:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
 }
 
-export async function DELETE(request: Request) {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
-    
-    if (await db.products.delete(id)) {
-        return NextResponse.json({ success: true });
+// ============================================================================
+// PUT HANDLER (Update)
+// ============================================================================
+
+export async function PUT(request: NextRequest) {
+  try {
+    // TODO: Implement authentication check for Admin+ role
+    const body = await request.json();
+    const productId = body.id || body.productId;
+
+    if (!productId) {
+      return NextResponse.json(
+        { error: 'Product ID is required' },
+        { status: 400 }
+      );
     }
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+    // Check product exists
+    const product = await getProduct(productId);
+    if (!product) {
+      return NextResponse.json(
+        { error: 'Product not found' },
+        { status: 404 }
+      );
+    }
+
+    // Update product
+    await updateProduct(productId, body);
+
+    return NextResponse.json(
+      { message: 'Product updated successfully' },
+      { status: 200 }
+    );
+
+  } catch (error) {
+    console.error('Error updating product:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+// ============================================================================
+// DELETE HANDLER
+// ============================================================================
+
+export async function DELETE(request: NextRequest) {
+  try {
+    // TODO: Implement authentication check for Main Admin only
+    const searchParams = request.nextUrl.searchParams;
+    const productId = searchParams.get('id');
+
+    if (!productId) {
+      return NextResponse.json(
+        { error: 'Product ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Check product exists
+    const product = await getProduct(productId);
+    if (!product) {
+      return NextResponse.json(
+        { error: 'Product not found' },
+        { status: 404 }
+      );
+    }
+
+    // Delete product
+    await deleteProduct(productId);
+
+    return NextResponse.json(
+      { message: 'Product deleted successfully' },
+      { status: 200 }
+    );
+
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
 }

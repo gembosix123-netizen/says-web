@@ -20,7 +20,7 @@ export default async function AdminPage() {
     <div className="max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-white">Overview</h1>
-        <p className="text-slate-400">Welcome back, here's what's happening with your field sales today.</p>
+        <p className="text-slate-400">Welcome back, here&apos;s what&apos;s happening with your field sales today.</p>
       </div>
       
       <AnalyticsDashboard 

@@ -31,7 +31,8 @@ export default function Login() {
         localStorage.setItem('user', JSON.stringify({ 
           id: data.id,
           name: data.name, 
-          role: data.role 
+          role: data.role,
+          branch: data.branch 
         }));
         
         // Redirect based on role

@@ -18,9 +18,13 @@ export default function LoginPage() {
     if (user) {
         try {
             const userData = JSON.parse(user);
-            if (userData.role === 'Admin') router.push('/admin');
+            if (userData.role === 'Main Admin') router.push('/admin/founder');
+            else if (userData.role === 'Admin') router.push('/admin');
             else router.push('/dashboard');
-        } catch (e) {}
+        } catch (e) {
+            // Invalid JSON in localStorage, clear it
+            localStorage.removeItem('user');
+        }
     }
   }, [router]);
 
@@ -42,10 +46,13 @@ export default function LoginPage() {
         localStorage.setItem('user', JSON.stringify({ 
           id: data.id,
           name: data.name, 
-          role: data.role 
+          role: data.role,
+          branch: data.branch 
         }));
         
-        if (data.role === 'Admin') {
+        if (data.role === 'Main Admin') {
+            router.push('/admin/founder'); 
+        } else if (data.role === 'Admin') {
             router.push('/admin'); 
         } else {
             router.push('/dashboard');
@@ -72,16 +79,16 @@ export default function LoginPage() {
       <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-xl border border-slate-800/50 p-8 rounded-2xl shadow-2xl relative z-10">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-6">
-             <div className="w-32 h-32 relative flex items-center justify-center">
-                 <Image 
-                    src="/logo.svg" 
-                    alt="Yanong's Logo" 
-                    width={150} 
-                    height={150} 
-                    className="object-contain"
-                    priority
-                 />
-             </div>
+            <div className="w-32 h-32 rounded-full overflow-hidden ring-2 ring-white/15 shadow-lg shadow-black/40 bg-white/5">
+              <Image
+                src="/unnamed.jpg"
+                alt="Yanong's Logo"
+                width={128}
+                height={128}
+                className="w-full h-full object-cover"
+                priority
+              />
+            </div>
           </div>
           <h1 className="text-3xl font-bold text-white tracking-tight">SISTEM SAYS</h1>
           <p className="text-slate-400 mt-2">Sales & Audit Management System</p>

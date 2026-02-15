@@ -1,26 +1,47 @@
 [
   {
-    "id": "u2",
-    "username": "sales1",
-    "password": "password",
-    "role": "Sales",
-    "name": "Sales Ali",
-    "commissionRate": 0.04
-  },
-  {
-    "id": "u3",
-    "username": "allan",
-    "password": "Allan123",
-    "role": "Sales",
-    "name": "Allan"
-  },
-  {
-    "id": "u1769659646010",
-    "username": "admin",
-    "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
-    "role": "Admin",
-    "name": "admn kk",
+    "id": "u_founder",
+    "username": "founder",
+    "password": "Founder2024!",
+    "role": "Main Admin",
+    "name": "Main Admin",
     "assignedShopId": null,
     "branch": "HQ"
+  },
+  {
+    "id": "u_admin_kk",
+    "username": "admin_kk",
+    "password": "AdminKK2024!",
+    "role": "Admin",
+    "name": "Admin Kota Kinabalu",
+    "assignedShopId": null,
+    "branch": "Kota Kinabalu"
+  },
+  {
+    "id": "u_admin_kinabatangan",
+    "username": "admin_kinabatangan",
+    "password": "AdminKB2024!",
+    "role": "Admin",
+    "name": "Admin Kinabatangan",
+    "assignedShopId": null,
+    "branch": "Kinabatangan"
+  },
+  {
+    "id": "u_sales_kk",
+    "username": "sales_kk",
+    "password": "SalesKK2024!",
+    "role": "Sales",
+    "name": "Sales Kota Kinabalu",
+    "commissionRate": 0.04,
+    "branch": "Kota Kinabalu"
+  },
+  {
+    "id": "u_sales_kinabatangan",
+    "username": "sales_kinabatangan",
+    "password": "SalesKB2024!",
+    "role": "Sales",
+    "name": "Sales Kinabatangan",
+    "commissionRate": 0.04,
+    "branch": "Kinabatangan"
   }
 ]

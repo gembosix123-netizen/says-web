@@ -29,6 +29,8 @@ export interface Product {
   price: number;
   unit: string;
   stock: number;
+  sku?: string;
+  code?: string;
 }
 
 export interface Customer {
@@ -40,6 +42,14 @@ export interface Customer {
   lon?: number;
   sales_id?: string;
   branch?: string;
+}
+
+export interface Store {
+  id: string;
+  name: string;
+  address?: string;
+  branch?: string; // e.g., 'Kota Kinabalu' | 'Kinabatangan'
+  createdAt?: string;
 }
 
 export interface CartItem extends Product {
@@ -62,6 +72,13 @@ export interface Order {
 
 export type OrderStatus = 'Pending' | 'Confirmed' | 'Processing' | 'Completed' | 'Cancelled';
 
+export interface PaymentData {
+  method: 'cash' | 'transfer' | 'credit';
+  returnAmount?: number;
+  exchangeAmount?: number;
+  focAmount?: number;
+}
+
 export interface Transaction {
   id: string;
   checkInTime: string | null;
@@ -69,7 +86,7 @@ export interface Transaction {
   customer: Customer | null;
   items: CartItem[];
   subtotal: number;
-  payment: any;
+  payment: PaymentData | null;
   total: number;
   signatureUrl: string | null;
   photoUrl: string | null;

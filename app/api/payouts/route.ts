@@ -3,11 +3,11 @@ import { db } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const payouts = await db.payouts.getAll();
     return NextResponse.json({ success: true, data: payouts });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ success: false, error: 'Failed to fetch payouts' }, { status: 500 });
   }
 }
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 
     await db.payouts.save(newPayout);
     return NextResponse.json({ success: true, data: newPayout });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ success: false, error: 'Failed to create payout' }, { status: 500 });
   }
 }

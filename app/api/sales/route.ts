@@ -1,140 +1,282 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { Transaction, VanInventory, Customer } from '@/types';
+import { supabaseAdmin } from '@/lib/supabase';
 
-export async function GET() {
-  const transactions = (await db.transactions.getAll()) as Transaction[];
-  // Sort by createdAt desc
-  const sorted = transactions.sort((a, b) => {
-    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
-    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : (b.checkInTime ? new Date(b.checkInTime).getTime() : 0);
-    return timeB - timeA;
-  });
-  return NextResponse.json(sorted);
+const TABLE_KOTA = 'sales_kota_kinabalu';
+const TABLE_KIN = 'sales_kinabatangan';
+
+// Get current user from session cookie
+async function getCurrentUser(request: Request) {
+  try {
+    const session = (request as any).cookies.get('session');
+    if (!session) return null;
+    const data = JSON.parse(session.value);
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+function generateInvoice(branchCode = 'XX') {
+  const timestamp = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return `INV-${branchCode.toUpperCase().replace(/\s+/g, '_')}-${timestamp}-${rand}`;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    // Check authorization
+    const currentUser = await getCurrentUser(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (!supabaseAdmin) {
+      console.error('Supabase admin client not available');
+      return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    let branch = searchParams.get('branch');
+
+    // Branch access control
+    // If Admin, only allow their own branch
+    if (currentUser.role === 'Admin') {
+      branch = currentUser.branch;
+    } else if (currentUser.role === 'Sales') {
+      // Sales can only see their own data - filter by user_id
+      branch = currentUser.branch;
+    }
+    // Main Admin can query any branch (respects branch param if provided)
+
+    let salesAll: any[] = [];
+
+    if (!branch || branch === 'all') {
+      // Only Main Admin can fetch all
+      if (currentUser.role !== 'Main Admin') {
+        return NextResponse.json({ error: 'Unauthorized - only Main Admin can view all sales' }, { status: 403 });
+      }
+      const [{ data: a }, { data: b }] = await Promise.all([
+        supabaseAdmin.from(TABLE_KOTA).select('*').order('created_at', { ascending: false }),
+        supabaseAdmin.from(TABLE_KIN).select('*').order('created_at', { ascending: false }),
+      ]);
+      salesAll = (a || []).concat(b || []);
+    } else if (branch === 'Kota Kinabalu' || branch.toLowerCase().includes('kota')) {
+      // Check access
+      if (currentUser.role === 'Admin' && currentUser.branch !== 'Kota Kinabalu') {
+        return NextResponse.json({ error: 'Unauthorized - you cannot access other branches' }, { status: 403 });
+      }
+      const { data } = await supabaseAdmin.from(TABLE_KOTA).select('*').order('created_at', { ascending: false });
+      salesAll = data || [];
+    } else if (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) {
+      // Check access
+      if (currentUser.role === 'Admin' && currentUser.branch !== 'Kinabatangan') {
+        return NextResponse.json({ error: 'Unauthorized - you cannot access other branches' }, { status: 403 });
+      }
+      const { data } = await supabaseAdmin.from(TABLE_KIN).select('*').order('created_at', { ascending: false });
+      salesAll = data || [];
+    } else {
+      // Unknown branch -> return empty
+      salesAll = [];
+    }
+
+    const transactions = salesAll.map((sale) => ({
+      id: sale.id,
+      invoice: sale.invoice,
+      total: parseFloat(sale.total_amount ?? sale.amount ?? 0),
+      branch: sale.branch,
+      items: sale.items ?? (sale.item_name ? [{ name: sale.item_name, quantity: 1, price: parseFloat(sale.amount || 0) }] : []),
+      status: 'Completed',
+      createdAt: sale.created_at,
+      customer: { id: sale.customer_id || null, name: sale.customer_name || null },
+      salesmanId: sale.salesman_id || null,
+      payment: { method: sale.payment_method || 'cash', amount: parseFloat(sale.total_amount ?? sale.amount ?? 0) }
+    }));
+
+    return NextResponse.json(transactions);
+  } catch (error) {
+    console.error('Error in GET /api/sales:', error);
+    return NextResponse.json({ error: 'Failed to fetch sales data' }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const session = request.cookies.get('session');
-    let userId = '';
-    if (session) {
-      try {
-        userId = JSON.parse(session.value).id;
-      } catch (e) {}
+    // Check authorization
+    const currentUser = await getCurrentUser(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const data = await request.json();
-    const newTransaction: Transaction = {
-        ...data,
-        id: Date.now().toString(),
-        salesmanId: userId,
-        status: 'Completed',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    // Only Sales and Admin can create sales
+    if (currentUser.role !== 'Sales' && currentUser.role !== 'Admin') {
+      return NextResponse.json({ error: 'Unauthorized - only sales staff and admin can create sales' }, { status: 403 });
+    }
+
+    if (!supabaseAdmin) {
+      console.error('Supabase admin client not available');
+      return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
+    }
+
+    const body = await request.json();
+    let branch = body.branch || currentUser.branch; // Default to user's branch
+
+    // Ensure user can only create sales for their own branch
+    if (currentUser.role === 'Sales') {
+      branch = currentUser.branch;
+    } else if (currentUser.role === 'Admin') {
+      // Admin can create sales for their branch only
+      if (body.branch && body.branch !== currentUser.branch) {
+        return NextResponse.json({ error: 'You can only create sales for your own branch' }, { status: 403 });
+      }
+      branch = currentUser.branch;
+    }
+
+    const target = (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) ? TABLE_KIN : TABLE_KOTA;
+
+    const invoice = body.invoice || generateInvoice(branch.replace(/\s+/g, '_'));
+
+    const totalAmount = body.total_amount ?? body.total ?? body.amount ?? 0;
+    const paymentMethod = body.payment_method || 'cash';
+    const isCredit = paymentMethod === 'credit';
+
+    const saleData: Record<string, any> = {
+      invoice,
+      branch,
+      total_amount: totalAmount,
+      amount: totalAmount,
+      items: body.items ?? [],
+      item_name: Array.isArray(body.items) && body.items.length > 0 ? body.items[0].name : body.item_name || 'Sale Item',
+      customer_name: body.customer_name || null,
+      customer_id: body.customer_id || null,
+      salesman_id: currentUser.id,  // Track who made the sale
+      salesman_name: currentUser.name || currentUser.username || null,
+      check_in_time: body.checkInTime || null,
+      gps_lat: body.gps_lat ?? null,
+      gps_long: body.gps_long ?? null,
+      payment_method: paymentMethod,
+      payment_status: isCredit ? 'pending' : 'paid',  // Track payment status
+      return_amount: body.return_amount || 0,
+      exchange_amount: body.exchange_amount || 0,
+      foc_amount: body.foc_amount || 0,
+      proof_photo_url: body.receipt_url ?? body.proof_photo_url ?? null,
+      created_at: new Date().toISOString()
     };
-    
-    // 1. Validate and Deduct Van Stock
-    if (userId) {
-        // Fetch User to get Branch info
-        const user = await db.users.getById(userId);
-        if (user && user.branch) {
-            newTransaction.branch = user.branch;
-        }
 
-        // Fix: Use correct ID format 'van_userId'
-        const vanInv = (await db.vanInventories.getById(`van_${userId}`)) as VanInventory | null;
-        if (!vanInv) {
-             return NextResponse.json({ error: 'Van inventory not found for user' }, { status: 400 });
-        }
+    const { data: sale, error } = await supabaseAdmin
+      .from(target)
+      .insert(saleData)
+      .select()
+      .single();
 
-        // Verify stock availability
-        for (const item of newTransaction.items) {
-            // Fix: Access items as Record<string, number>
-            const currentQty = vanInv.items[item.id] || 0;
-            if (currentQty < item.quantity) {
-                return NextResponse.json({ 
-                    error: `Insufficient van stock for product ID: ${item.id}. Available: ${currentQty}` 
-                }, { status: 400 });
-            }
-        }
-
-        // Deduct Sales Items
-        for (const item of newTransaction.items) {
-            const currentQty = vanInv.items[item.id] || 0;
-            vanInv.items[item.id] = Math.max(0, currentQty - item.quantity);
-        }
-        
-        // Deduct Exchange Items (Replaced with new stock from van)
-        if (newTransaction.exchangeItems) {
-            for (const item of newTransaction.exchangeItems) {
-                const currentQty = vanInv.items[item.productId] || 0;
-                
-                if (currentQty < item.quantity) {
-                        return NextResponse.json({ 
-                        error: `Insufficient van stock for exchange item ID: ${item.productId}` 
-                    }, { status: 400 });
-                }
-                vanInv.items[item.productId] = Math.max(0, currentQty - item.quantity);
-            }
-        }
-
-        vanInv.lastUpdated = new Date().toISOString();
-        await db.vanInventories.save(vanInv);
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json({ error: 'Failed to create sale', details: error.message }, { status: 500 });
     }
 
-    // 2. Save Transaction
-    await db.transactions.save(newTransaction);
+    // Update customer outstanding balance if credit payment
+    if (isCredit && body.customer_id) {
+      try {
+        // Get current outstanding balance
+        const { data: customer } = await supabaseAdmin
+          .from('customers')
+          .select('outstandingBalance')
+          .eq('id', body.customer_id)
+          .single();
 
-    // 3. Update Customer Outstanding Balance (If credit/bill-to-bill or partial payment)
-    if (newTransaction.customer) {
-        const customer = (await db.customers.getById(newTransaction.customer.id)) as Customer | null;
-        if (customer) {
-            // Logic: Outstanding += Total - PaidAmount
-            // Assuming 'payment.method' handles logic elsewhere, but here we can track debt
-            // For simplicity, if payment method is NOT cash, or if there's logic, adjust here.
-            // Current requirement: "Payment Mode: Tambah pilihan cara bayaran: Cash atau Bill-to-Bill (Invois)."
-            
-            // If Bill-to-Bill (Credit), add to outstanding
-            // If Cash, assume paid in full unless partial logic exists (not in current scope detail)
-            // But let's assume 'credit' method means full debt.
-            
-            if (newTransaction.payment.method === 'credit') {
-                customer.outstandingBalance += newTransaction.total;
-                await db.customers.save(customer);
-            }
-        }
+        const currentBalance = customer?.outstandingBalance || 0;
+        const newBalance = currentBalance + totalAmount;
+
+        // Update customer's outstanding balance
+        await supabaseAdmin
+          .from('customers')
+          .update({ outstandingBalance: newBalance })
+          .eq('id', body.customer_id);
+          
+        console.log(`Updated customer ${body.customer_id} outstanding: ${currentBalance} -> ${newBalance}`);
+      } catch (updateErr) {
+        console.error('Failed to update customer outstanding balance:', updateErr);
+        // Don't fail the sale, just log the error
+      }
     }
 
-    return NextResponse.json({ success: true, id: newTransaction.id });
+    const transaction = {
+      id: sale.id,
+      invoice: sale.invoice,
+      total: parseFloat((sale.total_amount ?? sale.amount ?? 0) as any),
+      branch: sale.branch,
+      items: sale.items ?? [{ name: sale.item_name, quantity: 1, price: parseFloat((sale.amount ?? 0) as any) }],
+      status: isCredit ? 'Pending Payment' : 'Completed',
+      paymentStatus: sale.payment_status,
+      createdAt: sale.created_at,
+      customer: { id: sale.customer_id, name: sale.customer_name },
+      salesmanId: sale.salesman_id,
+      salesmanName: sale.salesman_name,
+      proofPhotoUrl: sale.proof_photo_url ?? sale.receipt_url
+    };
+
+    return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
-    console.error("Sales Error:", error);
-    return NextResponse.json({ error: 'Failed to save transaction' }, { status: 500 });
+    console.error('Error in POST /api/sales:', error);
+    return NextResponse.json({ error: 'Failed to create sale' }, { status: 500 });
   }
 }
 
-export async function PUT(request: NextRequest) {
-    try {
-        const data = await request.json();
-        const { id, ...updates } = data;
-        
-        if (!id) {
-            return NextResponse.json({ error: 'ID required' }, { status: 400 });
-        }
-
-        const existing = (await db.transactions.getById(id)) as Transaction | null;
-        if (!existing) {
-             return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
-        }
-
-        const updated: Transaction = {
-            ...existing,
-            ...updates,
-            updatedAt: new Date().toISOString()
-        };
-
-        await db.transactions.save(updated);
-        return NextResponse.json({ success: true, data: updated });
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to update transaction' }, { status: 500 });
+export async function DELETE(request: NextRequest) {
+  try {
+    // Check authorization
+    const currentUser = await getCurrentUser(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Only Admin and Main Admin can delete sales
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+      return NextResponse.json({ error: 'Unauthorized - only admin can delete sales' }, { status: 403 });
+    }
+
+    if (!supabaseAdmin) {
+      console.error('Supabase admin client not available');
+      return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    let branch = searchParams.get('branch');
+
+    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+    // Branch access control
+    if (currentUser.role === 'Admin') {
+      branch = currentUser.branch; // Admin can only delete from their branch
+    }
+
+    const target = (branch && (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina'))) ? TABLE_KIN : TABLE_KOTA;
+
+    // Verify the sale exists in the correct branch before deleting
+    const { data: sale, error: fetchError } = await supabaseAdmin
+      .from(target)
+      .select('branch')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !sale) {
+      return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
+    }
+
+    // Double check Admin can only delete from their branch
+    if (currentUser.role === 'Admin' && sale.branch !== currentUser.branch) {
+      return NextResponse.json({ error: 'You cannot delete sales from other branches' }, { status: 403 });
+    }
+
+    const { error } = await supabaseAdmin.from(target).delete().eq('id', id);
+    if (error) {
+      console.error('Supabase error deleting sale:', error);
+      return NextResponse.json({ error: 'Failed to delete sale' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error in DELETE /api/sales:', error);
+    return NextResponse.json({ error: 'Failed to delete sale' }, { status: 500 });
+  }
 }

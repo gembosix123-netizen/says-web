@@ -153,7 +153,81 @@ const dictionary: Translations = {
   top_products: { ms: 'Top 5 Produk Terlaris', en: 'Top 5 Best Selling Products' },
   top_agents: { ms: 'Top Sales Agent', en: 'Top Sales Agents' },
   sales_trend: { ms: 'Trend Jualan', en: 'Sales Trend' },
-  low_stock_alerts: { ms: 'Amaran Stok Rendah', en: 'Low Stock Alerts' }
+  low_stock_alerts: { ms: 'Amaran Stok Rendah', en: 'Low Stock Alerts' },
+
+  // Monthly Reports
+  monthly_reports: { ms: 'Laporan Bulanan', en: 'Monthly Reports' },
+  sales_analysis: { ms: 'Analisis jualan terperinci dan metrik prestasi mengikut cawangan', en: 'Detailed sales analysis and performance metrics by branch' },
+  select_month: { ms: 'Pilih Bulan', en: 'Select Month' },
+  select_branch: { ms: 'Pilih Cawangan', en: 'Select Branch' },
+  all_branches: { ms: 'Semua Cawangan', en: 'All Branches' },
+  total_revenue: { ms: 'Jumlah Hasil', en: 'Total Revenue' },
+  avg_transaction: { ms: 'Transaksi Purata', en: 'Avg Transaction' },
+  active_branches: { ms: 'Cawangan Aktif', en: 'Active Branches' },
+  loading_report: { ms: 'Memuatkan data laporan...', en: 'Loading report data...' },
+  no_data_available: { ms: 'Tiada data tersedia untuk bulan dan cawangan ini.', en: 'No data available for this month and branch.' },
+  daily_sales_trend: { ms: 'Trend Jualan Harian', en: 'Daily Sales Trend' },
+  top_products_chart: { ms: 'Produk Terlaris', en: 'Top Products' },
+  branch_summary: { ms: 'Ringkasan Cawangan', en: 'Branch Summary' },
+  revenue: { ms: 'Hasil', en: 'Revenue' },
+  transactions: { ms: 'Transaksi', en: 'Transactions' },
+  quantity: { ms: 'Kuantiti', en: 'Quantity' },
+  export_pdf: { ms: 'Eksport PDF', en: 'Export PDF' },
+  generating: { ms: 'Menjana...', en: 'Generating...' },
+
+  // User Management
+  user_management: { ms: 'Pengurusan Pengguna', en: 'User Management' },
+  register_user: { ms: 'Daftarkan Pengguna Baru', en: 'Register New User' },
+  full_name: { ms: 'Nama Penuh', en: 'Full Name' },
+  confirm_password: { ms: 'Sahkan Kata Laluan', en: 'Confirm Password' },
+  password_must_match: { ms: 'Kata laluan mesti sama', en: 'Passwords must match' },
+  user_role: { ms: 'Peranan Pengguna', en: 'User Role' },
+  admin_role: { ms: 'Admin', en: 'Admin' },
+  sales_role: { ms: 'Sales', en: 'Sales' },
+  user_branch: { ms: 'Cawangan', en: 'Branch' },
+  kota_kinabalu: { ms: 'Kota Kinabalu', en: 'Kota Kinabalu' },
+  kinabatangan: { ms: 'Kinabatangan', en: 'Kinabatangan' },
+  hq: { ms: 'Ibu Pejabat', en: 'HQ' },
+  register_button: { ms: 'Daftar Pengguna', en: 'Register User' },
+  user_list: { ms: 'Senarai Pengguna', en: 'User List' },
+  joined_date: { ms: 'Tarikh Bergabung', en: 'Joined Date' },
+  edit_delete: { ms: 'Kemaskini / Padam', en: 'Edit / Delete' },
+  branch_access_warning: { ms: 'Anda hanya boleh mengakses pengguna untuk cawangan anda sendiri.', en: 'You can only access users for your own branch.' },
+  user_created_success: { ms: 'Pengguna berjaya didaftarkan!', en: 'User registered successfully!' },
+  user_create_failed: { ms: 'Gagal mendaftarkan pengguna.', en: 'Failed to register user.' },
+  user_deleted_success: { ms: 'Pengguna berjaya dihapuskan.', en: 'User deleted successfully.' },
+  user_delete_failed: { ms: 'Gagal menghapuskan pengguna.', en: 'Failed to delete user.' },
+  confirm_delete: { ms: 'Adakah anda pasti untuk menghapuskan pengguna ini?', en: 'Are you sure you want to delete this user?' },
+
+  // Admin Navigation & Headers
+  admin_section: { ms: 'Bahagian Admin', en: 'Admin Section' },
+  dashboard: { ms: 'Papan Pemuka', en: 'Dashboard' },
+  reports: { ms: 'Laporan', en: 'Reports' },
+  settings: { ms: 'Tetapan', en: 'Settings' },
+  logout: { ms: 'Log Keluar', en: 'Logout' },
+  user_info: { ms: 'Info Pengguna', en: 'User Info' },
+  logged_in_as: { ms: 'Log masuk sebagai:', en: 'Logged in as:' },
+  admin_panel: { ms: 'Panel Admin', en: 'Admin Panel' },
+  founder_dashboard: { ms: 'Papan Pemuka Pengasas', en: 'Founder Dashboard' },
+  branch: { ms: 'Cawangan', en: 'Branch' },
+  role: { ms: 'Peranan', en: 'Role' },
+  main_admin: { ms: 'Admin Utama', en: 'Main Admin' },
+  store_management: { ms: 'Pengurusan Kedai', en: 'Store Management' },
+  product_management: { ms: 'Pengurusan Produk', en: 'Product Management' },
+  sales_history: { ms: 'Sejarah Jualan', en: 'Sales History' },
+  audits: { ms: 'Audit', en: 'Audits' },
+  commissions: { ms: 'Komisen', en: 'Commissions' },
+
+  // Navigation & Admin Section Labels
+  overview: { ms: 'Gambaran Keseluruhan', en: 'Overview' },
+  global_monitor: { ms: 'Pemantau Global', en: 'Global Monitor' },
+  van_loading: { ms: 'Muatan Van', en: 'Van Loading' },
+  staff_mgmt: { ms: 'Pengurusan Kakitangan', en: 'Staff Management' },
+  database_nav: { ms: 'Pangkalan Data', en: 'Database' },
+
+  // Additional Admin & User Info
+  per_transaction: { ms: 'Setiap transaksi', en: 'Per transaction' },
+  active_branches_count: { ms: 'Cawangan aktif', en: 'Active branches' }
 };
 
 interface LanguageContextType {

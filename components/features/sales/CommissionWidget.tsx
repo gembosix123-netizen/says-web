@@ -20,7 +20,7 @@ export default function CommissionWidget({ user }: CommissionWidgetProps) {
     async function fetchData() {
       try {
         const [txRes, payoutRes] = await Promise.all([
-          fetch('/api/sales').then(res => res.json()), // Assuming this returns all transactions, we might need filtering
+          fetch(`/api/sales?branch=${user.branch || 'all'}`).then(res => res.json()),
           fetch('/api/payouts').then(res => res.json().catch(() => ({ data: [] }))) // New endpoint or mock
         ]);
 
@@ -38,7 +38,7 @@ export default function CommissionWidget({ user }: CommissionWidgetProps) {
     }
     
     fetchData();
-  }, [user.id]);
+  }, [user.id, user.branch]);
 
   const stats = useMemo(() => {
     // Role-based filtering: Only show data for user's location

@@ -139,7 +139,8 @@ export default function MonthlyReport({ transactions, products }: MonthlyReportP
                 disabled={isExporting}
                 className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
             >
-                {isExporting ? 'Generating...' : <><Download size={18} /> Export PDF</>}
+                <Download size={18} />
+                <span>{isExporting ? 'Generating...' : 'Export PDF'}</span>
             </button>
         </div>
       </div>

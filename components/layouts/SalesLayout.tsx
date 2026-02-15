@@ -3,9 +3,64 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Users, ShoppingCart, LogOut, Menu, X, Package, Globe } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, LogOut, Menu, X, Globe } from 'lucide-react';
 import clsx from 'clsx';
-import Image from 'next/image';
+import SidebarHeader from '@/components/SidebarHeader';
+
+// User Info Component
+function UserHeaderInfo() {
+  const [username, setUsername] = useState('');
+  const [role, setRole] = useState('');
+  const [branch, setBranch] = useState('');
+  const router = useRouter();
+
+  useEffect(() => {
+    const user = localStorage.getItem('user');
+    if (user) {
+      try {
+        const userData = JSON.parse(user);
+        setUsername(userData.name || userData.username || 'User');
+        setRole(userData.role || '');
+        setBranch(userData.branch || '');
+      } catch (e) {
+        console.error('Failed to parse user:', e);
+      }
+    }
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.error('Logout failed:', e);
+    }
+    localStorage.removeItem('user');
+    router.push('/');
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      {username && (
+        <>
+          <div className="text-right hidden sm:block">
+            <p className="text-sm font-semibold text-white">{username}</p>
+            <p className="text-xs text-slate-400">{branch || 'Branch N/A'}</p>
+          </div>
+          <span className="px-2 py-1 text-xs font-medium rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">
+            {role}
+          </span>
+        </>
+      )}
+      <button
+        onClick={handleLogout}
+        className="p-2 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
+        title="Logout"
+      >
+        <LogOut size={18} />
+      </button>
+    </div>
+  );
+}
 
 export default function SalesLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -23,10 +78,9 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
     }
   };
 
+  // Hanya menu yang kau mahu
   const navItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/digital-audit', label: 'Digital Audit', icon: Package },
-    { to: '/prospecting', label: 'Prospecting', icon: Users },
     { to: '/daily-sales', label: 'Daily Sales', icon: ShoppingCart },
   ];
 
@@ -54,25 +108,13 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
         )}
       >
         <div className="h-full flex flex-col">
-          <div className="h-20 flex items-center px-6 border-b border-slate-800/50 bg-slate-900/50">
-            <div className="w-10 h-10 relative mr-3 flex items-center justify-center">
-               <Image 
-                 src="/logo.svg" 
-                 alt="SAYS Logo" 
-                 width={40} 
-                 height={40} 
-                 className="object-contain"
-               />
-            </div>
-            <div>
-               <h1 className="font-bold text-lg tracking-tight text-white">SAYS Vite</h1>
-               <p className="text-xs text-slate-500">Sales Console</p>
-            </div>
-          </div>
+          {/* Header Sidebar / Logo */}
+          <SidebarHeader className="bg-slate-900/50 border-white/10" />
 
+          {/* Navigation Links */}
           <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
             {navItems.map((item) => {
-              const isActive = pathname === item.to || (item.to === '/' && pathname === '/');
+              const isActive = pathname === item.to;
               return (
                 <Link
                   key={item.to}
@@ -81,7 +123,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
                   className={clsx(
                     "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                     isActive 
-                      ? "bg-blue-600/90 backdrop-blur-sm text-white shadow-lg shadow-blue-900/20" 
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" 
                       : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-100"
                   )}
                 >
@@ -92,6 +134,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
             })}
           </nav>
 
+          {/* Logout Section */}
           <div className="p-4 border-t border-slate-800/50 bg-slate-900/30">
              <button 
                 onClick={handleLogout}
@@ -106,7 +149,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-transparent relative z-10">
-        <header className="h-16 flex items-center justify-between px-4 lg:px-8 z-10">
+        <header className="flex items-center justify-between px-4 lg:px-8 z-10 border-b border-slate-800/30 bg-slate-900/30">
            <div className="flex items-center gap-4">
                <button 
                  onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -114,19 +157,17 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
                >
                  {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
                </button>
-               <h2 className="text-lg font-semibold text-white ml-2 lg:ml-0">
-                 Welcome Back
+               <h2 className="text-sm font-medium text-slate-400">
+                 Sales Dashboard / <span className="text-white font-bold">Active Session</span>
                </h2>
            </div>
            
-           <div className="flex items-center gap-3">
-              <button className="p-2 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-full transition-colors backdrop-blur-sm">
-                  <Globe size={20} />
-              </button>
+           <div className="flex items-center gap-6">
+              <UserHeaderInfo />
            </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 lg:p-8 z-10">
+        <div className="flex-1 overflow-y-auto p-4 lg:p-8 z-10 custom-scrollbar">
           {children}
         </div>
       </main>

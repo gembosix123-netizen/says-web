@@ -3,12 +3,16 @@ import { useSales } from '@/context/SalesContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
+import { AlertTriangle } from 'lucide-react';
 
 export default function PaymentForm() {
-  const { calculateGrandTotal, payment, setPayment, setStep } = useSales();
+  const { calculateGrandTotal, payment, setPayment, setStep, selectedCustomer } = useSales();
   const { t } = useLanguage();
 
   const total = calculateGrandTotal();
+  const isCredit = payment.method === 'credit';
+  const currentOutstanding = selectedCustomer?.outstandingBalance || 0;
+  const newOutstanding = currentOutstanding + total;
 
   type PaymentKey = keyof typeof payment;
 
@@ -34,6 +38,35 @@ export default function PaymentForm() {
             </button>
           ))}
         </div>
+
+        {/* Credit/Bill-to-Bill Warning */}
+        {isCredit && (
+          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
+              <div>
+                <p className="font-bold text-amber-800">{t('credit_warning_title') || 'Pembayaran Kredit (Hutang)'}</p>
+                <p className="text-sm text-amber-700 mt-1">
+                  {t('credit_warning_desc') || 'Jumlah ini akan ditambah ke baki hutang pelanggan.'}
+                </p>
+                <div className="mt-3 text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-amber-700">{t('current_outstanding') || 'Baki Semasa'}:</span>
+                    <span className="font-bold text-amber-800">{formatCurrency(currentOutstanding)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-amber-700">{t('this_sale') || 'Jualan Ini'}:</span>
+                    <span className="font-bold text-amber-800">+ {formatCurrency(total)}</span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-amber-200">
+                    <span className="text-amber-700 font-bold">{t('new_outstanding') || 'Baki Baru'}:</span>
+                    <span className="font-bold text-red-600">{formatCurrency(newOutstanding)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -50,7 +83,7 @@ export default function PaymentForm() {
             <span className="text-slate-600 mr-2">RM</span>
               <input
                 type="number"
-                className="w-24 text-right font-bold text-slate-800 outline-none border-b border-slate-300 focus:border-blue-500 p-1"
+                className="w-24 text-right font-bold text-white bg-slate-700 outline-none border-b border-slate-500 focus:border-blue-400 p-1 rounded"
                 value={payment[field.key as PaymentKey] || ''}
                 placeholder="0.00"
                 onChange={(e) => setPayment({ ...payment, [field.key as PaymentKey]: parseFloat(e.target.value) || 0 })}

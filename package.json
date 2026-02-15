@@ -6,12 +6,20 @@
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed:supabase": "node scripts/seed-supabase.js",
+    "migrate:firestore": "ts-node scripts/firestore-migration.ts",
+    "migrate:firestore:validate": "ts-node -e \"console.log('Firestore migration script is valid')\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.95.3",
     "@upstash/redis": "^1.36.0",
     "@vercel/kv": "^3.0.0",
+    "bcrypt": "^5.1.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.2.4",
+    "firebase": "^10.14.1",
+    "firebase-admin": "^12.0.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
     "jspdf-autotable": "^5.0.2",
@@ -20,16 +28,19 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-signature-canvas": "^1.1.0-alpha.2",
-    "recharts": "^3.6.0"
+    "recharts": "^3.6.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/bcrypt": "^5.0.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

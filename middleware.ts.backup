@@ -1,0 +1,97 @@
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // 1. Exclude static assets and _next folders from middleware logic
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/static') ||
+    pathname === '/favicon.ico' ||
+    /\.(png|jpg|jpeg|gif|svg|ico|css|js)$/.test(pathname)
+  ) {
+    return NextResponse.next();
+  }
+
+  const session = request.cookies.get('session');
+  const isLoginPage = pathname === '/login';
+
+  // 2. API Protection
+  if (pathname.startsWith('/api')) {
+    if (
+      pathname.startsWith('/api/auth/login') ||
+      pathname.startsWith('/api/auth/logout')
+    ) {
+        return NextResponse.next();
+    }
+
+    if (!session) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    return NextResponse.next();
+  }
+
+  // 3. Auth Logic
+  if (isLoginPage && session) {
+    try {
+        JSON.parse(session.value);
+        return NextResponse.redirect(new URL('/', request.url));
+    } catch (e) {
+        const response = NextResponse.next();
+        response.cookies.delete('session');
+        return response;
+    }
+  }
+
+  if (!isLoginPage && !session) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  // 4. Role-based access control
+  if (session) {
+    try {
+      const sessionData = JSON.parse(session.value);
+      const { role, branch } = sessionData;
+
+      // Admin routes protection
+      if (pathname.startsWith('/admin')) {
+        if (role !== 'Admin' && role !== 'Founder') {
+          return NextResponse.redirect(new URL('/', request.url));
+        }
+
+        // Branch-based restrictions for Admins
+        if (role === 'Admin' && branch === 'Kinabatangan' && pathname.startsWith('/admin/kota-kinabalu')) {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+        if (role === 'Admin' && branch === 'Kota Kinabalu' && pathname.startsWith('/admin/kinabatangan')) {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+
+        // Global monitor only for Founder
+        if (pathname.startsWith('/admin/global-monitor') && role !== 'Founder') {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+      }
+      
+      // Sales routes protection
+      if (pathname.startsWith('/sales') || pathname.startsWith('/dashboard') || pathname.startsWith('/daily-sales')) {
+        if (role !== 'Sales' && role !== 'Admin' && role !== 'Founder') {
+          return NextResponse.redirect(new URL('/', request.url));
+        }
+      }
+
+    } catch (e) {
+      const response = NextResponse.redirect(new URL('/login', request.url));
+      response.cookies.delete('session');
+      return response;
+    }
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};

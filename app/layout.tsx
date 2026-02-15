@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { ToastProvider } from "@/components/ui/Toast";
+import ThemeScript from "@/components/ThemeScript";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,12 +28,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning={true}>
+      <head>
+        <ThemeScript />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-white`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white dark:bg-black text-slate-900 dark:text-white transition-colors duration-300`}
       >
         <ThemeProvider>
           <LanguageProvider>
-            {children}
+            <ToastProvider>
+              {children}
+            </ToastProvider>
           </LanguageProvider>
         </ThemeProvider>
       </body>

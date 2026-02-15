@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Ignore script files (CommonJS utility scripts)
+    "scripts/**",
+    "seed-users.js",
+    "create-admin.js",
   ]),
 ]);
 

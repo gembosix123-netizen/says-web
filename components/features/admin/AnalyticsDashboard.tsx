@@ -1,5 +1,5 @@
 'use client';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Transaction, Product, User, StockAudit, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
@@ -14,6 +14,7 @@ interface AnalyticsDashboardProps {
 
 export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
   const { t } = useLanguage();
+  const [selectedBranch, setSelectedBranch] = useState('all');
 
   // Agent mapping for role-based access
   const agentMapping: { [key: string]: string } = {
@@ -21,12 +22,22 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
     "u3": "Kinabatangan"
   };
 
-  // Filter transactions based on current user's location (if applicable)
-  const filteredTransactions = useMemo(() => {
-    // For now, show all transactions in admin dashboard
-    // In future, we can add user context to filter by location
-    return transactions || [];
+  // Get unique branches from transactions
+  const branches = useMemo(() => {
+    const uniqueBranches = new Set<string>();
+    transactions?.forEach(t => {
+      if (t.branch) uniqueBranches.add(t.branch);
+    });
+    return Array.from(uniqueBranches).sort();
   }, [transactions]);
+
+  // Filter transactions based on selected branch
+  const filteredTransactions = useMemo(() => {
+    if (selectedBranch === 'all') {
+      return transactions || [];
+    }
+    return (transactions || []).filter(t => t.branch === selectedBranch);
+  }, [transactions, selectedBranch]);
 
   // Top 5 Products
   const topProducts = useMemo(() => {
@@ -92,7 +103,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
           return { date: d.toISOString().split('T')[0], total: 0 };
       });
       
-      transactions?.forEach(t => {
+      filteredTransactions?.forEach(t => {
           if (t.createdAt) {
               const date = t.createdAt.split('T')[0];
               const dayData = data.find(d => d.date === date);
@@ -102,14 +113,14 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
           }
       });
       return data;
-  }, [transactions]);
+  }, [filteredTransactions]);
 
   const maxSales = Math.max(...salesTrend.map(d => d.total), 1);
 
   // Exchange/Return Tracking
   const exchangeReport = useMemo(() => {
     const report: { productName: string; quantity: number; reason: string }[] = [];
-    transactions?.forEach(t => {
+    filteredTransactions?.forEach(t => {
       if (t.exchangeItems) {
         t.exchangeItems.forEach(item => {
             const product = products.find(p => p.id === item.productId);
@@ -122,10 +133,25 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
       }
     });
     return report;
-  }, [transactions, products]);
+  }, [filteredTransactions, products]);
 
   return (
     <div className="space-y-6">
+        {/* Branch Filter */}
+        <div className="bg-slate-900/50 backdrop-blur-sm p-4 rounded-lg border border-slate-800">
+          <label className="text-sm font-medium text-slate-300 mr-3">Filter by Branch:</label>
+          <select
+            value={selectedBranch}
+            onChange={(e) => setSelectedBranch(e.target.value)}
+            className="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">All Branches</option>
+            {branches.map(branch => (
+              <option key={branch} value={branch}>{branch}</option>
+            ))}
+          </select>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Master Sales Report (Summary) */}
             <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800 md:col-span-2">

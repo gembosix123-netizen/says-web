@@ -1,17 +1,47 @@
 'use client';
 
 import SalesLayout from '@/components/layouts/SalesLayout';
-import { Package, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
-
-const mockAudits = [
-  { id: 'AUD-001', van: 'Van A (WXY 1234)', date: '2023-10-26', status: 'Verified', items: 145, discrepancies: 0 },
-  { id: 'AUD-002', van: 'Van B (VBC 5678)', date: '2023-10-26', status: 'Pending', items: 132, discrepancies: 2 },
-  { id: 'AUD-003', van: 'Van A (WXY 1234)', date: '2023-10-25', status: 'Verified', items: 148, discrepancies: 0 },
-  { id: 'AUD-004', van: 'Van C (JQK 9012)', date: '2023-10-25', status: 'Flagged', items: 120, discrepancies: 5 },
-  { id: 'AUD-005', van: 'Van B (VBC 5678)', date: '2023-10-24', status: 'Verified', items: 130, discrepancies: 0 },
-];
+import { CheckCircle, XCircle, Clock, Search, ClipboardList } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { StockAudit } from '@/types';
 
 export default function DigitalAuditPage() {
+  const [audits, setAudits] = useState<StockAudit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    async function fetchAudits() {
+      try {
+        const response = await fetch('/api/stock-audits');
+        const data = await response.json();
+        setAudits(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error('Failed to fetch audits:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchAudits();
+  }, []);
+
+  // Calculate stats
+  const totalAudits = audits.length;
+  const totalItemsScanned = audits.reduce((sum, a) => sum + (a.items?.length || 0), 0);
+
+  // Filter audits by search
+  const filteredAudits = audits.filter(a => 
+    a.id.toLowerCase().includes(search.toLowerCase()) ||
+    a.customerId?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return 'N/A';
+    return new Date(dateStr).toLocaleDateString('en-MY', {
+      year: 'numeric', month: 'short', day: 'numeric'
+    });
+  };
+
   return (
     <SalesLayout>
       <div className="space-y-6">
@@ -19,26 +49,42 @@ export default function DigitalAuditPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
                 <h1 className="text-2xl font-bold text-white tracking-tight">Digital Audit</h1>
-                <p className="text-slate-400">Track and verify van inventory status.</p>
+                <p className="text-slate-400">Track and verify stock audit records.</p>
             </div>
-            <button className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all active:scale-[0.98]">
-                + New Audit
-            </button>
         </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl">
-                <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Total Verified</p>
-                <p className="text-3xl font-bold text-white">1,245</p>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-blue-500/20 rounded-lg">
+                    <ClipboardList size={20} className="text-blue-400" />
+                  </div>
+                </div>
+                <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Total Audits</p>
+                <p className="text-3xl font-bold text-white">{totalAudits}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl">
-                <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Pending Review</p>
-                <p className="text-3xl font-bold text-yellow-400">8</p>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-emerald-500/20 rounded-lg">
+                    <CheckCircle size={20} className="text-emerald-400" />
+                  </div>
+                </div>
+                <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Items Scanned</p>
+                <p className="text-3xl font-bold text-emerald-400">{totalItemsScanned}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl">
-                <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Discrepancies</p>
-                <p className="text-3xl font-bold text-red-400">12</p>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-purple-500/20 rounded-lg">
+                    <Clock size={20} className="text-purple-400" />
+                  </div>
+                </div>
+                <p className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">This Month</p>
+                <p className="text-3xl font-bold text-purple-400">{audits.filter(a => {
+                  const date = new Date(a.createdAt || '');
+                  const now = new Date();
+                  return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+                }).length}</p>
             </div>
         </div>
 
@@ -51,49 +97,49 @@ export default function DigitalAuditPage() {
                     <input 
                         type="text" 
                         placeholder="Search audits..." 
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
                         className="w-full bg-black/20 border border-white/10 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50"
                     />
                 </div>
             </div>
+            {loading ? (
+              <div className="p-8 text-center text-slate-400">Loading audits...</div>
+            ) : filteredAudits.length === 0 ? (
+              <div className="p-8 text-center text-slate-400">No audits found</div>
+            ) : (
             <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm text-slate-400">
                     <thead className="bg-white/5 text-slate-300 font-medium">
                         <tr>
                             <th className="px-6 py-3">Audit ID</th>
-                            <th className="px-6 py-3">Van / Unit</th>
+                            <th className="px-6 py-3">Customer</th>
+                            <th className="px-6 py-3">Salesman</th>
                             <th className="px-6 py-3">Date</th>
-                            <th className="px-6 py-3">Items Scanned</th>
+                            <th className="px-6 py-3">Items</th>
                             <th className="px-6 py-3">Status</th>
-                            <th className="px-6 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                        {mockAudits.map((audit) => (
+                        {filteredAudits.map((audit) => (
                             <tr key={audit.id} className="hover:bg-white/5 transition-colors">
-                                <td className="px-6 py-4 font-mono text-white">{audit.id}</td>
-                                <td className="px-6 py-4 text-white">{audit.van}</td>
-                                <td className="px-6 py-4">{audit.date}</td>
-                                <td className="px-6 py-4">{audit.items}</td>
+                                <td className="px-6 py-4 font-mono text-white">{audit.id.slice(0, 12)}...</td>
+                                <td className="px-6 py-4 text-white">{audit.customerId || 'N/A'}</td>
+                                <td className="px-6 py-4">{audit.salesmanId || 'N/A'}</td>
+                                <td className="px-6 py-4">{formatDate(audit.createdAt)}</td>
+                                <td className="px-6 py-4">{audit.items?.length || 0}</td>
                                 <td className="px-6 py-4">
-                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${
-                                        audit.status === 'Verified' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                        audit.status === 'Pending' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                                        'bg-red-500/10 text-red-400 border-red-500/20'
-                                    }`}>
-                                        {audit.status === 'Verified' && <CheckCircle size={12} />}
-                                        {audit.status === 'Pending' && <Clock size={12} />}
-                                        {audit.status === 'Flagged' && <XCircle size={12} />}
-                                        {audit.status}
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                                        <CheckCircle size={12} />
+                                        Completed
                                     </span>
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    <button className="text-blue-400 hover:text-white transition-colors">View Details</button>
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
+            )}
         </div>
       </div>
     </SalesLayout>
