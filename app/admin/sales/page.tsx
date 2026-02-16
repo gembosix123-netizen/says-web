@@ -83,7 +83,7 @@ export default function AdminSalesPage() {
                     <td className="px-2 py-2 text-slate-300">{new Date(s.createdAt || '').toLocaleDateString()}</td>
                     <td className="px-2 py-2">
                       <button
-                        onClick={() => deleteSale(s.id, s.branch)}
+                        onClick={() => deleteSale(s.id, s.branch || 'unknown')}
                         className="px-2 py-1 bg-red-600 rounded text-sm hover:bg-red-700"
                       >
                         Delete
