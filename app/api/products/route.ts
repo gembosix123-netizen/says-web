@@ -169,9 +169,18 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     // Check product exists
-    const product = await getProduct(productId);
-    if (!product) {
+    const { data: product, error: fetchError } = await supabaseAdmin
+      .from('products')
+      .select('*')
+      .eq('id', productId)
+      .single();
+
+    if (fetchError || !product) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
@@ -179,7 +188,26 @@ export async function PUT(request: NextRequest) {
     }
 
     // Update product
-    await updateProduct(productId, body);
+    const { error: updateError } = await supabaseAdmin
+      .from('products')
+      .update({
+        name: body.name,
+        sku: body.sku,
+        price: body.price,
+        cost: body.cost,
+        stock: body.stock,
+        unit: body.unit,
+        category: body.category,
+        description: body.description,
+        is_active: body.is_active ?? true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', productId);
+
+    if (updateError) {
+      console.error('Error updating product:', updateError);
+      return NextResponse.json({ error: 'Failed to update product' }, { status: 500 });
+    }
 
     return NextResponse.json(
       { message: 'Product updated successfully' },
@@ -212,17 +240,34 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     // Check product exists
-    const product = await getProduct(productId);
-    if (!product) {
+    const { data: product, error: fetchError } = await supabaseAdmin
+      .from('products')
+      .select('*')
+      .eq('id', productId)
+      .single();
+
+    if (fetchError || !product) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
       );
     }
 
-    // Delete product
-    await deleteProduct(productId);
+    // Soft delete product
+    const { error: deleteError } = await supabaseAdmin
+      .from('products')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', productId);
+
+    if (deleteError) {
+      console.error('Error deleting product:', deleteError);
+      return NextResponse.json({ error: 'Failed to delete product' }, { status: 500 });
+    }
 
     return NextResponse.json(
       { message: 'Product deleted successfully' },

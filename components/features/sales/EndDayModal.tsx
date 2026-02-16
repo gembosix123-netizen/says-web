@@ -20,8 +20,8 @@ export default function EndDayModal({ isOpen, onClose, userId, userName }: { isO
   );
 
   const totalSales = userTransactions.reduce((acc, t) => acc + t.total, 0);
-  const totalCash = userTransactions.filter(t => t.payment.method === 'cash').reduce((acc, t) => acc + t.total, 0);
-  const totalCredit = userTransactions.filter(t => t.payment.method === 'credit' || t.payment.method === 'transfer').reduce((acc, t) => acc + t.total, 0);
+  const totalCash = userTransactions.filter(t => t.payment?.method === 'cash').reduce((acc, t) => acc + t.total, 0);
+  const totalCredit = userTransactions.filter(t => t.payment?.method === 'credit' || t.payment?.method === 'transfer').reduce((acc, t) => acc + t.total, 0);
 
   useEffect(() => {
       if (isOpen && userId) {

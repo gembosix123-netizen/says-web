@@ -109,7 +109,7 @@ export default function AdminStoresPage() {
                     <td className="px-2 py-2 text-white font-semibold">{st.name}</td>
                     <td className="px-2 py-2 text-slate-300">{st.branch}</td>
                     <td className="px-2 py-2 text-slate-300">{st.address || '-'}</td>
-                    <td className="px-2 py-2 text-slate-400 text-xs">{new Date(st.createdAt).toLocaleDateString()}</td>
+                    <td className="px-2 py-2 text-slate-400 text-xs">{st.createdAt ? new Date(st.createdAt).toLocaleDateString() : '-'}</td>
                     <td className="px-2 py-2">
                       <button
                         onClick={() => deleteStore(st.id)}

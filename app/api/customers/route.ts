@@ -100,29 +100,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     // Create customer
-    const customerId = await createCustomer({
-      name: body.name,
-      phone: body.phone || '',
-      email: body.email || '',
-      address: body.address || '',
-      city: body.city || '',
-      state: body.state || '',
-      postalCode: body.postalCode || '',
-      branch: body.branch,
-      type: body.type || 'retail',
-      status: body.status || 'active',
-      totalPurchases: body.totalPurchases || 0,
-      totalSpent: body.totalSpent || 0,
-      creditLimit: body.creditLimit || 100000,
-      credits: body.credits || 0,
-      notes: body.notes || '',
-    });
+    const { data: newCustomer, error: createError } = await supabaseAdmin
+      .from('customers')
+      .insert({
+        name: body.name,
+        phone: body.phone || '',
+        email: body.email || '',
+        address: body.address || '',
+        city: body.city || '',
+        state: body.state || '',
+        postal_code: body.postalCode || '',
+        branch: body.branch,
+        type: body.type || 'retail',
+        status: body.status || 'active',
+        total_purchases: body.totalPurchases || 0,
+        total_spent: body.totalSpent || 0,
+        credit_limit: body.creditLimit || 100000,
+        credits: body.credits || 0,
+        notes: body.notes || '',
+        is_active: true,
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      console.error('Error creating customer:', createError);
+      return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 });
+    }
 
     return NextResponse.json(
       {
         message: 'Customer created successfully',
-        customerId,
+        customerId: newCustomer?.id,
       },
       { status: 201 }
     );
@@ -153,9 +168,18 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     // Check customer exists
-    const customer = await getCustomer(customerId);
-    if (!customer) {
+    const { data: customer, error: fetchError } = await supabaseAdmin
+      .from('customers')
+      .select('*')
+      .eq('id', customerId)
+      .single();
+
+    if (fetchError || !customer) {
       return NextResponse.json(
         { error: 'Customer not found' },
         { status: 404 }
@@ -163,7 +187,28 @@ export async function PUT(request: NextRequest) {
     }
 
     // Update customer
-    await updateCustomer(customerId, body);
+    const { error: updateError } = await supabaseAdmin
+      .from('customers')
+      .update({
+        name: body.name,
+        phone: body.phone,
+        email: body.email,
+        address: body.address,
+        city: body.city,
+        state: body.state,
+        postal_code: body.postalCode,
+        branch: body.branch,
+        type: body.type,
+        status: body.status,
+        notes: body.notes,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', customerId);
+
+    if (updateError) {
+      console.error('Error updating customer:', updateError);
+      return NextResponse.json({ error: 'Failed to update customer' }, { status: 500 });
+    }
 
     return NextResponse.json(
       { message: 'Customer updated successfully' },
@@ -196,17 +241,34 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     // Check customer exists
-    const customer = await getCustomer(customerId);
-    if (!customer) {
+    const { data: customer, error: fetchError } = await supabaseAdmin
+      .from('customers')
+      .select('*')
+      .eq('id', customerId)
+      .single();
+
+    if (fetchError || !customer) {
       return NextResponse.json(
         { error: 'Customer not found' },
         { status: 404 }
       );
     }
 
-    // Delete customer
-    await deleteCustomer(customerId);
+    // Soft delete customer (set is_active to false)
+    const { error: deleteError } = await supabaseAdmin
+      .from('customers')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', customerId);
+
+    if (deleteError) {
+      console.error('Error deleting customer:', deleteError);
+      return NextResponse.json({ error: 'Failed to delete customer' }, { status: 500 });
+    }
 
     return NextResponse.json(
       { message: 'Customer deleted successfully' },

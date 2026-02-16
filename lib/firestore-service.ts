@@ -145,7 +145,7 @@ export async function getAllDocuments<T extends DocumentData>(
     return snapshot.docs.map((doc) => ({
       ...doc.data(),
       id: doc.id,
-    } as T));
+    } as unknown as T));
   } catch (error) {
     console.error(`Error fetching ${collectionName}:`, error);
     throw error;
@@ -162,7 +162,7 @@ export async function getDocument<T extends DocumentData>(
   try {
     const docRef = doc(db, collectionName, documentId);
     const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? ({ ...docSnap.data(), id: docSnap.id } as T) : null;
+    return docSnap.exists() ? ({ ...docSnap.data(), id: docSnap.id } as unknown as T) : null;
   } catch (error) {
     console.error(`Error fetching ${collectionName}/${documentId}:`, error);
     throw error;
@@ -192,7 +192,7 @@ export async function queryDocuments<T extends DocumentData>(
     return snapshot.docs.map((doc) => ({
       ...doc.data(),
       id: doc.id,
-    } as T));
+    } as unknown as T));
   } catch (error) {
     console.error(`Error querying ${collectionName}:`, error);
     throw error;

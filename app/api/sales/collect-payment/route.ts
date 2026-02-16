@@ -140,7 +140,7 @@ export async function GET(request: NextRequest) {
     let pendingSales: any[] = [];
 
     const fetchPending = async (table: string) => {
-      let query = supabaseAdmin
+      let query = supabaseAdmin!
         .from(table)
         .select('*')
         .eq('payment_status', status)

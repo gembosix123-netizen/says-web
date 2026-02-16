@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
 
     // Get all sales for the period
     const fetchSales = async (table: string, branchFilter?: string) => {
-      let query = supabaseAdmin
+      let query = supabaseAdmin!
         .from(table)
         .select('*')
         .gte('created_at', `${defaultStart}T00:00:00Z`)
@@ -114,12 +114,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Get commission payouts for the period
-    const { data: payouts } = await supabaseAdmin
+    const payoutsResult = await supabaseAdmin!
       .from('commission_payouts')
       .select('*')
       .gte('paid_at', `${defaultStart}T00:00:00Z`)
-      .lte('paid_at', `${defaultEnd}T23:59:59Z`)
-      .catch(() => ({ data: [] }));
+      .lte('paid_at', `${defaultEnd}T23:59:59Z`);
+    const payouts = payoutsResult?.data || [];
 
     const payoutsByUser: Record<string, number> = {};
     (payouts || []).forEach((p: any) => {
