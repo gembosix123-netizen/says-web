@@ -76,11 +76,11 @@ export default function AdminSalesPage() {
               <tbody>
                 {sales.map((s) => (
                   <tr key={s.id} className="border-b border-slate-700/30 hover:bg-slate-800/20">
-                    <td className="px-2 py-2 text-white font-mono">{s.invoice || s.id}</td>
-                    <td className="px-2 py-2 text-white">RM {Number(s.total || s.amount || 0).toFixed(2)}</td>
+                    <td className="px-2 py-2 text-white font-mono">{s.id}</td>
+                    <td className="px-2 py-2 text-white">RM {Number(s.total || 0).toFixed(2)}</td>
                     <td className="px-2 py-2 text-slate-300">{s.customer?.name || '-'}</td>
                     <td className="px-2 py-2 text-slate-300">{s.branch}</td>
-                    <td className="px-2 py-2 text-slate-300">{new Date(s.createdAt || s.created_at).toLocaleDateString()}</td>
+                    <td className="px-2 py-2 text-slate-300">{new Date(s.createdAt || '').toLocaleDateString()}</td>
                     <td className="px-2 py-2">
                       <button
                         onClick={() => deleteSale(s.id, s.branch)}
