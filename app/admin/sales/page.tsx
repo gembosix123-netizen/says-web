@@ -106,7 +106,7 @@ export default function AdminSalesPage() {
           </div>
           <div>
             <p className="text-slate-400">Total Amount</p>
-            <p className="text-2xl font-bold text-green-400">RM {sales.reduce((s, sl) => s + (Number(sl.total || sl.amount || 0)), 0).toFixed(2)}</p>
+            <p className="text-2xl font-bold text-green-400">RM {sales.reduce((s, sl) => s + (Number(sl.total || 0)), 0).toFixed(2)}</p>
           </div>
           <div>
             <p className="text-slate-400">Branches</p>
