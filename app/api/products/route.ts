@@ -10,31 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-function validateProductData(data: any): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (!data.name || typeof data.name !== 'string') {
-    errors.push('Product name is required');
-  }
-
-  if (data.price === undefined || typeof data.price !== 'number' || data.price < 0) {
-    errors.push('Valid product price is required');
-  }
-
-  if (!data.sku || typeof data.sku !== 'string') {
-    errors.push('SKU is required');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
-}
+import { createProductSchema, updateProductSchema } from '@/lib/validations';
 
 // ============================================================================
 // GET HANDLER
@@ -103,14 +79,17 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    // Validate product data
-    const validation = validateProductData(body);
-    if (!validation.valid) {
+    // Validate product data with Zod
+    const validation = createProductSchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
-        { error: 'Validation failed', details: validation.errors },
+        { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
       );
     }
+
+    const validatedData = validation.data;
 
     // Create product
     const { data, error } = await supabaseAdmin
@@ -118,11 +97,11 @@ export async function POST(request: NextRequest) {
       .insert([
         {
           id: body.id || `prod_${Date.now()}`,
-          name: body.name,
-          code: body.code || body.sku,
-          price: body.price,
-          unit: body.unit || 'pkt',
-          is_active: true,
+          name: validatedData.name,
+          code: validatedData.code || validatedData.sku,
+          price: validatedData.price,
+          unit: validatedData.unit,
+          is_active: validatedData.isActive,
         },
       ])
       .select();

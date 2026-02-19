@@ -22,31 +22,11 @@ import {
   toApiResponse,
   InventoryItem,
 } from '@/lib/firestore-service';
+import { loadInventorySchema, updateVanInventorySchema } from '@/lib/validations';
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-
-function validateInventoryData(data: any): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (!data.productId || typeof data.productId !== 'string') {
-    errors.push('Product ID is required');
-  }
-
-  if (!data.branch || typeof data.branch !== 'string') {
-    errors.push('Branch is required');
-  }
-
-  if (data.quantity === undefined || typeof data.quantity !== 'number' || data.quantity < 0) {
-    errors.push('Valid quantity is required');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
-}
 
 // ============================================================================
 // GET HANDLER
@@ -118,20 +98,23 @@ export async function POST(request: NextRequest) {
     // TODO: Implement authentication check for Admin+ role
     const body = await request.json();
 
-    // Validate inventory data
-    const validation = validateInventoryData(body);
-    if (!validation.valid) {
+    // Validate inventory data with Zod
+    const validation = loadInventorySchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
-        { error: 'Validation failed', details: validation.errors },
+        { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
       );
     }
 
+    const validatedData = validation.data;
+
     // Create inventory item
     const inventoryId = await createInventoryItem({
-      productId: body.productId,
-      branch: body.branch,
-      quantity: body.quantity,
+      productId: validatedData.items[0]?.productId || body.productId,
+      branch: validatedData.branch,
+      quantity: validatedData.items[0]?.quantity || body.quantity,
       reservedQuantity: body.reservedQuantity || 0,
       availableQuantity: (body.quantity || 0) - (body.reservedQuantity || 0),
       lastRestockDate: body.lastRestockDate,

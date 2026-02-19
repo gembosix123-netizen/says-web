@@ -4,16 +4,24 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Store, Lock, User as UserIcon } from 'lucide-react';
 import Image from 'next/image';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { loginSchema, type LoginInput } from '@/lib/validations';
 
 export default function Login() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+  });
+
+  const onSubmit = async (data: LoginInput) => {
     setLoading(true);
     setError('');
 
@@ -21,28 +29,28 @@ export default function Login() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(data),
       });
 
-      const data = await res.json();
+      const responseData = await res.json();
 
       if (res.ok) {
         // Store user info (but not sensitive tokens if using httpOnly cookies)
         localStorage.setItem('user', JSON.stringify({ 
-          id: data.id,
-          name: data.name, 
-          role: data.role,
-          branch: data.branch 
+          id: responseData.id,
+          name: responseData.name, 
+          role: responseData.role,
+          branch: responseData.branch 
         }));
         
         // Redirect based on role
-        if (data.role === 'Admin') {
+        if (responseData.role === 'Admin') {
             router.push('/admin'); 
         } else {
             router.push('/');
         }
       } else {
-        setError(data.error || 'Invalid credentials');
+        setError(responseData.error || 'Invalid credentials');
       }
     } catch (err) {
       console.error(err);
@@ -51,6 +59,8 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  const handleLogin = handleSubmit(onSubmit);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black p-4 relative overflow-hidden">
@@ -86,13 +96,14 @@ export default function Login() {
                 <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
                 <input 
                   type="text" 
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  {...register('username')}
                   className="w-full pl-12 h-12 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                   placeholder="Enter username"
-                  required
                 />
               </div>
+              {errors.username && (
+                <p className="text-red-400 text-xs mt-1 ml-1">{errors.username.message}</p>
+              )}
             </div>
 
             <div>
@@ -101,13 +112,14 @@ export default function Login() {
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
                 <input 
                   type="password" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  {...register('password')}
                   className="w-full pl-12 h-12 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                   placeholder="Enter password"
-                  required
                 />
               </div>
+              {errors.password && (
+                <p className="text-red-400 text-xs mt-1 ml-1">{errors.password.message}</p>
+              )}
             </div>
           </div>
 

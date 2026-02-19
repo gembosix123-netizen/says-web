@@ -10,27 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-function validateCustomerData(data: any): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (!data.name || typeof data.name !== 'string') {
-    errors.push('Customer name is required');
-  }
-
-  if (!data.branch || typeof data.branch !== 'string') {
-    errors.push('Branch is required');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
-}
+import { createCustomerSchema, updateCustomerSchema } from '@/lib/validations';
 
 // ============================================================================
 // GET HANDLER
@@ -91,14 +71,17 @@ export async function POST(request: NextRequest) {
     // TODO: Implement authentication check
     const body = await request.json();
 
-    // Validate customer data
-    const validation = validateCustomerData(body);
-    if (!validation.valid) {
+    // Validate customer data with Zod
+    const validation = createCustomerSchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
-        { error: 'Validation failed', details: validation.errors },
+        { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
       );
     }
+
+    const validatedData = validation.data;
 
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
@@ -108,22 +91,22 @@ export async function POST(request: NextRequest) {
     const { data: newCustomer, error: createError } = await supabaseAdmin
       .from('customers')
       .insert({
-        name: body.name,
-        phone: body.phone || '',
-        email: body.email || '',
-        address: body.address || '',
-        city: body.city || '',
-        state: body.state || '',
-        postal_code: body.postalCode || '',
-        branch: body.branch,
-        type: body.type || 'retail',
-        status: body.status || 'active',
-        total_purchases: body.totalPurchases || 0,
-        total_spent: body.totalSpent || 0,
-        credit_limit: body.creditLimit || 100000,
-        credits: body.credits || 0,
-        notes: body.notes || '',
-        is_active: true,
+        name: validatedData.name,
+        phone: validatedData.phone || '',
+        email: validatedData.email || '',
+        address: validatedData.address || '',
+        city: validatedData.city || '',
+        state: validatedData.state || '',
+        postal_code: validatedData.postalCode || '',
+        branch: validatedData.branch,
+        type: validatedData.type,
+        status: validatedData.status,
+        total_purchases: 0,
+        total_spent: 0,
+        credit_limit: validatedData.creditLimit,
+        credits: validatedData.credits,
+        notes: validatedData.notes || '',
+        is_active: validatedData.isActive,
         created_at: new Date().toISOString(),
       })
       .select()

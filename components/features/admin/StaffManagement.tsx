@@ -234,6 +234,7 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
               <option value="">Select Role</option>
               <option value="Admin">Admin</option>
               <option value="Sales">Sales</option>
+              <option value="Merchandiser">Merchandiser</option>
             </select>
             <select
               value={formData.branch}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { createSaleSchema } from '@/lib/validations';
 
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
@@ -131,34 +132,47 @@ export async function POST(request: NextRequest) {
       branch = currentUser.branch;
     }
 
+    // Set branch for validation
+    body.branch = branch;
+
+    // Validate sale data with Zod
+    const validation = createSaleSchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      return NextResponse.json(
+        { error: 'Ralat pengesahan', details: errors },
+        { status: 400 }
+      );
+    }
+
+    const validatedData = validation.data;
+
     const target = (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) ? TABLE_KIN : TABLE_KOTA;
 
-    const invoice = body.invoice || generateInvoice(branch.replace(/\s+/g, '_'));
+    const invoice = validatedData.invoice || generateInvoice(branch.replace(/\s+/g, '_'));
 
-    const totalAmount = body.total_amount ?? body.total ?? body.amount ?? 0;
-    const paymentMethod = body.payment_method || 'cash';
-    const isCredit = paymentMethod === 'credit';
+    const isCredit = validatedData.payment_method === 'credit';
 
     const saleData: Record<string, any> = {
       invoice,
-      branch,
-      total_amount: totalAmount,
-      amount: totalAmount,
-      items: body.items ?? [],
-      item_name: Array.isArray(body.items) && body.items.length > 0 ? body.items[0].name : body.item_name || 'Sale Item',
-      customer_name: body.customer_name || null,
-      customer_id: body.customer_id || null,
-      salesman_id: currentUser.id,  // Track who made the sale
-      salesman_name: currentUser.name || currentUser.username || null,
-      check_in_time: body.checkInTime || null,
-      gps_lat: body.gps_lat ?? null,
-      gps_long: body.gps_long ?? null,
-      payment_method: paymentMethod,
+      branch: validatedData.branch,
+      total_amount: validatedData.total_amount,
+      amount: validatedData.total_amount,
+      items: validatedData.items,
+      item_name: validatedData.items.length > 0 ? validatedData.items[0].name : 'Sale Item',
+      customer_name: validatedData.customer_name || null,
+      customer_id: validatedData.customer_id || null,
+      salesman_id: validatedData.salesman_id || currentUser.id,  // Track who made the sale
+      salesman_name: validatedData.salesman_name || currentUser.name || currentUser.username || null,
+      check_in_time: validatedData.check_in_time || null,
+      gps_lat: validatedData.gps_lat ?? null,
+      gps_long: validatedData.gps_long ?? null,
+      payment_method: validatedData.payment_method,
       payment_status: isCredit ? 'pending' : 'paid',  // Track payment status
-      return_amount: body.return_amount || 0,
-      exchange_amount: body.exchange_amount || 0,
-      foc_amount: body.foc_amount || 0,
-      proof_photo_url: body.receipt_url ?? body.proof_photo_url ?? null,
+      return_amount: validatedData.return_amount,
+      exchange_amount: validatedData.exchange_amount,
+      foc_amount: validatedData.foc_amount,
+      proof_photo_url: validatedData.proof_photo_url || validatedData.receipt_url || null,
       created_at: new Date().toISOString()
     };
 
@@ -184,7 +198,7 @@ export async function POST(request: NextRequest) {
           .single();
 
         const currentBalance = customer?.outstandingBalance || 0;
-        const newBalance = currentBalance + totalAmount;
+        const newBalance = currentBalance + validatedData.total_amount;
 
         // Update customer's outstanding balance
         await supabaseAdmin

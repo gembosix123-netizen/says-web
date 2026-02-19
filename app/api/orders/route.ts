@@ -22,35 +22,11 @@ import {
   toApiResponse,
   Transaction,
 } from '@/lib/firestore-service';
+import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-
-function validateTransactionData(data: any): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (!data.userId || typeof data.userId !== 'string') {
-    errors.push('User ID is required');
-  }
-
-  if (!data.branch || typeof data.branch !== 'string') {
-    errors.push('Branch is required');
-  }
-
-  if (!Array.isArray(data.items) || data.items.length === 0) {
-    errors.push('Transaction must have at least one item');
-  }
-
-  if (data.amount === undefined || typeof data.amount !== 'number' || data.amount < 0) {
-    errors.push('Valid transaction amount is required');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
-}
 
 // ============================================================================
 // GET HANDLER
@@ -123,27 +99,56 @@ export async function POST(request: NextRequest) {
     // TODO: Implement authentication check for Sales+ role
     const body = await request.json();
 
-    // Validate transaction data
-    const validation = validateTransactionData(body);
-    if (!validation.valid) {
+    // Validate transaction data with Zod
+    const validation = createOrderSchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
-        { error: 'Validation failed', details: validation.errors },
+        { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
       );
     }
 
+    const validatedData = validation.data;
+
+    // Map order type to transaction type
+    const orderType = validatedData.orderType || 'sale';
+    let transactionType: 'sale' | 'return' | 'restock' | 'adjustment' | 'commission' = 'sale';
+    if (orderType === 'purchase' || orderType === 'transfer') {
+      transactionType = 'restock';
+    } else if (orderType === 'return') {
+      transactionType = 'return';
+    }
+
+    // Map order status to transaction status  
+    const orderStatus = validatedData.status || 'pending';
+    let transactionStatus: 'pending' | 'completed' | 'cancelled' = 'pending';
+    if (orderStatus === 'completed') {
+      transactionStatus = 'completed';
+    } else if (orderStatus === 'cancelled' || orderStatus === 'failed') {
+      transactionStatus = 'cancelled';
+    }
+
+    // Transform items to transaction format
+    const transactionItems = validatedData.items.map(item => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      totalPrice: item.subtotal
+    }));
+
     // Create transaction
     const transactionId = await createTransaction({
-      type: body.type || 'sale',
-      status: body.status || 'pending',
-      userId: body.userId,
-      branch: body.branch,
-      amount: body.amount,
-      items: body.items,
-      customerId: body.customerId || '',
+      type: transactionType,
+      status: transactionStatus,
+      userId: validatedData.createdBy || body.userId || '',
+      branch: validatedData.branch,
+      amount: validatedData.totalAmount,
+      items: transactionItems,
+      customerId: validatedData.customerId || '',
       paymentMethod: body.paymentMethod || 'cash',
       reference: body.reference || '',
-      notes: body.notes || '',
+      notes: validatedData.notes || '',
       metadata: body.metadata || {},
     });
 

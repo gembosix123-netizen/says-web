@@ -3,7 +3,7 @@
  * Ensures data segregation between branches: Kota Kinabalu & Kinabatangan
  */
 
-export type UserRole = 'Main Admin' | 'Admin' | 'Sales';
+export type UserRole = 'Main Admin' | 'Admin' | 'Sales' | 'Merchandiser';
 export type Branch = 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
 
 export interface SessionUser {
@@ -19,6 +19,7 @@ export interface SessionUser {
  * - Main Admin: can access all branches
  * - Admin: can only access their own branch
  * - Sales: can only access their own data
+ * - Merchandiser: can only access their own data
  */
 export function canAccessBranch(
   userRole: UserRole,
@@ -31,8 +32,26 @@ export function canAccessBranch(
   // Admin hanya access branch mereka
   if (userRole === 'Admin') return userBranch === targetBranch;
   
-  // Sales tidak boleh access user management
+  // Sales dan Merchandiser tidak boleh access user management
   return false;
+}
+
+/**
+ * Check if user can perform sales transactions
+ * Only Sales, Admin, and Main Admin can create sales
+ * Merchandiser CANNOT perform sales
+ */
+export function canPerformSales(role: UserRole): boolean {
+  return role === 'Sales' || role === 'Admin' || role === 'Main Admin';
+}
+
+/**
+ * Check if user can perform store audits
+ * Both Merchandiser and Sales can do audits
+ * Admin and Main Admin can also audit
+ */
+export function canPerformAudit(role: UserRole): boolean {
+  return role === 'Merchandiser' || role === 'Sales' || role === 'Admin' || role === 'Main Admin';
 }
 
 /**
@@ -62,7 +81,7 @@ export function buildBranchFilter(
     return { filterByBranch: false };
   }
   
-  // Admin and Sales see only their branch
+  // Admin, Sales, and Merchandiser see only their branch
   return {
     filterByBranch: true,
     branchValue: userBranch,
@@ -98,10 +117,10 @@ export function validateRoleCreation(
   // Main Admin dapat create semua role
   if (creatorRole === 'Main Admin') return true;
   
-  // Admin hanya boleh create Sales, tidak boleh create Admin atau Main Admin
-  if (creatorRole === 'Admin') return targetRole === 'Sales';
+  // Admin hanya boleh create Sales dan Merchandiser, tidak boleh create Admin atau Main Admin
+  if (creatorRole === 'Admin') return targetRole === 'Sales' || targetRole === 'Merchandiser';
   
-  // Sales tidak boleh create user
+  // Sales dan Merchandiser tidak boleh create user
   return false;
 }
 
@@ -120,7 +139,7 @@ export function getAccessibleBranches(userRole: UserRole, userBranch: Branch): B
     return [userBranch];
   }
   
-  // Sales hanya access branch mereka (untuk display only)
+  // Sales dan Merchandiser hanya access branch mereka (untuk display only)
   return [userBranch];
 }
 

@@ -9,9 +9,13 @@
     "lint": "eslint",
     "seed:supabase": "node scripts/seed-supabase.js",
     "migrate:firestore": "ts-node scripts/firestore-migration.ts",
-    "migrate:firestore:validate": "ts-node -e \"console.log('Firestore migration script is valid')\""
+    "migrate:firestore:validate": "ts-node -e \"console.log('Firestore migration script is valid')\"",
+    "migrate:passwords": "ts-node scripts/migrate-passwords.ts",
+    "migrate:passwords:dry": "ts-node scripts/migrate-passwords.ts --dry-run",
+    "migrate:passwords:reset": "ts-node scripts/migrate-passwords.ts --force-reset"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
     "@supabase/supabase-js": "^2.95.3",
     "@upstash/redis": "^1.36.0",
     "@vercel/kv": "^3.0.0",
@@ -27,9 +31,11 @@
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-hook-form": "^7.71.1",
     "react-signature-canvas": "^1.1.0-alpha.2",
     "recharts": "^3.6.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

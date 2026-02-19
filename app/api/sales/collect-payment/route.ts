@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { collectPaymentSchema } from '@/lib/validations';
 
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
@@ -32,12 +33,22 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { saleId, branch, amountPaid, paymentMethod } = body;
 
-    if (!saleId) {
-      return NextResponse.json({ error: 'Missing saleId' }, { status: 400 });
+    // Validate payment data with Zod
+    const validation = collectPaymentSchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      return NextResponse.json(
+        { error: 'Ralat pengesahan', details: errors },
+        { status: 400 }
+      );
     }
 
+    const { saleId, customerId, amount, payment_method, reference_number, notes, receipt_url } = validation.data;
+
+    // Get branch from sale record
+    let branch = body.branch;
+    
     // Determine which table
     const target = (branch === 'Kinabatangan' || branch?.toLowerCase().includes('kina')) 
       ? TABLE_KIN 
@@ -64,10 +75,13 @@ export async function POST(request: NextRequest) {
       .from(target)
       .update({
         payment_status: 'paid',
-        payment_method: paymentMethod || sale.payment_method,
+        payment_method: payment_method || sale.payment_method,
         paid_at: new Date().toISOString(),
         paid_by: currentUser.id,
-        amount_paid: amountPaid || sale.total_amount
+        amount_paid: amount,
+        reference_number,
+        payment_notes: notes,
+        receipt_url
       })
       .eq('id', saleId);
 
@@ -104,7 +118,7 @@ export async function POST(request: NextRequest) {
       success: true, 
       message: 'Payment collected successfully',
       saleId,
-      amountPaid: amountPaid || sale.total_amount
+      amountPaid: amount || sale.total_amount
     });
 
   } catch (error) {

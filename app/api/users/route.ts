@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import crypto from 'crypto';
+import bcrypt from 'bcrypt';
+import { createUserSchema, updateUserSchema } from '@/lib/validations';
 
 type SessionUser = {
   id: string;
@@ -12,9 +13,8 @@ type SessionUser = {
 const ALLOWED_ROLES = ['Main Admin', 'Admin', 'Sales'] as const;
 const ALLOWED_BRANCHES = ['HQ', 'Kota Kinabalu', 'Kinabatangan'] as const;
 
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex');
-}
+// Bcrypt salt rounds - higher is more secure but slower
+const SALT_ROUNDS = 10;
 
 function isColumnError(error: any): boolean {
   const msg = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
@@ -45,35 +45,6 @@ async function getCurrentUser(request: NextRequest): Promise<SessionUser | null>
     console.error('Error getting current user:', error);
     return null;
   }
-}
-
-function validateUserData(data: any): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (!data.name || typeof data.name !== 'string' || !data.name.trim()) {
-    errors.push('Name is required');
-  }
-
-  if (!data.username || typeof data.username !== 'string' || !data.username.trim()) {
-    errors.push('Username is required');
-  }
-
-  if (!data.password || typeof data.password !== 'string' || data.password.length < 6) {
-    errors.push('Password is required and must be at least 6 characters');
-  }
-
-  if (!data.role || !ALLOWED_ROLES.includes(data.role)) {
-    errors.push('Role must be one of: Main Admin, Admin, Sales');
-  }
-
-  if (!data.branch || !ALLOWED_BRANCHES.includes(data.branch)) {
-    errors.push('Branch must be one of: HQ, Kota Kinabalu, Kinabatangan');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
 }
 
 export async function GET(request: NextRequest) {
@@ -151,27 +122,31 @@ export async function POST(request: NextRequest) {
       commissionRate: rawBody.commissionRate,
     };
 
-    const validation = validateUserData(body);
-    if (!validation.valid) {
-      return NextResponse.json({ error: validation.errors.join(', ') }, { status: 400 });
+    // Validate input with Zod
+    const validation = createUserSchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      return NextResponse.json({ error: 'Ralat pengesahan', details: errors }, { status: 400 });
     }
 
-    if (currentUser.role === 'Admin' && body.branch !== currentUser.branch) {
+    const validatedData = validation.data;
+
+    if (currentUser.role === 'Admin' && validatedData.branch !== currentUser.branch) {
       return NextResponse.json({ error: 'Admin can only create users in their own branch' }, { status: 403 });
     }
 
-    if (body.role === 'Main Admin' && body.branch !== 'HQ') {
+    if (validatedData.role === 'Main Admin' && validatedData.branch !== 'HQ') {
       return NextResponse.json({ error: 'Main Admin must be assigned to HQ' }, { status: 400 });
     }
 
-    if (body.role !== 'Main Admin' && body.branch === 'HQ') {
+    if (validatedData.role !== 'Main Admin' && validatedData.branch === 'HQ') {
       return NextResponse.json({ error: 'Only Main Admin can be assigned to HQ' }, { status: 400 });
     }
 
     const { data: existing, error: existingError } = await supabaseAdmin
       .from('users')
       .select('id')
-      .eq('username', body.username)
+      .eq('username', validatedData.username)
       .limit(1);
 
     if (existingError) {
@@ -182,32 +157,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Username already exists' }, { status: 409 });
     }
 
-    const hashedPassword = hashPassword(body.password);
-    const commissionRate = body.role === 'Sales' ? Number(body.commissionRate ?? 0.04) : null;
+    // Hash password using bcrypt (async operation)
+    const hashedPassword = await bcrypt.hash(validatedData.password, SALT_ROUNDS);
+    const commissionRate = validatedData.role === 'Sales' ? Number(validatedData.commissionRate ?? 0.04) : null;
 
     const payloadCandidates = [
       {
-        username: body.username,
-        full_name: body.name,
+        username: validatedData.username,
+        full_name: validatedData.name,
         password: hashedPassword,
-        role: body.role,
-        branch: body.branch,
+        role: validatedData.role,
+        branch: validatedData.branch,
         commission_rate: commissionRate,
       },
       {
-        username: body.username,
-        name: body.name,
+        username: validatedData.username,
+        name: validatedData.name,
         password: hashedPassword,
-        role: body.role,
-        branch: body.branch,
+        role: validatedData.role,
+        branch: validatedData.branch,
         commissionRate,
       },
       {
-        username: body.username,
-        full_name: body.name,
+        username: validatedData.username,
+        full_name: validatedData.name,
         password_hash: hashedPassword,
-        role: body.role,
-        branch: body.branch,
+        role: validatedData.role,
+        branch: validatedData.branch,
       },
     ];
 
@@ -298,7 +274,8 @@ export async function PUT(request: NextRequest) {
     if (typeof body.branch === 'string' && ALLOWED_BRANCHES.includes(body.branch)) updates.branch = body.branch;
 
     if (typeof body.password === 'string' && body.password.trim().length >= 6) {
-      const hashed = hashPassword(body.password.trim());
+      // Hash password using bcrypt (async operation)
+      const hashed = await bcrypt.hash(body.password.trim(), SALT_ROUNDS);
       updates.password = hashed;
       updates.password_hash = hashed;
     }

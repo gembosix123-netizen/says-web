@@ -1,6 +1,9 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Store, Plus, Save, Trash2, Search, Edit, MapPin } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { createCustomerSchema, type CreateCustomerInput } from '@/lib/validations';
 
 interface Customer {
   id: string;

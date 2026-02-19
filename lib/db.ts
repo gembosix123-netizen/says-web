@@ -2,20 +2,19 @@ import { Redis } from '@upstash/redis';
 import fs from 'fs';
 import path from 'path';
 
-// Initialize Redis client explicitly with connection check logging
-// Prioritize KV_ (Vercel) but fallback to UPSTASH_ (Direct)
+// Initialize Redis client only if credentials exist
 const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const canUseRedis = Boolean(redisUrl && redisToken);
 
-const redis = new Redis({
-  url: redisUrl || '',
-  token: redisToken || '',
-});
+const redis = canUseRedis
+  ? new Redis({ url: redisUrl!, token: redisToken! })
+  : null;
 
 if (process.env.NODE_ENV === 'production') {
   console.log('[DB] Initializing Redis connection...');
-  if (!redisUrl || !redisToken) {
-    console.error('[DB] CRITICAL: Redis credentials missing! Check KV_REST_API_URL or UPSTASH_REDIS_REST_URL.');
+  if (!canUseRedis) {
+    console.warn('[DB] Redis credentials missing. Falling back to JSON storage.');
   } else {
     console.log('[DB] Redis credentials found.');
   }
@@ -41,7 +40,7 @@ export class DB<T extends { id: string }> {
   }
 
   async getAll(): Promise<T[]> {
-    if (IS_PROD) {
+    if (IS_PROD && canUseRedis && redis) {
       let data: T[] | null = null;
       try {
         data = await redis.get<T[]>(this.keyName);
@@ -124,7 +123,7 @@ export class DB<T extends { id: string }> {
       newItems.push(item);
     }
     
-    if (IS_PROD) {
+    if (IS_PROD && canUseRedis && redis) {
       await redis.set(this.keyName, newItems);
     } else {
       fs.writeFileSync(this.filePath, JSON.stringify(newItems, null, 2));
@@ -139,7 +138,7 @@ export class DB<T extends { id: string }> {
     
     if (items.length === newItems.length) return false;
     
-    if (IS_PROD) {
+    if (IS_PROD && canUseRedis && redis) {
       await redis.set(this.keyName, newItems);
     } else {
       fs.writeFileSync(this.filePath, JSON.stringify(newItems, null, 2));

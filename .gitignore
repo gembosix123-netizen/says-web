@@ -41,6 +41,10 @@ firebase-key.json
 firestore-backup/
 backups/
 
+# Migration logs (may contain sensitive data)
+/logs/
+*.log
+
 # vercel
 .vercel
 

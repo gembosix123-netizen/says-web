@@ -1,4 +1,4 @@
-export type Role = 'Super Admin' | 'Admin' | 'Sales';
+export type Role = 'Super Admin' | 'Admin' | 'Sales' | 'Merchandiser';
 
 export interface User {
   id: string;
@@ -9,6 +9,7 @@ export interface User {
   assignedShopId?: string | null;
   commissionRate?: number; // 0.05 for 5%
   branch: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
+  allowedStores?: string[]; // For merchandiser: array of customer IDs they can visit
 }
 
 export interface CommissionPayout {
@@ -136,4 +137,59 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+// Merchandiser-related types
+export interface StoreVisit {
+  id: string;
+  merchandiser_id: string;
+  customer_id: string;
+  branch: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
+  
+  // Visit tracking
+  check_in_time: string; // ISO timestamp
+  check_out_time?: string | null;
+  gps_lat?: number | null;
+  gps_long?: number | null;
+  
+  // Staff information
+  staff_name?: string | null;
+  staff_contact?: string | null;
+  
+  // Visit details
+  visit_type?: 'audit' | 'inspection' | 'follow-up';
+  status: 'in-progress' | 'completed' | 'cancelled';
+  notes?: string | null;
+  
+  // Photos
+  photo_urls?: string[] | null;
+  
+  // Metadata
+  created_at: string;
+  updated_at: string;
+  
+  // Joined data (optional, populated by API)
+  customer?: Customer;
+  merchandiser?: User;
+}
+
+export interface StoreAuditItem {
+  id: string;
+  visit_id: string;
+  product_id: string;
+  product_name: string;
+  
+  // Stock status
+  balance_stock: number;
+  expired_stock: number;
+  damaged_stock: number;
+  
+  // Condition notes
+  condition_notes?: string | null;
+  photo_url?: string | null;
+  
+  created_at: string;
+  
+  // Joined data (optional)
+  product?: Product;
 }

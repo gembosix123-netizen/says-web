@@ -1,6 +1,9 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Plus, Save, Trash2, Users, Store, Globe } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { createUserSchema, type CreateUserInput } from '@/lib/validations';
 
 interface UserType {
   id: string;
@@ -24,14 +27,22 @@ export default function UserManagement({ enableCreation = true }: UserManagement
   const [users, setUsers] = useState<UserType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({
-    username: '',
-    password: '',
-    name: '',
-    role: 'Sales',
-    assignedShopId: '',
-    branch: ''
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+    watch
+  } = useForm<CreateUserInput>({
+    resolver: zodResolver(createUserSchema),
+    defaultValues: {
+      role: 'Sales',
+      branch: 'Kota Kinabalu'
+    }
   });
+
+  const watchRole = watch('role');
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -61,27 +72,21 @@ export default function UserManagement({ enableCreation = true }: UserManagement
     fetchCustomers();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.username || !form.password || !form.name || !form.branch) {
-      alert('Please fill in all required fields');
-      return;
-    }
-
+  const onSubmit = async (data: CreateUserInput) => {
     try {
       const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(data)
       });
 
       if (res.ok) {
         alert('User created successfully');
-        setForm({ username: '', password: '', name: '', role: 'Sales', assignedShopId: '', branch: '' });
+        reset();
         fetchUsers();
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to create user');
+        alert(err.error || err.details?.join(', ') || 'Failed to create user');
       }
     } catch (error) {
       console.error('Error creating user:', error);
@@ -115,63 +120,81 @@ export default function UserManagement({ enableCreation = true }: UserManagement
           Add New User
         </h2>
         
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input
-            placeholder="Username (e.g., sales_ali)"
-            value={form.username}
-            onChange={(e) => setForm({ ...form, username: e.target.value })}
-            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            required
-          />
-          <input
-            placeholder="Full Name"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            required
-          />
+        <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <input
+              placeholder="Username (e.g., sales_ali)"
+              {...register('username')}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            {errors.username && (
+              <p className="text-red-400 text-xs mt-1">{errors.username.message}</p>
+            )}
+          </div>
+          <div>
+            <input
+              type="password"
+              placeholder="Password"
+              {...register('password')}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            {errors.password && (
+              <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>
+            )}
+          </div>
+          <div>
+            <input
+              placeholder="Full Name"
+              {...register('name')}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            {errors.name && (
+              <p className="text-red-400 text-xs mt-1">{errors.name.message}</p>
+            )}
+          </div>
           
-          <select
-            value={form.branch}
-            onChange={(e) => setForm({ ...form, branch: e.target.value })}
-            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required
-          >
-            <option value="">Select Branch (Required)</option>
-            <option value="Kota Kinabalu">Kota Kinabalu</option>
-            <option value="Kinabatangan">Kinabatangan</option>
-            <option value="HQ">HQ</option>
-          </select>
+          <div>
+            <select
+              {...register('branch')}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select Branch (Required)</option>
+              <option value="Kota Kinabalu">Kota Kinabalu</option>
+              <option value="Kinabatangan">Kinabatangan</option>
+              <option value="HQ">HQ</option>
+            </select>
+            {errors.branch && (
+              <p className="text-red-400 text-xs mt-1">{errors.branch.message}</p>
+            )}
+          </div>
 
-          <select
-            value={form.role}
-            onChange={(e) => setForm({ ...form, role: e.target.value })}
-            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="Sales">Sales</option>
-            <option value="Admin">Admin</option>
-            <option value="Super Admin">Super Admin</option>
-          </select>
+          <div>
+            <select
+              {...register('role')}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="Sales">Sales</option>
+              <option value="Admin">Admin</option>
+              <option value="Main Admin">Main Admin</option>
+            </select>
+            {errors.role && (
+              <p className="text-red-400 text-xs mt-1">{errors.role.message}</p>
+            )}
+          </div>
 
-          {form.role === 'Sales' && (
-              <select
-                value={form.assignedShopId}
-                onChange={(e) => setForm({ ...form, assignedShopId: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 md:col-span-2"
-              >
-                  <option value="">Select Assigned Shop (Optional)</option>
-                  {customers.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-              </select>
+          {watchRole === 'Sales' && (
+            <div>
+              <input
+                type="number"
+                step="0.01"
+                placeholder="Commission Rate (e.g., 0.04 for 4%)"
+                {...register('commissionRate', { valueAsNumber: true })}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {errors.commissionRate && (
+                <p className="text-red-400 text-xs mt-1">{errors.commissionRate.message}</p>
+              )}
+            </div>
           )}
 
           <button type="submit" className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 transition-all">

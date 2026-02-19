@@ -90,6 +90,16 @@ export function middleware(request: NextRequest) {
       if (role === 'Main Admin' && (pathname === '/' || pathname === '/dashboard')) {
         return NextResponse.redirect(new URL('/admin', request.url));
       }
+      
+      // Redirect Merchandiser to their dashboard
+      if (role === 'Merchandiser' && (pathname === '/' || pathname === '/dashboard')) {
+        return NextResponse.redirect(new URL('/merchandiser', request.url));
+      }
+      
+      // Redirect Sales to sales dashboard (choice between sales and merchandiser)
+      if (role === 'Sales' && pathname === '/') {
+        return NextResponse.redirect(new URL('/sales-dashboard', request.url));
+      }
 
       if (pathname.startsWith('/admin')) {
         if (role !== 'Admin' && role !== 'Main Admin') {
@@ -110,8 +120,16 @@ export function middleware(request: NextRequest) {
         }
       }
       
+      // Sales routes - only Sales role can create sales (not Merchandiser)
       if (pathname.startsWith('/sales') && role !== 'Sales' && role !== 'Admin' && role !== 'Main Admin') {
          return NextResponse.redirect(new URL('/', request.url));
+      }
+      
+      // Merchandiser routes - both Merchandiser and Sales can access (Sales can do merchandiser work)
+      if (pathname.startsWith('/merchandiser')) {
+        if (role !== 'Merchandiser' && role !== 'Sales' && role !== 'Admin' && role !== 'Main Admin') {
+          return NextResponse.redirect(new URL('/', request.url));
+        }
       }
 
     } catch (e) {
