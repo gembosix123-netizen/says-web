@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
     allSales.forEach((sale) => {
       const date = sale.created_at?.split('T')[0] || 'unknown';
       const branchName = sale.branch || 'Unknown';
-      const amount = parseFloat(sale.amount || sale.total_amount || 0);
+      const amount = Number(sale.amount ?? sale.total_amount ?? 0);
 
       // Daily data
       if (!dailyData[date]) {

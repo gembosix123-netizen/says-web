@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
 
     const payoutsByUser: Record<string, number> = {};
     (payouts as CommissionPayoutRecord[]).forEach((p) => {
-      payoutsByUser[p.user_id] = (payoutsByUser[p.user_id] || 0) + parseFloat(p.amount || 0);
+      payoutsByUser[p.user_id] = (payoutsByUser[p.user_id] || 0) + Number(p.amount ?? 0);
     });
 
     // Calculate commission for each sales user
@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
       );
 
       const totalSales = userSales.reduce((sum, s) => 
-        sum + parseFloat(s.total_amount || s.amount || 0), 0
+        sum + Number(s.total_amount ?? s.amount ?? 0), 0
       );
 
       const commissionRate = user.commission_rate || 0.05; // Default 5%

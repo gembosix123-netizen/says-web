@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     // ============================================================================
     // Sheet 2: BRANCH BREAKDOWN
     // ============================================================================
-    const branchData = [
+    const branchData: Array<Array<string | number>> = [
       ['BRANCH SUMMARY'],
       [],
       ['Branch', 'Total Revenue (RM)', 'Transactions', 'Avg Transaction (RM)'],
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     // ============================================================================
     // Sheet 3: DAILY SALES
     // ============================================================================
-    const dailyData = [
+    const dailyData: Array<Array<string | number>> = [
       ['DAILY SALES TREND'],
       [],
       ['Date', 'Amount (RM)', 'Transactions'],
