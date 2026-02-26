@@ -20,9 +20,9 @@ import {
   updateTransaction,
   deleteTransaction,
   toApiResponse,
-  Transaction,
 } from '@/lib/firestore-service';
-import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
+import { createOrderSchema } from '@/lib/validations';
+import { requireAuth } from '@/lib/auth-check';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -96,13 +96,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Sales+ role
+    // Check authentication - Sales role or higher can create orders
+    const { error } = await requireAuth(request, 'Sales');
+    if (error) return error;
+
     const body = await request.json();
 
     // Validate transaction data with Zod
     const validation = createOrderSchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
         { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
@@ -175,7 +178,10 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // TODO: Implement authentication check
+    // Check authentication - Admin role or higher can update orders
+    const { error } = await requireAuth(request, 'Admin');
+    if (error) return error;
+
     const body = await request.json();
     const transactionId = body.id || body.transactionId;
 
@@ -218,7 +224,10 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Main Admin only
+    // Check authentication - Main Admin only can delete orders
+    const { error } = await requireAuth(request, 'Main Admin');
+    if (error) return error;
+
     const searchParams = request.nextUrl.searchParams;
     const transactionId = searchParams.get('id');
 

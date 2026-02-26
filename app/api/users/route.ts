@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import bcrypt from 'bcrypt';
-import { createUserSchema, updateUserSchema } from '@/lib/validations';
+import { createUserSchema } from '@/lib/validations';
 
 type SessionUser = {
   id: string;
@@ -16,19 +16,14 @@ const ALLOWED_BRANCHES = ['HQ', 'Kota Kinabalu', 'Kinabatangan'] as const;
 // Bcrypt salt rounds - higher is more secure but slower
 const SALT_ROUNDS = 10;
 
-function isColumnError(error: any): boolean {
-  const msg = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
-  return msg.includes('column') || msg.includes('schema cache');
-}
-
-function mapUser(row: any) {
+function mapUser(row: Record<string, unknown>) {
   return {
-    id: row.id,
-    username: row.username,
-    role: row.role,
-    name: row.name ?? row.full_name ?? '',
-    branch: row.branch,
-    commissionRate: row.commission_rate ?? row.commissionRate,
+    id: row.id as string,
+    username: row.username as string,
+    role: row.role as string,
+    name: row.name as string,
+    branch: row.branch as string,
+    commissionRate: (row.commission_rate as number | undefined) ?? 0,
     created_at: row.created_at,
   };
 }
@@ -125,7 +120,7 @@ export async function POST(request: NextRequest) {
     // Validate input with Zod
     const validation = createUserSchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json({ error: 'Ralat pengesahan', details: errors }, { status: 400 });
     }
 
@@ -159,59 +154,34 @@ export async function POST(request: NextRequest) {
 
     // Hash password using bcrypt (async operation)
     const hashedPassword = await bcrypt.hash(validatedData.password, SALT_ROUNDS);
-    const commissionRate = validatedData.role === 'Sales' ? Number(validatedData.commissionRate ?? 0.04) : null;
+    const commissionRate = validatedData.role === 'Sales' ? Number(validatedData.commissionRate ?? 0.04) : 0;
 
-    const payloadCandidates = [
-      {
-        username: validatedData.username,
-        full_name: validatedData.name,
-        password: hashedPassword,
-        role: validatedData.role,
-        branch: validatedData.branch,
-        commission_rate: commissionRate,
-      },
-      {
-        username: validatedData.username,
-        name: validatedData.name,
-        password: hashedPassword,
-        role: validatedData.role,
-        branch: validatedData.branch,
-        commissionRate,
-      },
-      {
-        username: validatedData.username,
-        full_name: validatedData.name,
-        password_hash: hashedPassword,
-        role: validatedData.role,
-        branch: validatedData.branch,
-      },
-    ];
+    // Use correct column names matching Supabase schema
+    const payload = {
+      username: validatedData.username,
+      name: validatedData.name,
+      password: hashedPassword,
+      role: validatedData.role,
+      branch: validatedData.branch,
+      commission_rate: commissionRate,
+    };
 
-    let createdUser: any = null;
-    let lastError: any = null;
+    const { data: createdUser, error } = await supabaseAdmin
+      .from('users')
+      .insert(payload)
+      .select('*')
+      .maybeSingle();
 
-    for (const payload of payloadCandidates) {
-      const { data, error } = await supabaseAdmin
-        .from('users')
-        .insert(payload)
-        .select('*')
-        .maybeSingle();
-
-      if (!error) {
-        createdUser = data;
-        break;
-      }
-
-      lastError = error;
-      if (!isColumnError(error)) break;
-    }
-
-    if (!createdUser) {
-      console.error('Error creating user:', lastError);
-      const message = `${lastError?.message || ''}`.toLowerCase().includes('duplicate')
+    if (error) {
+      console.error('Error creating user:', error);
+      const message = `${error?.message || ''}`.toLowerCase().includes('duplicate')
         ? 'Username already exists'
         : 'Failed to create user';
       return NextResponse.json({ error: message }, { status: 500 });
+    }
+
+    if (!createdUser) {
+      return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
     }
 
     return NextResponse.json(
@@ -263,7 +233,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    const updates: any = {};
+    const updates: Record<string, unknown> = {};
 
     if (typeof body.name === 'string') {
       updates.name = body.name;

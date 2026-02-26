@@ -13,18 +13,18 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Check if already logged in
+    // Check if already logged in - run only once on mount
     const user = localStorage.getItem('user');
     if (user) {
-        try {
-            const userData = JSON.parse(user);
-            if (userData.role === 'Main Admin') router.push('/admin/founder');
-            else if (userData.role === 'Admin') router.push('/admin');
-            else router.push('/dashboard');
-        } catch (e) {
-            // Invalid JSON in localStorage, clear it
-            localStorage.removeItem('user');
-        }
+      try {
+        const userData = JSON.parse(user);
+        if (userData.role === 'Main Admin') router.push('/admin/founder');
+        else if (userData.role === 'Admin') router.push('/admin');
+        else router.push('/dashboard');
+      } catch (e) {
+        // Invalid JSON in localStorage, clear it
+        localStorage.removeItem('user');
+      }
     }
   }, [router]);
 

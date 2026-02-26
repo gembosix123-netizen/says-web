@@ -2,13 +2,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // Helper: Get current user from session
-async function getCurrentUser(request: Request) {
+interface SaleItemRecord {
+  name?: string;
+  quantity?: number;
+}
+
+interface MonthlySaleRecord {
+  created_at?: string;
+  branch?: string;
+  amount?: number | string;
+  total_amount?: number | string;
+  items?: SaleItemRecord[] | null;
+  item_name?: string;
+}
+
+interface DailyEntry {
+  date: string;
+  amount: number;
+  transactions: number;
+  branch: string;
+}
+
+interface BranchEntry {
+  branch: string;
+  totalRevenue: number;
+  transactionCount: number;
+}
+
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -63,7 +90,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch sales data for the month
-    let allSales: any[] = [];
+    let allSales: MonthlySaleRecord[] = [];
     for (const table of tables) {
       const { data: sales, error } = await supabaseAdmin
         .from(table)
@@ -80,8 +107,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Process data for report
-    const dailyData: Record<string, any> = {};
-    const branchData: Record<string, any> = {};
+    const dailyData: Record<string, DailyEntry> = {};
+    const branchData: Record<string, BranchEntry> = {};
     const productData: Record<string, number> = {};
 
     allSales.forEach((sale) => {
@@ -105,7 +132,7 @@ export async function GET(request: NextRequest) {
 
       // Product data
       if (sale.items && Array.isArray(sale.items)) {
-        sale.items.forEach((item: any) => {
+        sale.items.forEach((item) => {
           const productName = item.name || 'Unknown Product';
           productData[productName] = (productData[productName] || 0) + (item.quantity || 1);
         });
@@ -115,11 +142,11 @@ export async function GET(request: NextRequest) {
     });
 
     // Calculate summary
-    const totalRevenue = Object.values(dailyData).reduce((sum, d: any) => sum + d.amount, 0);
+    const totalRevenue = Object.values(dailyData).reduce((sum, d) => sum + d.amount, 0);
     const totalTransactions = allSales.length;
 
     // Branch summaries with avg
-    const branchSummaries = Object.values(branchData).map((b: any) => ({
+    const branchSummaries = Object.values(branchData).map((b) => ({
       ...b,
       avgTransaction: b.totalRevenue / b.transactionCount,
       topProduct: 'N/A', // Could be enhanced
@@ -133,7 +160,7 @@ export async function GET(request: NextRequest) {
 
     // Daily data sorted by date
     const dailyDataArray = Object.values(dailyData)
-      .sort((a: any, b: any) => a.date.localeCompare(b.date))
+      .sort((a, b) => a.date.localeCompare(b.date))
       .slice(0, 31);
 
     const report = {

@@ -12,12 +12,27 @@ export default function InventoryPage() {
   const [sortBy, setSortBy] = useState<'name' | 'stock' | 'price'>('name');
   const [filterLowStock, setFilterLowStock] = useState(false);
 
+  const toSafeNumber = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
   useEffect(() => {
     async function fetchProducts() {
       try {
-        const response = await fetch('/api/products');
+        const response = await fetch('/api/inventory/van');
         const data = await response.json();
-        setProducts(Array.isArray(data) ? data : []);
+
+        const rawProducts = Array.isArray(data?.products) ? data.products : [];
+        const normalizedProducts: Product[] = rawProducts.map((item: any) => ({
+          id: String(item?.id || ''),
+          name: String(item?.name || 'Unnamed Product'),
+          unit: String(item?.unit || 'unit'),
+          price: toSafeNumber(item?.price),
+          stock: toSafeNumber(item?.stock),
+        }));
+
+        setProducts(normalizedProducts);
       } catch (error) {
         console.error('Failed to fetch products:', error);
       } finally {
@@ -146,7 +161,7 @@ export default function InventoryPage() {
           {loading ? (
             <div className="p-8 text-center text-slate-400">Loading inventory...</div>
           ) : filteredProducts.length === 0 ? (
-            <div className="p-8 text-center text-slate-400">No products found</div>
+            <div className="p-8 text-center text-slate-400">No van inventory assigned</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">

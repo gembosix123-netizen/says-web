@@ -1,0 +1,9 @@
+{
+  "id": "u_auditor",
+  "username": "auditor",
+  "password": "Auditor2026!",
+  "role": "Auditor",
+  "name": "Auditor",
+  "assignedShopId": null,
+  "branch": "HQ"
+}

@@ -7,20 +7,38 @@ import {
   ArrowLeft, 
   TrendingUp,
   Target,
-  Award,
   BarChart3,
   Calendar,
   Store,
   Package
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 
 interface WeeklyData {
   day: string;
   date: string;
   sales: number;
   revenue: number;
+}
+
+interface SalesApiItem {
+  name?: string;
+  product_name?: string;
+  quantity?: number;
+  subtotal?: number;
+  price?: number;
+}
+
+interface SalesApiRecord {
+  id: string;
+  customer_id?: string;
+  customer_name?: string;
+  customer?: { id?: string; name?: string };
+  total?: number;
+  total_amount?: number;
+  created_at?: string;
+  createdAt?: string;
+  items?: SalesApiItem[];
 }
 
 interface StatsData {
@@ -54,50 +72,59 @@ export default function SalesStatsPage() {
     setLoading(true);
     try {
       const today = new Date();
+      const response = await fetch('/api/sales');
+      const payload = await response.json().catch(() => []);
+
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to fetch sales data');
+      }
+
+      const allSales: SalesApiRecord[] = Array.isArray(payload) ? payload : [];
+      const normalizedSales = allSales.map((sale) => {
+        const createdAt = sale.created_at || sale.createdAt || '';
+        return {
+          ...sale,
+          created_at: createdAt,
+          total_amount: Number(sale.total_amount ?? sale.total ?? 0),
+        };
+      });
       
       // Get this week's data
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
-      const weekStartStr = weekStart.toISOString().split('T')[0];
+      const weekStartMs = new Date(weekStart.toISOString().split('T')[0]).getTime();
 
       // Get last week's start
       const lastWeekStart = new Date(weekStart);
       lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-      const lastWeekStartStr = lastWeekStart.toISOString().split('T')[0];
+      const lastWeekStartMs = new Date(lastWeekStart.toISOString().split('T')[0]).getTime();
 
       // Get month start
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      const monthStartStr = monthStart.toISOString().split('T')[0];
+      const monthStartMs = monthStart.getTime();
 
-      // Fetch this week's sales
-      const { data: thisWeekSales } = await supabase
-        .from('sales')
-        .select('*, customers(name)')
-        .gte('created_at', weekStartStr);
+      const thisWeek = normalizedSales.filter((sale) => {
+        const createdMs = new Date(sale.created_at || '').getTime();
+        return !Number.isNaN(createdMs) && createdMs >= weekStartMs;
+      });
 
-      // Fetch last week's sales
-      const { data: lastWeekSales } = await supabase
-        .from('sales')
-        .select('*')
-        .gte('created_at', lastWeekStartStr)
-        .lt('created_at', weekStartStr);
+      const lastWeek = normalizedSales.filter((sale) => {
+        const createdMs = new Date(sale.created_at || '').getTime();
+        return !Number.isNaN(createdMs) && createdMs >= lastWeekStartMs && createdMs < weekStartMs;
+      });
 
-      // Fetch this month's sales
-      const { data: monthSales } = await supabase
-        .from('sales')
-        .select('*')
-        .gte('created_at', monthStartStr);
+      const month = normalizedSales.filter((sale) => {
+        const createdMs = new Date(sale.created_at || '').getTime();
+        return !Number.isNaN(createdMs) && createdMs >= monthStartMs;
+      });
 
       // Calculate this week stats
-      const thisWeek = thisWeekSales || [];
       const thisWeekRevenue = thisWeek.reduce((sum, s) => sum + (s.total_amount || 0), 0);
 
       // Calculate last week stats
-      const lastWeek = lastWeekSales || [];
       const lastWeekRevenue = lastWeek.reduce((sum, s) => sum + (s.total_amount || 0), 0);
 
       // Calculate monthly stats
-      const month = monthSales || [];
       const monthRevenue = month.reduce((sum, s) => sum + (s.total_amount || 0), 0);
 
       // Weekly data by day
@@ -124,7 +151,7 @@ export default function SalesStatsPage() {
       // Top customers
       const customerMap: Record<string, { name: string; totalSpent: number; orders: number }> = {};
       thisWeek.forEach(sale => {
-        const name = sale.customers?.name || 'Unknown';
+        const name = sale.customer_name || sale.customer?.name || 'Unknown';
         if (!customerMap[name]) {
           customerMap[name] = { name, totalSpent: 0, orders: 0 };
         }
@@ -139,13 +166,14 @@ export default function SalesStatsPage() {
       const productMap: Record<string, { name: string; quantity: number; revenue: number }> = {};
       thisWeek.forEach(sale => {
         if (sale.items && Array.isArray(sale.items)) {
-          sale.items.forEach((item: any) => {
-            if (item.product_name) {
-              if (!productMap[item.product_name]) {
-                productMap[item.product_name] = { name: item.product_name, quantity: 0, revenue: 0 };
+          sale.items.forEach((item) => {
+            const productName = item.product_name || item.name;
+            if (productName) {
+              if (!productMap[productName]) {
+                productMap[productName] = { name: productName, quantity: 0, revenue: 0 };
               }
-              productMap[item.product_name].quantity += item.quantity || 0;
-              productMap[item.product_name].revenue += item.subtotal || 0;
+              productMap[productName].quantity += Number(item.quantity || 0);
+              productMap[productName].revenue += Number(item.subtotal || 0) || (Number(item.price || 0) * Number(item.quantity || 0));
             }
           });
         }

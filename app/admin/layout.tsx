@@ -40,6 +40,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         const response = await fetch('/api/auth/me');
         if (response.ok) {
           const userData = await response.json();
+          // Batch state updates to prevent cascading renders
           setUsername(userData.name || userData.username || 'User');
           setUserRole(userData.role);
           setUserBranch(userData.branch);

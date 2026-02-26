@@ -10,7 +10,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { createCustomerSchema, updateCustomerSchema } from '@/lib/validations';
+import { createCustomerSchema } from '@/lib/validations';
+import { requireAuth } from '@/lib/auth-check';
 
 // ============================================================================
 // GET HANDLER
@@ -19,8 +20,6 @@ import { createCustomerSchema, updateCustomerSchema } from '@/lib/validations';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const branch = searchParams.get('branch');
-    const type = searchParams.get('type');
     const id = searchParams.get('id');
 
     if (!supabaseAdmin) {
@@ -68,13 +67,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // TODO: Implement authentication check
+    // Check authentication - Sales role or higher can create customers
+    const { error } = await requireAuth(request, 'Sales');
+    if (error) return error;
+
     const body = await request.json();
 
     // Validate customer data with Zod
     const validation = createCustomerSchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
         { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
@@ -140,7 +142,10 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // TODO: Implement authentication check
+    // Check authentication - Sales role or higher can update customers
+    const { error } = await requireAuth(request, 'Sales');
+    if (error) return error;
+
     const body = await request.json();
     const customerId = body.id || body.customerId;
 

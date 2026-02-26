@@ -6,13 +6,13 @@ const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
 
 // Get current user from session cookie
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -37,17 +37,17 @@ export async function POST(request: NextRequest) {
     // Validate payment data with Zod
     const validation = collectPaymentSchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
         { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
       );
     }
 
-    const { saleId, customerId, amount, payment_method, reference_number, notes, receipt_url } = validation.data;
+    const { saleId, amount, payment_method, reference_number, notes, receipt_url } = validation.data;
 
     // Get branch from sale record
-    let branch = body.branch;
+    const branch = body.branch;
     
     // Determine which table
     const target = (branch === 'Kinabatangan' || branch?.toLowerCase().includes('kina')) 
@@ -151,7 +151,7 @@ export async function GET(request: NextRequest) {
       branch = currentUser.branch;
     }
 
-    let pendingSales: any[] = [];
+    let pendingSales = [];
 
     const fetchPending = async (table: string) => {
       let query = supabaseAdmin!

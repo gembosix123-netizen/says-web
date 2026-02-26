@@ -12,15 +12,22 @@ interface AnalyticsDashboardProps {
   customers: Customer[];
 }
 
+interface LowStockAlert {
+    productId: string;
+    productName: string;
+    physicalStock: number;
+    customerName: string;
+    auditDate: string;
+}
+
+const AGENT_BRANCH_MAP: Record<string, string> = {
+    u2: 'Kota Kinabalu',
+    u3: 'Kinabatangan'
+};
+
 export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
   const { t } = useLanguage();
   const [selectedBranch, setSelectedBranch] = useState('all');
-
-  // Agent mapping for role-based access
-  const agentMapping: { [key: string]: string } = {
-    "u2": "Kota Kinabalu",
-    "u3": "Kinabatangan"
-  };
 
   // Get unique branches from transactions
   const branches = useMemo(() => {
@@ -58,7 +65,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
   }, [filteredTransactions, products]);
 
   // Top Sales Agent with location mapping
-  const topAgents = useMemo(() => {
+    const topAgents = (() => {
     const agentSales: Record<string, number> = {};
     filteredTransactions?.forEach(t => {
       if (t.salesmanId) {
@@ -69,22 +76,24 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
       .map(([id, total]) => ({
         user: salesUsers.find(u => u.id === id),
         total: Number(total) || 0,
-        location: agentMapping[id] || 'Unknown'
+                location: AGENT_BRANCH_MAP[id] || 'Unknown'
       }))
       .filter(item => item.user)
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
-  }, [filteredTransactions, salesUsers]);
+    })();
 
   // Stock Alerts (Latest audit for each product < 10)
   const lowStockAlerts = useMemo(() => {
-     const alerts: any[] = [];
+     const alerts: LowStockAlert[] = [];
      stockAudits?.forEach(audit => {
          audit.items?.forEach(item => {
              if (item.physicalStock < 10) {
                  const customer = customers.find(c => c.id === audit.customerId);
                  alerts.push({
-                     ...item,
+                     productId: item.productId,
+                     productName: item.productName,
+                     physicalStock: item.physicalStock,
                      customerName: customer?.name || 'Unknown',
                      auditDate: audit.createdAt,
                  });
@@ -159,21 +168,21 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Total Revenue</p>
-                        <p className="text-2xl font-bold text-green-400">{formatCurrency(transactions.reduce((acc, t) => acc + Number(t.total || 0), 0))}</p>
+                        <p className="text-2xl font-bold text-green-400">{formatCurrency(filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0))}</p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Total Transactions</p>
-                        <p className="text-2xl font-bold text-blue-400">{transactions.length}</p>
+                        <p className="text-2xl font-bold text-blue-400">{filteredTransactions.length}</p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Avg. Order Value</p>
                         <p className="text-2xl font-bold text-purple-400">
-                            {formatCurrency(transactions.length > 0 ? transactions.reduce((acc, t) => acc + Number(t.total || 0), 0) / transactions.length : 0)}
+                            {formatCurrency(filteredTransactions.length > 0 ? filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0) / filteredTransactions.length : 0)}
                         </p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Active Agents</p>
-                        <p className="text-2xl font-bold text-orange-400">{new Set(transactions.map(t => t.salesmanId)).size}</p>
+                        <p className="text-2xl font-bold text-orange-400">{new Set(filteredTransactions.map(t => t.salesmanId).filter(Boolean)).size}</p>
                     </div>
                 </div>
             </div>

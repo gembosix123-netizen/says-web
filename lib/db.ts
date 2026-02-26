@@ -44,9 +44,9 @@ export class DB<T extends { id: string }> {
       let data: T[] | null = null;
       try {
         data = await redis.get<T[]>(this.keyName);
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Handle WRONGTYPE error (e.g. key exists but is not a JSON string)
-        if (error?.message?.includes('WRONGTYPE')) {
+        if (error instanceof Error && error.message.includes('WRONGTYPE')) {
           console.warn(`[DB] Detected WRONGTYPE for ${this.keyName}. resetting key...`);
           await redis.del(this.keyName);
           data = null; // Allow fall-through to seeding logic
@@ -77,9 +77,9 @@ export class DB<T extends { id: string }> {
       if (initialData.length === 0 && this.keyName === 'users') {
         console.log('[DB] Seeding default admin user (Hardcoded).');
         initialData = [
-          { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin" } as any,
-          { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as any,
-          { id: "u3", username: "allan", password: "Allan123", role : "Sales", name: "Allan"} as any
+          { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin" } as unknown as T,
+          { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as unknown as T,
+          { id: "u3", username: "allan", password: "Allan123", role : "Sales", name: "Allan"} as unknown as T
         ];
       }
 
@@ -101,7 +101,7 @@ export class DB<T extends { id: string }> {
       try {
         const data = fs.readFileSync(this.filePath, 'utf8');
         return JSON.parse(data) as T[];
-      } catch (error) {
+      } catch {
         return [];
       }
     }

@@ -15,23 +15,47 @@ export function MerchandiserDashboard() {
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
-    // Get from cookie
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    if (sessionCookie) {
+    let mounted = true;
+
+    const fetchUserInfo = async () => {
       try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
+        const response = await fetch('/api/auth/me', { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+
+        if (mounted && response.ok && payload) {
+          setUserInfo({
+            name: payload.name || payload.username || 'User',
+            role: payload.role || '',
+            branch: payload.branch || ''
+          });
+          return;
+        }
+      } catch (e) {
+        console.error('Failed to fetch authenticated user:', e);
+      }
+
+      const localUser = localStorage.getItem('user');
+      if (!localUser || !mounted) {
+        return;
+      }
+
+      try {
+        const data = JSON.parse(localUser);
         setUserInfo({
           name: data.name || data.username || 'User',
           role: data.role || '',
           branch: data.branch || ''
         });
       } catch (e) {
-        console.error('Failed to parse session:', e);
+        console.error('Failed to parse local user data:', e);
       }
-    }
+    };
+
+    fetchUserInfo();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -122,7 +146,9 @@ export function MerchandiserDashboard() {
               </div>
               <div className="text-left hidden sm:block">
                 <p className="text-sm font-medium text-white">{userInfo?.name || 'User'}</p>
-                <p className="text-xs text-white/50">{userInfo?.branch || 'Branch'}</p>
+                <p className="text-xs text-white/60">
+                  {[userInfo?.role, userInfo?.branch].filter(Boolean).join(' • ') || 'Maklumat akaun tiada'}
+                </p>
               </div>
               <ChevronDown size={16} className={`text-white/50 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
             </button>
@@ -139,12 +165,16 @@ export function MerchandiserDashboard() {
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-white text-lg truncate">{userInfo?.name}</p>
                       <div className="flex flex-wrap gap-2 mt-1">
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          {userInfo?.role}
-                        </span>
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300 border border-slate-600">
-                          {userInfo?.branch}
-                        </span>
+                        {userInfo?.role && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            {userInfo.role}
+                          </span>
+                        )}
+                        {userInfo?.branch && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300 border border-slate-600">
+                            {userInfo.branch}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -51,17 +51,20 @@ async function seedSupabase() {
     )
 
     for (const user of usersData) {
+      // Remove id field to let Supabase auto-generate UUID
+      // Remove fields that don't exist in schema (assignedShopId)
+      // Convert commissionRate to commission_rate (snake_case)
+      const { id, assignedShopId, commissionRate, ...userData } = user;
+      
+      const userPayload = {
+        ...userData,
+        commission_rate: commissionRate || 0
+      };
+
       const { error } = await supabase
         .from('users')
-        .upsert({
-          id: user.id,
-          username: user.username,
-          password: user.password,
-          name: user.name,
-          role: user.role,
-          branch: user.branch,
-        }, { onConflict: 'id' })
-      
+        .upsert(userPayload, { onConflict: 'username' })
+        
       if (error) {
         console.error(`  ❌ ${user.username}: ${error.message}`)
       } else {

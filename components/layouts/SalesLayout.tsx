@@ -9,9 +9,7 @@ import SidebarHeader from '@/components/SidebarHeader';
 
 // User Info Component
 function UserHeaderInfo() {
-  const [username, setUsername] = useState('');
-  const [role, setRole] = useState('');
-  const [branch, setBranch] = useState('');
+  const [userInfo, setUserInfo] = useState({ username: '', role: '', branch: '' });
   const router = useRouter();
 
   useEffect(() => {
@@ -19,9 +17,12 @@ function UserHeaderInfo() {
     if (user) {
       try {
         const userData = JSON.parse(user);
-        setUsername(userData.name || userData.username || 'User');
-        setRole(userData.role || '');
-        setBranch(userData.branch || '');
+        // Batch state update to prevent cascading renders
+        setUserInfo({
+          username: userData.name || userData.username || 'User',
+          role: userData.role || '',
+          branch: userData.branch || ''
+        });
       } catch (e) {
         console.error('Failed to parse user:', e);
       }
@@ -40,14 +41,14 @@ function UserHeaderInfo() {
 
   return (
     <div className="flex items-center gap-3">
-      {username && (
+      {userInfo.username && (
         <>
           <div className="text-right hidden sm:block">
-            <p className="text-sm font-semibold text-white">{username}</p>
-            <p className="text-xs text-slate-400">{branch || 'Branch N/A'}</p>
+            <p className="text-sm font-semibold text-white">{userInfo.username}</p>
+            <p className="text-xs text-slate-400">{userInfo.branch || 'Branch N/A'}</p>
           </div>
           <span className="px-2 py-1 text-xs font-medium rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">
-            {role}
+            {userInfo.role}
           </span>
         </>
       )}

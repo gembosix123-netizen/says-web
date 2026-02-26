@@ -1,14 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
+  }
+}
+
+function resolveSalesTable(branch: string) {
+  if (branch === 'Kinabatangan') {
+    return 'sales_kinabatangan';
+  }
+
+  return 'sales_kota_kinabalu';
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const currentUser = await getCurrentUser(request);
+    if (!currentUser || currentUser.role !== 'Admin') {
+      return NextResponse.json({ error: 'Only Admin can access day end status' }, { status: 403 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const date = searchParams.get('date');
+    const branch = searchParams.get('branch') || currentUser.branch;
+
+    if (!date || !branch) {
+      return NextResponse.json({ error: 'Missing required query params' }, { status: 400 });
+    }
+
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('day_end_closings')
+      .select('*')
+      .eq('date', date)
+      .eq('branch', branch)
+      .eq('status', 'closed')
+      .order('closedAt', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('Error fetching day end status:', error);
+      return NextResponse.json({ error: 'Failed to check day end status' }, { status: 500 });
+    }
+
+    const record = data?.[0] || null;
+
+    return NextResponse.json({
+      closed: Boolean(record),
+      record,
+    });
+  } catch (error) {
+    console.error('Error in GET /api/day-end/close:', error);
+    return NextResponse.json({ error: 'Failed to check day end status' }, { status: 500 });
   }
 }
 
@@ -52,9 +105,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to save day end closing' }, { status: 500 });
     }
 
-    // Lock all transactions for that day (add is_locked flag)
+    const salesTable = resolveSalesTable(branch);
+
+    // Lock all transactions for that day by branch (add is_locked flag)
     const { error: lockError } = await supabaseAdmin
-      .from('sales_kota_kinabalu')
+      .from(salesTable)
       .update({ is_locked: true })
       .gte('created_at', `${date}T00:00:00Z`)
       .lte('created_at', `${date}T23:59:59Z`);

@@ -1,13 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+interface ReportBranchSummary {
+  branch: string;
+  totalRevenue: number;
+  transactionCount: number;
+  avgTransaction: number;
+}
+
+interface ReportProduct {
+  name: string;
+  quantity: number;
+}
+
+interface PdfReportData {
+  totalRevenue: number;
+  totalTransactions: number;
+  branchSummaries: ReportBranchSummary[];
+  topProducts: ReportProduct[];
+}
+
 // Helper: Get current user from session
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -20,7 +39,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { month, branch, reportData } = body;
+    const { month, branch, reportData } = body as { month: string; branch: string; reportData: PdfReportData };
 
     if (!month || !reportData) {
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
@@ -183,7 +202,7 @@ export async function POST(request: NextRequest) {
                 </tr>
               </thead>
               <tbody>
-                ${reportData.branchSummaries.map((b: any) => `
+                ${reportData.branchSummaries.map((b) => `
                   <tr>
                     <td>${b.branch}</td>
                     <td class="text-right">${formatCurrency(b.totalRevenue)}</td>
@@ -207,7 +226,7 @@ export async function POST(request: NextRequest) {
                 </tr>
               </thead>
               <tbody>
-                ${reportData.topProducts.slice(0, 10).map((p: any) => `
+                ${reportData.topProducts.slice(0, 10).map((p) => `
                   <tr>
                     <td>${p.name}</td>
                     <td class="text-right">${p.quantity}</td>

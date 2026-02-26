@@ -29,10 +29,24 @@ export default function MetricCard({
   isLoading = false,
 }: MetricCardProps) {
   const statusColors = {
-    success: 'border-green-500/20 bg-green-500/5',
-    warning: 'border-yellow-500/20 bg-yellow-500/5',
-    danger: 'border-red-500/20 bg-red-500/5',
-    neutral: 'border-slate-700/50 bg-gradient-to-br from-slate-800/40 to-slate-900/40',
+    success: 'border-emerald-500/35 bg-gradient-to-br from-emerald-500/20 to-emerald-900/20',
+    warning: 'border-amber-500/35 bg-gradient-to-br from-amber-500/20 to-amber-900/20',
+    danger: 'border-rose-500/35 bg-gradient-to-br from-rose-500/20 to-rose-900/20',
+    neutral: 'border-blue-500/25 bg-gradient-to-br from-blue-500/15 to-slate-900/55',
+  };
+
+  const iconContainerColors = {
+    success: 'bg-emerald-500/25 border border-emerald-400/30',
+    warning: 'bg-amber-500/25 border border-amber-400/30',
+    danger: 'bg-rose-500/25 border border-rose-400/30',
+    neutral: 'bg-blue-500/25 border border-blue-400/30',
+  };
+
+  const iconColors = {
+    success: 'text-emerald-300',
+    warning: 'text-amber-300',
+    danger: 'text-rose-300',
+    neutral: 'text-blue-300',
   };
 
   const trendColors = {
@@ -74,8 +88,8 @@ export default function MetricCard({
           </div>
 
           {Icon && (
-            <div className="p-3 rounded-xl bg-slate-700/30 group-hover:bg-says-accent/20 transition-colors duration-200">
-              <Icon size={24} className="text-says-accent" />
+            <div className={clsx('p-3 rounded-xl transition-colors duration-200', iconContainerColors[status])}>
+              <Icon size={24} className={iconColors[status]} />
             </div>
           )}
         </div>

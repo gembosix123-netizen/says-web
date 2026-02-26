@@ -12,45 +12,28 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('dark');
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    
-    // Check local storage or system preference
+  const [theme, setTheme] = useState<Theme>(() => {
+    // Initialize theme from localStorage or system preference (lazy init)
+    if (typeof window === 'undefined') return 'dark';
     const savedTheme = localStorage.getItem('theme') as Theme | null;
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
-    const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
-    setTheme(initialTheme);
-    
-    // Apply to HTML element
+    return savedTheme || (prefersDark ? 'dark' : 'light');
+  });
+
+  useEffect(() => {
+    // Only apply to HTML element when theme changes
     const html = document.documentElement;
-    if (initialTheme === 'dark') {
+    if (theme === 'dark') {
       html.classList.add('dark');
     } else {
       html.classList.remove('dark');
     }
-  }, []);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   const toggleTheme = () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
-    
-    // Immediately apply to HTML element
-    const html = document.documentElement;
-    if (newTheme === 'dark') {
-      html.classList.add('dark');
-    } else {
-      html.classList.remove('dark');
-    }
+    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
   };
-
-  if (!mounted) {
-    return <>{children}</>;
-  }
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>

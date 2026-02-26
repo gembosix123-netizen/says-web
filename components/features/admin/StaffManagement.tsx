@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Edit, Trash2, Plus, Search, ChevronDown } from 'lucide-react';
+import { Edit, Trash2, Plus, Search } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
 import clsx from 'clsx';
 
@@ -20,12 +20,33 @@ interface StaffManagementProps {
   userRole?: string;
 }
 
+interface ApiUser {
+  id: string;
+  username: string;
+  name: string;
+  role: string;
+  branch: string;
+  email?: string;
+  salary?: number;
+  status?: 'active' | 'inactive';
+}
+
+const toStaffMember = (u: ApiUser): StaffMember => ({
+  id: u.id,
+  username: u.username,
+  name: u.name,
+  role: u.role,
+  branch: u.branch,
+  email: u.email || '',
+  salary: u.salary || undefined,
+  status: u.status || 'active',
+});
+
 export default function StaffManagement({ userRole = 'Admin' }: StaffManagementProps) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: '', email: '', password: '', role: '', branch: '', salary: '' });
   const { addToast } = useToast();
 
@@ -38,20 +59,11 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
         // Fetch staff from API
         const res = await fetch('/api/users');
         if (!res.ok) throw new Error('Failed to fetch staff');
-        const users = await res.json();
+        const users = (await res.json()) as ApiUser[];
         // Map API response to StaffMember[] shape
-        const mapped = (users || []).map((u: any) => ({
-          id: u.id,
-          username: u.username,
-          name: u.name,
-          role: u.role,
-          branch: u.branch,
-          email: u.email || '',
-          salary: u.salary || undefined,
-          status: u.status || 'active',
-        }));
+        const mapped = (users || []).map(toStaffMember);
         setStaff(mapped);
-      } catch (error) {
+      } catch {
         addToast('Failed to load staff data', 'error');
       } finally {
         setIsLoading(false);
@@ -95,17 +107,8 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
 
       // Refresh staff list
       const usersRes = await fetch('/api/users');
-      const users = await usersRes.json();
-      setStaff(users.map((u: any) => ({
-        id: u.id,
-        username: u.username,
-        name: u.name,
-        role: u.role,
-        branch: u.branch,
-        email: u.email || '',
-        salary: u.salary || undefined,
-        status: u.status || 'active',
-      })));
+      const users = (await usersRes.json()) as ApiUser[];
+      setStaff(users.map(toStaffMember));
 
       setFormData({ name: '', email: '', password: '', role: '', branch: '', salary: '' });
       setShowAddForm(false);
@@ -130,23 +133,14 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
           if (!res.ok) throw new Error(json?.error || 'Failed to delete');
           // Refresh list
           const usersRes = await fetch('/api/users');
-          const users = await usersRes.json();
-          setStaff(users.map((u: any) => ({
-            id: u.id,
-            username: u.username,
-            name: u.name,
-            role: u.role,
-            branch: u.branch,
-            email: u.email || '',
-            salary: u.salary || undefined,
-            status: u.status || 'active',
-          })));
+          const users = (await usersRes.json()) as ApiUser[];
+          setStaff(users.map(toStaffMember));
           addToast('Staff member deleted successfully', 'success');
         })
         .catch((err) => {
           addToast(err?.message || 'Failed to delete staff member', 'error');
         });
-    } catch (error) {
+    } catch {
       addToast('Failed to delete staff member', 'error');
     }
   };
@@ -168,17 +162,8 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
 
         // Refresh users
         const usersRes = await fetch('/api/users');
-        const users = await usersRes.json();
-        setStaff(users.map((u: any) => ({
-          id: u.id,
-          username: u.username,
-          name: u.name,
-          role: u.role,
-          branch: u.branch,
-          email: u.email || '',
-          salary: u.salary || undefined,
-          status: u.status || 'active',
-        })));
+        const users = (await usersRes.json()) as ApiUser[];
+        setStaff(users.map(toStaffMember));
 
         addToast('Salary updated successfully', 'success');
       } catch (error) {

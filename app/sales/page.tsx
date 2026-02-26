@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { 
@@ -8,7 +8,6 @@ import {
   History, 
   FileText, 
   BarChart3, 
-  ArrowLeft,
   ShoppingCart,
   DollarSign,
   Users,
@@ -18,7 +17,6 @@ import {
   User
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 
 export default function SalesHubPage() {
   const router = useRouter();
@@ -31,30 +29,24 @@ export default function SalesHubPage() {
   const [userInfo, setUserInfo] = useState<{ name: string; role: string; branch: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
-  useEffect(() => {
-    fetchTodayStats();
-    fetchUserInfo();
-  }, []);
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/me', { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
 
-  const fetchUserInfo = () => {
-    // Get from cookie
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    if (sessionCookie) {
-      try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
-        setUserInfo({
-          name: data.name || data.username || 'User',
-          role: data.role || '',
-          branch: data.branch || ''
-        });
-      } catch (e) {
-        console.error('Failed to parse session:', e);
+      if (!response.ok || !payload) {
+        return;
       }
+
+      setUserInfo({
+        name: payload.name || payload.username || 'User',
+        role: payload.role || '',
+        branch: payload.branch || ''
+      });
+    } catch (e) {
+      console.error('Failed to fetch user info:', e);
     }
-  };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -67,29 +59,43 @@ export default function SalesHubPage() {
     router.push('/login');
   };
 
-  const fetchTodayStats = async () => {
+  const fetchTodayStats = useCallback(async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      
-      const { data: sales, error } = await supabase
-        .from('sales')
-        .select('*')
-        .gte('created_at', `${today}T00:00:00`)
-        .lte('created_at', `${today}T23:59:59`);
+      const response = await fetch('/api/sales');
+      const payload = await response.json().catch(() => []);
 
-      if (!error && sales) {
-        setTodayStats({
-          totalSales: sales.length,
-          totalRevenue: sales.reduce((sum, s) => sum + (s.total_amount || 0), 0),
-          totalCustomers: new Set(sales.map(s => s.customer_id)).size
-        });
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to fetch sales');
       }
+
+      const sales = Array.isArray(payload) ? payload : [];
+      const today = new Date().toISOString().split('T')[0];
+
+      const todaysSales = sales.filter((sale) => {
+        const createdAt = sale.created_at || sale.createdAt;
+        return typeof createdAt === 'string' && createdAt.startsWith(today);
+      });
+
+      setTodayStats({
+        totalSales: todaysSales.length,
+        totalRevenue: todaysSales.reduce((sum, sale) => sum + Number(sale.total_amount ?? sale.total ?? 0), 0),
+        totalCustomers: new Set(
+          todaysSales
+            .map((sale) => sale.customer_id || sale.customer?.id)
+            .filter(Boolean)
+        ).size
+      });
     } catch (err) {
       console.error('Error fetching stats:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchTodayStats();
+    fetchUserInfo();
+  }, [fetchTodayStats, fetchUserInfo]);
 
   const menuItems = [
     {

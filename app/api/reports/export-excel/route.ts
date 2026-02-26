@@ -1,14 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 
+interface ReportProduct {
+  name: string;
+  quantity: number;
+}
+
+interface ReportBranchSummary {
+  branch: string;
+  totalRevenue: number;
+  transactionCount: number;
+  avgTransaction: number;
+}
+
+interface ReportDailyData {
+  date: string;
+  amount: number;
+  transactions: number;
+}
+
+interface ExportReportData {
+  totalRevenue: number;
+  totalTransactions: number;
+  branchSummaries: ReportBranchSummary[];
+  topProducts?: ReportProduct[];
+  dailyData?: ReportDailyData[];
+}
+
 // Helper: Get current user from session
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -21,7 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { month, branch, reportData } = body;
+    const { month, branch, reportData } = body as { month: string; branch: string; reportData: ExportReportData };
 
     if (!month || !reportData) {
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
@@ -49,7 +75,7 @@ export async function POST(request: NextRequest) {
     // Add top products
     if (reportData.topProducts && reportData.topProducts.length > 0) {
       summaryData.push(['Product Name', 'Quantity Sold']);
-      reportData.topProducts.slice(0, 5).forEach((product: any) => {
+      reportData.topProducts.slice(0, 5).forEach((product) => {
         summaryData.push([product.name, product.quantity]);
       });
     }
@@ -67,12 +93,12 @@ export async function POST(request: NextRequest) {
       ['Branch', 'Total Revenue (RM)', 'Transactions', 'Avg Transaction (RM)'],
     ];
 
-    reportData.branchSummaries.forEach((branch: any) => {
+    reportData.branchSummaries.forEach((branchSummary) => {
       branchData.push([
-        branch.branch,
-        branch.totalRevenue.toFixed(2),
-        branch.transactionCount,
-        branch.avgTransaction.toFixed(2),
+        branchSummary.branch,
+        branchSummary.totalRevenue.toFixed(2),
+        branchSummary.transactionCount,
+        branchSummary.avgTransaction.toFixed(2),
       ]);
     });
 
@@ -95,7 +121,7 @@ export async function POST(request: NextRequest) {
     ];
 
     if (reportData.dailyData && reportData.dailyData.length > 0) {
-      reportData.dailyData.forEach((day: any) => {
+      reportData.dailyData.forEach((day) => {
         dailyData.push([
           day.date,
           day.amount.toFixed(2),

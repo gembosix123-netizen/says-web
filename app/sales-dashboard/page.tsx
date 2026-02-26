@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import MetricCard from '@/components/ui/MetricCard';
 import { Button } from '@/components/ui/Button';
@@ -8,37 +8,50 @@ import { ShoppingCart, Store, TrendingUp, LogOut, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
+const formatCurrency = (amount: number) =>
+  `RM ${amount.toLocaleString('ms-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export default function SalesDashboardPage() {
   const router = useRouter();
   const [userInfo, setUserInfo] = useState<{ name: string; role: string; branch: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [stats, setStats] = useState({ sales: 0, visits: 0, revenue: 0 });
 
-  useEffect(() => {
-    fetchUserInfo();
-    fetchTodayStats();
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/me', { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+
+      if (response.ok && payload) {
+        setUserInfo({
+          name: payload.name || payload.username || 'User',
+          role: payload.role || '',
+          branch: payload.branch || ''
+        });
+        return;
+      }
+    } catch (e) {
+      console.error('Failed to fetch authenticated user:', e);
+    }
+
+    const localUser = localStorage.getItem('user');
+    if (!localUser) {
+      return;
+    }
+
+    try {
+      const data = JSON.parse(localUser);
+      setUserInfo({
+        name: data.name || data.username || 'User',
+        role: data.role || '',
+        branch: data.branch || ''
+      });
+    } catch (e) {
+      console.error('Failed to parse local user data:', e);
+    }
   }, []);
 
-  const fetchUserInfo = () => {
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    if (sessionCookie) {
-      try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
-        setUserInfo({
-          name: data.name || data.username || 'User',
-          role: data.role || '',
-          branch: data.branch || ''
-        });
-      } catch (e) {
-        console.error('Failed to parse session:', e);
-      }
-    }
-  };
-
-  const fetchTodayStats = async () => {
+  const fetchTodayStats = useCallback(async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
       
@@ -55,7 +68,12 @@ export default function SalesDashboardPage() {
     } catch (e) {
       console.error('Error fetching stats:', e);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchUserInfo();
+    fetchTodayStats();
+  }, [fetchTodayStats, fetchUserInfo]);
 
   const handleLogout = async () => {
     try {
@@ -92,7 +110,9 @@ export default function SalesDashboardPage() {
               </div>
               <div className="text-left hidden md:block">
                 <p className="text-sm font-medium text-white">{userInfo?.name || 'User'}</p>
-                <p className="text-xs text-white/50">{userInfo?.role} • {userInfo?.branch}</p>
+                <p className="text-xs text-white/60">
+                  {[userInfo?.role, userInfo?.branch].filter(Boolean).join(' • ') || 'Maklumat akaun tiada'}
+                </p>
               </div>
             </button>
 
@@ -107,12 +127,16 @@ export default function SalesDashboardPage() {
                     <div>
                       <p className="font-bold text-white text-lg">{userInfo?.name}</p>
                       <div className="flex gap-2 mt-1">
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/30 text-blue-300 border border-blue-500/50">
-                          {userInfo?.role}
-                        </span>
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300">
-                          {userInfo?.branch}
-                        </span>
+                        {userInfo?.role && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/30 text-blue-300 border border-blue-500/50">
+                            {userInfo.role}
+                          </span>
+                        )}
+                        {userInfo?.branch && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300">
+                            {userInfo.branch}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -198,17 +222,17 @@ export default function SalesDashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <MetricCard
               title="Sales Today"
-              value={0}
+              value={stats.sales}
               icon={ShoppingCart}
             />
             <MetricCard
               title="Store Visits"
-              value={0}
+              value={stats.visits}
               icon={Store}
             />
             <MetricCard
               title="Revenue"
-              value="RM 0"
+              value={formatCurrency(stats.revenue)}
               icon={TrendingUp}
             />
           </div>
@@ -249,6 +273,7 @@ export default function SalesDashboardPage() {
           </div>
         </Card>
       </div>
+    </div>
     </div>
   );
 }

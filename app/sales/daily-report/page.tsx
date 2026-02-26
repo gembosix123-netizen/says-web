@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { 
@@ -16,7 +16,25 @@ import {
   Award
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+
+interface SaleItem {
+  name?: string | null;
+  product_name?: string | null;
+  quantity?: number | null;
+  subtotal?: number | null;
+  price?: number | null;
+}
+
+interface SaleRecord {
+  id: string;
+  customer_id?: string | null;
+  customer?: { id?: string | null };
+  created_at?: string;
+  createdAt?: string;
+  total_amount?: number | null;
+  total?: number | null;
+  items?: SaleItem[] | null;
+}
 
 interface DailyStats {
   totalSales: number;
@@ -38,55 +56,72 @@ export default function DailyReportPage() {
   const [stats, setStats] = useState<DailyStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchDailyStats();
-  }, [date]);
-
-  const fetchDailyStats = async () => {
+  const fetchDailyStats = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch today's sales
-      const { data: todaySales, error } = await supabase
-        .from('sales')
-        .select('*')
-        .gte('created_at', `${date}T00:00:00`)
-        .lte('created_at', `${date}T23:59:59`);
+      const response = await fetch('/api/sales');
+      const payload = await response.json().catch(() => []);
 
-      if (error) throw error;
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to fetch sales data');
+      }
 
-      // Fetch yesterday's sales for comparison
+      const allSales: SaleRecord[] = Array.isArray(payload) ? payload : [];
+      const normalizedSales = allSales.map((sale) => ({
+        ...sale,
+        created_at: sale.created_at || sale.createdAt || '',
+        total_amount: Number(sale.total_amount ?? sale.total ?? 0),
+      }));
+
+      // Build day boundaries
+      const startOfDay = new Date(`${date}T00:00:00`).getTime();
+      const endOfDay = new Date(`${date}T23:59:59`).getTime();
+
+      // Filter today's sales
+      const todaySales = normalizedSales.filter((sale) => {
+        const createdMs = new Date(sale.created_at || '').getTime();
+        return !Number.isNaN(createdMs) && createdMs >= startOfDay && createdMs <= endOfDay;
+      });
+
+      // Filter yesterday's sales for comparison
       const yesterday = new Date(date);
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const yesterdayStart = new Date(`${yesterdayStr}T00:00:00`).getTime();
+      const yesterdayEnd = new Date(`${yesterdayStr}T23:59:59`).getTime();
 
-      const { data: yesterdaySales } = await supabase
-        .from('sales')
-        .select('*')
-        .gte('created_at', `${yesterdayStr}T00:00:00`)
-        .lte('created_at', `${yesterdayStr}T23:59:59`);
+      const yesterdaySales = normalizedSales.filter((sale) => {
+        const createdMs = new Date(sale.created_at || '').getTime();
+        return !Number.isNaN(createdMs) && createdMs >= yesterdayStart && createdMs <= yesterdayEnd;
+      });
 
       // Calculate stats
       const sales = todaySales || [];
       const totalRevenue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
-      const uniqueCustomers = new Set(sales.map(s => s.customer_id)).size;
+      const uniqueCustomers = new Set(
+        sales
+          .map((sale) => sale.customer_id || sale.customer?.id)
+          .filter(Boolean)
+      ).size;
 
       // Calculate items sold
       let totalItems = 0;
       const productMap: Record<string, { name: string; quantity: number; revenue: number }> = {};
       
       sales.forEach(sale => {
-        if (sale.items && Array.isArray(sale.items)) {
-          sale.items.forEach((item: any) => {
-            totalItems += item.quantity || 0;
-            if (item.product_name) {
-              if (!productMap[item.product_name]) {
-                productMap[item.product_name] = { name: item.product_name, quantity: 0, revenue: 0 };
-              }
-              productMap[item.product_name].quantity += item.quantity || 0;
-              productMap[item.product_name].revenue += item.subtotal || 0;
+        sale.items?.forEach(item => {
+          const quantity = item.quantity ?? 0;
+          const revenue = item.subtotal ?? ((item.price ?? 0) * quantity);
+          totalItems += quantity;
+          const productName = item.product_name || item.name;
+          if (productName) {
+            if (!productMap[productName]) {
+              productMap[productName] = { name: productName, quantity: 0, revenue: 0 };
             }
-          });
-        }
+            productMap[productName].quantity += quantity;
+            productMap[productName].revenue += revenue;
+          }
+        });
       });
 
       // Top products
@@ -97,7 +132,8 @@ export default function DailyReportPage() {
       // Sales by hour
       const hourMap: Record<number, { count: number; revenue: number }> = {};
       sales.forEach(sale => {
-        const hour = new Date(sale.created_at).getHours();
+        const hour = new Date(sale.created_at || '').getHours();
+        if (Number.isNaN(hour)) return;
         if (!hourMap[hour]) hourMap[hour] = { count: 0, revenue: 0 };
         hourMap[hour].count++;
         hourMap[hour].revenue += sale.total_amount || 0;
@@ -131,7 +167,11 @@ export default function DailyReportPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [date]);
+
+  useEffect(() => {
+    fetchDailyStats();
+  }, [fetchDailyStats]);
 
   const formatCurrency = (amount: number) => `RM ${amount.toLocaleString('ms-MY', { minimumFractionDigits: 2 })}`;
 

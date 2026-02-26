@@ -1,14 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
+interface AuditItemInput {
+  product_id: string;
+  product_name: string;
+  balance_stock?: number;
+  expired_stock?: number;
+  damaged_stock?: number;
+  condition_notes?: string;
+  photo_url?: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Internal server error';
+}
+
 // Get current user from session cookie
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -67,9 +81,9 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(data || []);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API merchandiser/audits GET] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
@@ -125,7 +139,7 @@ export async function POST(request: NextRequest) {
     // Main Admin can add to any visit
 
     // Prepare audit items for insertion
-    const auditItems = items.map((item: any) => ({
+    const auditItems = (items as AuditItemInput[]).map((item) => ({
       visit_id,
       product_id: item.product_id,
       product_name: item.product_name,
@@ -148,8 +162,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, count: data?.length || 0, data }, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API merchandiser/audits POST] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

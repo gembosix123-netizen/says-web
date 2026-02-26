@@ -15,7 +15,6 @@ import {
   Package
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 
 interface Product {
   id: string;
@@ -57,12 +56,12 @@ export default function NewSalePage() {
   const fetchData = async () => {
     try {
       const [customersRes, productsRes] = await Promise.all([
-        supabase.from('customers').select('*').order('name'),
-        supabase.from('products').select('*').order('name')
+        fetch('/api/customers').then(res => res.json()),
+        fetch('/api/products').then(res => res.json())
       ]);
 
-      if (customersRes.data) setCustomers(customersRes.data);
-      if (productsRes.data) setProducts(productsRes.data);
+      if (Array.isArray(customersRes)) setCustomers(customersRes);
+      if (Array.isArray(productsRes)) setProducts(productsRes);
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {
@@ -114,49 +113,59 @@ export default function NewSalePage() {
 
     setSubmitting(true);
     try {
-      // Get session for user info
-      const sessionCookie = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('session='));
-      
-      let userId = null;
-      if (sessionCookie) {
-        try {
-          const sessionData = JSON.parse(decodeURIComponent(sessionCookie.split('=')[1]));
-          userId = sessionData.id;
-        } catch (e) {
-          console.error('Error parsing session:', e);
-        }
+      const salePayload = {
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.name,
+        total_amount: totalAmount,
+        payment_method: paymentMethod,
+        return_amount: 0,
+        exchange_amount: 0,
+        foc_amount: 0,
+        items: cart.map((item) => ({
+          productId: item.product.id,
+          name: item.product.name,
+          quantity: item.quantity,
+          price: item.product.price,
+          subtotal: item.product.price * item.quantity,
+          unit: 'unit',
+          discount: 0,
+          type: 'sale' as const
+        }))
+      };
+
+      const response = await fetch('/api/sales', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(salePayload)
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const details = Array.isArray(result?.details)
+          ? result.details.join(', ')
+          : result?.details;
+        throw new Error(details || result?.error || 'Ralat semasa menyimpan jualan');
       }
 
-      // Create sale record
-      const { data: sale, error: saleError } = await supabase
-        .from('sales')
-        .insert({
-          customer_id: selectedCustomer.id,
-          user_id: userId,
-          total_amount: totalAmount,
-          payment_method: paymentMethod,
-          status: 'completed',
-          items: cart.map(item => ({
-            product_id: item.product.id,
-            product_name: item.product.name,
-            quantity: item.quantity,
-            price: item.product.price,
-            subtotal: item.product.price * item.quantity
-          }))
-        })
-        .select()
-        .single();
-
-      if (saleError) throw saleError;
-
       // Show success and redirect
-      alert('Jualan berjaya disimpan!');
-      router.push('/sales/history');
-    } catch (err) {
+      alert('Jualan berjaya disimpan! Anda akan kembali ke halaman Sales.');
+
+      // Reset local wizard state immediately (fallback if redirect is delayed)
+      setStep(1);
+      setSelectedCustomer(null);
+      setCart([]);
+      setSearchCustomer('');
+      setSearchProduct('');
+      setPaymentMethod('cash');
+
+      // Redirect to sales landing page
+      router.replace('/sales');
+    } catch (err: unknown) {
       console.error('Error creating sale:', err);
-      alert('Ralat semasa menyimpan jualan');
+      const message = err instanceof Error ? err.message : 'Ralat semasa menyimpan jualan';
+      alert(`Ralat semasa menyimpan jualan: ${message}`);
     } finally {
       setSubmitting(false);
     }

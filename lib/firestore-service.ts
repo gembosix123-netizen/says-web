@@ -15,17 +15,13 @@ import {
   getDocs,
   getDoc,
   addDoc,
-  setDoc,
   updateDoc,
   deleteDoc,
   query,
   where,
-  orderBy,
-  limit,
   Query,
   DocumentReference,
   Timestamp,
-  FirestoreDataConverter,
   DocumentData,
 } from 'firebase/firestore';
 import { db } from './firebase';
@@ -60,14 +56,14 @@ export interface Product {
   price: number;
   costPrice?: number;
   images?: string[];
-  specifications?: Record<string, any>;
+  specifications?: Record<string, unknown>;
   minStockLevel?: number;
   maxStockLevel?: number;
   supplier?: string;
   isActive: boolean;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Customer {
@@ -111,7 +107,7 @@ export interface Transaction {
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   completedAt?: Timestamp | null;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface InventoryItem {
@@ -177,7 +173,7 @@ export async function queryDocuments<T extends DocumentData>(
   filters?: Array<{
     field: string;
     operator: '==' | '<' | '>' | '<=' | '>=';
-    value: any;
+    value: unknown;
   }>
 ): Promise<T[]> {
   try {
@@ -497,7 +493,7 @@ export async function deleteInventoryItem(inventoryId: string): Promise<void> {
 /**
  * Safe JSON serialization that handles Firestore Timestamps
  */
-export function serializeForJSON(data: any): any {
+export function serializeForJSON(data: unknown): unknown {
   if (data instanceof Timestamp) {
     return data.toDate().toISOString();
   }
@@ -508,7 +504,7 @@ export function serializeForJSON(data: any): any {
     return data.map(serializeForJSON);
   }
   if (data !== null && typeof data === 'object') {
-    const serialized: Record<string, any> = {};
+    const serialized: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
       serialized[key] = serializeForJSON(value);
     }
@@ -521,6 +517,8 @@ export function serializeForJSON(data: any): any {
  * Validate user has permission to access branch data
  */
 export function canAccessBranch(userBranch: string, targetBranch: string): boolean {
+  void userBranch;
+  void targetBranch;
   // Main Admin can access all branches
   // Others can only access their own branch
   return true; // RBAC enforced at Firestore Security Rules level
@@ -529,6 +527,6 @@ export function canAccessBranch(userBranch: string, targetBranch: string): boole
 /**
  * Convert database response to API response
  */
-export function toApiResponse<T>(data: T, includeTimestamps = true): any {
+export function toApiResponse<T>(data: T, includeTimestamps = true): T | unknown {
   return includeTimestamps ? serializeForJSON(data) : data;
 }

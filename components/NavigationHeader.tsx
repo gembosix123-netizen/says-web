@@ -21,23 +21,32 @@ export default function NavigationHeader({
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
-    // Get from cookie
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    if (sessionCookie) {
+    let mounted = true;
+
+    const fetchUserInfo = async () => {
       try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
+        const response = await fetch('/api/auth/me', { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+
+        if (!mounted || !response.ok || !payload) {
+          return;
+        }
+
         setUserInfo({
-          name: data.name || data.username || 'User',
-          role: data.role || '',
-          branch: data.branch || ''
+          name: payload.name || payload.username || 'User',
+          role: payload.role || '',
+          branch: payload.branch || ''
         });
       } catch (e) {
-        console.error('Failed to parse session:', e);
+        console.error('Failed to fetch user info:', e);
       }
-    }
+    };
+
+    fetchUserInfo();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleLogout = async () => {

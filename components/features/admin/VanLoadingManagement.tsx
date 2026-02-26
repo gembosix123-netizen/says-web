@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Truck, Save, Plus, Trash2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface User {
   id: string;
@@ -20,23 +21,61 @@ export default function VanLoadingManagement() {
   const [selectedUser, setSelectedUser] = useState('');
   const [loadItems, setLoadItems] = useState<{ productId: string; quantity: number }[]>([]);
   
-  // Load initial data
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/users?role=Sales').then(res => res.json()),
-      fetch('/api/products').then(res => res.json())
-    ]).then(([userData, productData]) => {
-      // Ensure data is array, handle API response wrapping
+  // Fetch staff data
+  const fetchStaff = async () => {
+    try {
+      const res = await fetch('/api/users?role=Sales');
+      const userData = await res.json();
       const users = Array.isArray(userData) ? userData : (userData?.data || []);
-      const products = Array.isArray(productData) ? productData : (productData?.data || []);
-      
       setUsers(users);
-      setProducts(products);
-    }).catch(err => {
-      console.error('Error loading data:', err);
+    } catch (err) {
+      console.error('Error fetching staff:', err);
       setUsers([]);
+    }
+  };
+
+  // Fetch products data
+  const fetchProducts = async () => {
+    try {
+      const res = await fetch('/api/products');
+      const productData = await res.json();
+      const products = Array.isArray(productData) ? productData : (productData?.data || []);
+      setProducts(products);
+    } catch (err) {
+      console.error('Error fetching products:', err);
       setProducts([]);
-    });
+    }
+  };
+  
+  // Load initial data & setup Supabase Realtime subscription
+  useEffect(() => {
+    // Fetch initial data
+    fetchStaff();
+    fetchProducts();
+
+    // Setup Supabase Realtime subscription for staff (users with role Sales)
+    const channel = supabase
+      .channel('users-changes')
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'users',
+          filter: 'role=eq.Sales'
+        },
+        (payload) => {
+          console.log('Staff data changed:', payload);
+          // Refetch staff data when there's any change (INSERT, UPDATE, DELETE)
+          fetchStaff();
+        }
+      )
+      .subscribe();
+
+    // Cleanup: unsubscribe when component unmounts
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const addItem = () => {

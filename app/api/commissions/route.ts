@@ -4,14 +4,25 @@ import { supabaseAdmin } from '@/lib/supabase';
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
 
+interface SalesRecord {
+  salesman_id?: string;
+  total_amount?: number | string;
+  amount?: number | string;
+}
+
+interface CommissionPayoutRecord {
+  user_id: string;
+  amount: number | string;
+}
+
 // Get current user from session cookie
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -100,7 +111,7 @@ export async function GET(request: NextRequest) {
       return data || [];
     };
 
-    let allSales: any[] = [];
+    let allSales: SalesRecord[] = [];
     if (!branch || branch === 'all') {
       const [kk, kin] = await Promise.all([
         fetchSales(TABLE_KOTA),
@@ -122,14 +133,14 @@ export async function GET(request: NextRequest) {
     const payouts = payoutsResult?.data || [];
 
     const payoutsByUser: Record<string, number> = {};
-    (payouts || []).forEach((p: any) => {
+    (payouts as CommissionPayoutRecord[]).forEach((p) => {
       payoutsByUser[p.user_id] = (payoutsByUser[p.user_id] || 0) + parseFloat(p.amount || 0);
     });
 
     // Calculate commission for each sales user
     const commissions: CommissionSummary[] = (salesUsers || []).map(user => {
       // Filter sales by this user
-      const userSales = allSales.filter(s => 
+      const userSales = allSales.filter((s) => 
         s.salesman_id === user.id || 
         s.salesman_id === user.username
       );

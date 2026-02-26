@@ -2,17 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { createSaleSchema } from '@/lib/validations';
 
-const TABLE_KOTA = 'sales_kota_kinabalu';
-const TABLE_KIN = 'sales_kinabatangan';
+const SALES_TABLE = 'sales_transactions';
+const SALES_ITEMS_TABLE = 'sales_items';
 
 // Get current user from session cookie
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -49,49 +49,115 @@ export async function GET(request: NextRequest) {
     }
     // Main Admin can query any branch (respects branch param if provided)
 
-    let salesAll: any[] = [];
-
-    if (!branch || branch === 'all') {
-      // Only Main Admin can fetch all
-      if (currentUser.role !== 'Main Admin') {
-        return NextResponse.json({ error: 'Unauthorized - only Main Admin can view all sales' }, { status: 403 });
-      }
-      const [{ data: a }, { data: b }] = await Promise.all([
-        supabaseAdmin.from(TABLE_KOTA).select('*').order('created_at', { ascending: false }),
-        supabaseAdmin.from(TABLE_KIN).select('*').order('created_at', { ascending: false }),
-      ]);
-      salesAll = (a || []).concat(b || []);
-    } else if (branch === 'Kota Kinabalu' || branch.toLowerCase().includes('kota')) {
-      // Check access
-      if (currentUser.role === 'Admin' && currentUser.branch !== 'Kota Kinabalu') {
-        return NextResponse.json({ error: 'Unauthorized - you cannot access other branches' }, { status: 403 });
-      }
-      const { data } = await supabaseAdmin.from(TABLE_KOTA).select('*').order('created_at', { ascending: false });
-      salesAll = data || [];
-    } else if (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) {
-      // Check access
-      if (currentUser.role === 'Admin' && currentUser.branch !== 'Kinabatangan') {
-        return NextResponse.json({ error: 'Unauthorized - you cannot access other branches' }, { status: 403 });
-      }
-      const { data } = await supabaseAdmin.from(TABLE_KIN).select('*').order('created_at', { ascending: false });
-      salesAll = data || [];
-    } else {
-      // Unknown branch -> return empty
-      salesAll = [];
+    // Only Main Admin can fetch all branches
+    if ((!branch || branch === 'all') && currentUser.role !== 'Main Admin') {
+      return NextResponse.json({ error: 'Unauthorized - only Main Admin can view all sales' }, { status: 403 });
     }
 
-    const transactions = salesAll.map((sale) => ({
-      id: sale.id,
-      invoice: sale.invoice,
-      total: parseFloat(sale.total_amount ?? sale.amount ?? 0),
-      branch: sale.branch,
-      items: sale.items ?? (sale.item_name ? [{ name: sale.item_name, quantity: 1, price: parseFloat(sale.amount || 0) }] : []),
-      status: 'Completed',
-      createdAt: sale.created_at,
-      customer: { id: sale.customer_id || null, name: sale.customer_name || null },
-      salesmanId: sale.salesman_id || null,
-      payment: { method: sale.payment_method || 'cash', amount: parseFloat(sale.total_amount ?? sale.amount ?? 0) }
-    }));
+    let query = supabaseAdmin
+      .from(SALES_TABLE)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (branch && branch !== 'all') {
+      query = query.eq('branch', branch);
+    }
+
+    // Sales can only see their own transactions
+    if (currentUser.role === 'Sales') {
+      query = query.eq('user_id', currentUser.id);
+    }
+
+    const { data: salesRows, error: salesError } = await query;
+
+    if (salesError) {
+      console.error('Supabase error fetching sales:', salesError);
+      return NextResponse.json({ error: 'Failed to fetch sales data' }, { status: 500 });
+    }
+
+    const salesAll = salesRows || [];
+    const saleIds = salesAll.map((sale) => sale.id);
+    const customerIds = Array.from(new Set(salesAll.map((sale) => sale.customer_id).filter(Boolean)));
+    const userIds = Array.from(new Set(salesAll.map((sale) => sale.user_id).filter(Boolean)));
+
+    let itemsBySaleId: Record<string, Array<Record<string, unknown>>> = {};
+    if (saleIds.length > 0) {
+      const { data: itemsRows, error: itemsError } = await supabaseAdmin
+        .from(SALES_ITEMS_TABLE)
+        .select('*')
+        .in('transaction_id', saleIds)
+        .order('created_at', { ascending: true });
+
+      if (itemsError) {
+        console.error('Supabase error fetching sales items:', itemsError);
+        return NextResponse.json({ error: 'Failed to fetch sales items' }, { status: 500 });
+      }
+
+      itemsBySaleId = (itemsRows || []).reduce<Record<string, Array<Record<string, unknown>>>>((acc, item) => {
+        const transactionId = item.transaction_id;
+        if (!acc[transactionId]) acc[transactionId] = [];
+        acc[transactionId].push({
+          productId: item.product_id,
+          name: item.product_name,
+          quantity: Number(item.quantity || 0),
+          price: Number(item.unit_price || 0),
+          subtotal: Number(item.subtotal || 0)
+        });
+        return acc;
+      }, {});
+    }
+
+    let customersById: Record<string, string> = {};
+    if (customerIds.length > 0) {
+      const { data: customerRows } = await supabaseAdmin
+        .from('customers')
+        .select('id,name')
+        .in('id', customerIds);
+
+      customersById = (customerRows || []).reduce<Record<string, string>>((acc, customer) => {
+        acc[customer.id] = customer.name;
+        return acc;
+      }, {});
+    }
+
+    let usersById: Record<string, string> = {};
+    if (userIds.length > 0) {
+      const { data: userRows } = await supabaseAdmin
+        .from('users')
+        .select('id,name,full_name,username')
+        .in('id', userIds);
+
+      usersById = (userRows || []).reduce<Record<string, string>>((acc, user) => {
+        acc[user.id] = user.name || user.full_name || user.username || '';
+        return acc;
+      }, {});
+    }
+
+    const transactions = salesAll.map((sale) => {
+      const items = itemsBySaleId[sale.id] || [];
+      const total = Number(sale.grand_total ?? sale.subtotal_amount ?? 0);
+      const paymentStatus = sale.status === 'pending' ? 'pending' : 'paid';
+
+      return {
+        id: sale.id,
+        invoice: sale.invoice,
+        total,
+        total_amount: total,
+        branch: sale.branch,
+        items,
+        status: sale.status || 'completed',
+        paymentStatus,
+        createdAt: sale.created_at,
+        created_at: sale.created_at,
+        customer: { id: sale.customer_id || null, name: customersById[sale.customer_id] || null },
+        customer_id: sale.customer_id || null,
+        customer_name: customersById[sale.customer_id] || null,
+        salesmanId: sale.user_id || null,
+        salesmanName: usersById[sale.user_id] || null,
+        payment: { method: sale.payment_method || 'cash', amount: total },
+        payment_method: sale.payment_method || 'cash'
+      };
+    });
 
     return NextResponse.json(transactions);
   } catch (error) {
@@ -138,7 +204,7 @@ export async function POST(request: NextRequest) {
     // Validate sale data with Zod
     const validation = createSaleSchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
         { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
@@ -147,37 +213,26 @@ export async function POST(request: NextRequest) {
 
     const validatedData = validation.data;
 
-    const target = (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) ? TABLE_KIN : TABLE_KOTA;
-
     const invoice = validatedData.invoice || generateInvoice(branch.replace(/\s+/g, '_'));
-
     const isCredit = validatedData.payment_method === 'credit';
 
-    const saleData: Record<string, any> = {
+    const subtotalAmount = validatedData.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+    const saleData: Record<string, unknown> = {
       invoice,
       branch: validatedData.branch,
-      total_amount: validatedData.total_amount,
-      amount: validatedData.total_amount,
-      items: validatedData.items,
-      item_name: validatedData.items.length > 0 ? validatedData.items[0].name : 'Sale Item',
-      customer_name: validatedData.customer_name || null,
+      user_id: currentUser.id,
       customer_id: validatedData.customer_id || null,
-      salesman_id: validatedData.salesman_id || currentUser.id,  // Track who made the sale
-      salesman_name: validatedData.salesman_name || currentUser.name || currentUser.username || null,
-      check_in_time: validatedData.check_in_time || null,
-      gps_lat: validatedData.gps_lat ?? null,
-      gps_long: validatedData.gps_long ?? null,
+      transaction_date: new Date().toISOString(),
+      subtotal_amount: subtotalAmount,
+      grand_total: validatedData.total_amount,
       payment_method: validatedData.payment_method,
-      payment_status: isCredit ? 'pending' : 'paid',  // Track payment status
-      return_amount: validatedData.return_amount,
-      exchange_amount: validatedData.exchange_amount,
-      foc_amount: validatedData.foc_amount,
-      proof_photo_url: validatedData.proof_photo_url || validatedData.receipt_url || null,
+      status: isCredit ? 'pending' : 'completed',
+      notes: validatedData.notes || null,
       created_at: new Date().toISOString()
     };
 
     const { data: sale, error } = await supabaseAdmin
-      .from(target)
+      .from(SALES_TABLE)
       .insert(saleData)
       .select()
       .single();
@@ -187,23 +242,44 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create sale', details: error.message }, { status: 500 });
     }
 
+    const saleItems = validatedData.items.map((item) => ({
+      transaction_id: sale.id,
+      product_id: item.productId,
+      product_name: item.name,
+      quantity: item.quantity,
+      unit_price: item.price,
+      subtotal: item.subtotal,
+      created_at: new Date().toISOString()
+    }));
+
+    const { error: itemsError } = await supabaseAdmin
+      .from(SALES_ITEMS_TABLE)
+      .insert(saleItems);
+
+    if (itemsError) {
+      console.error('Supabase error inserting sales items:', itemsError);
+      // Best effort cleanup for orphaned transaction
+      await supabaseAdmin.from(SALES_TABLE).delete().eq('id', sale.id);
+      return NextResponse.json({ error: 'Failed to create sale items', details: itemsError.message }, { status: 500 });
+    }
+
     // Update customer outstanding balance if credit payment
     if (isCredit && body.customer_id) {
       try {
         // Get current outstanding balance
         const { data: customer } = await supabaseAdmin
           .from('customers')
-          .select('outstandingBalance')
+          .select('current_balance')
           .eq('id', body.customer_id)
           .single();
 
-        const currentBalance = customer?.outstandingBalance || 0;
+        const currentBalance = Number(customer?.current_balance || 0);
         const newBalance = currentBalance + validatedData.total_amount;
 
         // Update customer's outstanding balance
         await supabaseAdmin
           .from('customers')
-          .update({ outstandingBalance: newBalance })
+          .update({ current_balance: newBalance })
           .eq('id', body.customer_id);
           
         console.log(`Updated customer ${body.customer_id} outstanding: ${currentBalance} -> ${newBalance}`);
@@ -216,16 +292,22 @@ export async function POST(request: NextRequest) {
     const transaction = {
       id: sale.id,
       invoice: sale.invoice,
-      total: parseFloat((sale.total_amount ?? sale.amount ?? 0) as any),
+      total: Number(sale.grand_total ?? sale.subtotal_amount ?? 0),
       branch: sale.branch,
-      items: sale.items ?? [{ name: sale.item_name, quantity: 1, price: parseFloat((sale.amount ?? 0) as any) }],
+      items: saleItems.map((item) => ({
+        productId: item.product_id,
+        name: item.product_name,
+        quantity: item.quantity,
+        price: item.unit_price,
+        subtotal: item.subtotal
+      })),
       status: isCredit ? 'Pending Payment' : 'Completed',
-      paymentStatus: sale.payment_status,
+      paymentStatus: sale.status === 'pending' ? 'pending' : 'paid',
       createdAt: sale.created_at,
-      customer: { id: sale.customer_id, name: sale.customer_name },
-      salesmanId: sale.salesman_id,
-      salesmanName: sale.salesman_name,
-      proofPhotoUrl: sale.proof_photo_url ?? sale.receipt_url
+      customer: { id: sale.customer_id, name: validatedData.customer_name || null },
+      salesmanId: sale.user_id,
+      salesmanName: currentUser.name || currentUser.username || null,
+      proofPhotoUrl: null
     };
 
     return NextResponse.json(transaction, { status: 201 });
@@ -264,11 +346,9 @@ export async function DELETE(request: NextRequest) {
       branch = currentUser.branch; // Admin can only delete from their branch
     }
 
-    const target = (branch && (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina'))) ? TABLE_KIN : TABLE_KOTA;
-
-    // Verify the sale exists in the correct branch before deleting
+    // Verify the sale exists before deleting
     const { data: sale, error: fetchError } = await supabaseAdmin
-      .from(target)
+      .from(SALES_TABLE)
       .select('branch')
       .eq('id', id)
       .single();
@@ -282,7 +362,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'You cannot delete sales from other branches' }, { status: 403 });
     }
 
-    const { error } = await supabaseAdmin.from(target).delete().eq('id', id);
+    if (branch && branch !== 'all' && sale.branch !== branch) {
+      return NextResponse.json({ error: 'Sale does not belong to selected branch' }, { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin.from(SALES_TABLE).delete().eq('id', id);
     if (error) {
       console.error('Supabase error deleting sale:', error);
       return NextResponse.json({ error: 'Failed to delete sale' }, { status: 500 });

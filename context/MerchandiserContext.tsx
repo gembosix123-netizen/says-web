@@ -257,7 +257,8 @@ export function MerchandiserProvider({
         });
 
         if (!photoRes.ok) {
-          console.error("[MerchandiserContext] Failed to upload photos");
+          const error = await readJson(photoRes);
+          console.error("[MerchandiserContext] Failed to upload photos:", error || photoRes.statusText);
           // Don't fail the whole process if photos fail
         }
       }

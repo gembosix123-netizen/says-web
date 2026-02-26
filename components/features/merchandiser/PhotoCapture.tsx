@@ -10,19 +10,54 @@ export function PhotoCapture() {
   const { photos, addPhoto, removePhoto, setStep } = useMerchandiser();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDimension = 1280;
+          const scale = Math.min(maxDimension / img.width, maxDimension / img.height, 1);
+          const width = Math.max(1, Math.round(img.width * scale));
+          const height = Math.max(1, Math.round(img.height * scale));
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Failed to get canvas context'));
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          resolve(compressedDataUrl);
+        };
+
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = reader.result as string;
+      };
+
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (reader.result) {
-          addPhoto(reader.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    for (const file of Array.from(files)) {
+      try {
+        const compressedDataUrl = await compressImage(file);
+        addPhoto(compressedDataUrl);
+      } catch (error) {
+        console.error('[PhotoCapture] Failed to process selected photo:', error);
+      }
+    }
 
     // Reset input
     if (fileInputRef.current) {

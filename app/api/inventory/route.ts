@@ -20,9 +20,9 @@ import {
   updateInventoryItem,
   deleteInventoryItem,
   toApiResponse,
-  InventoryItem,
 } from '@/lib/firestore-service';
-import { loadInventorySchema, updateVanInventorySchema } from '@/lib/validations';
+import { loadInventorySchema } from '@/lib/validations';
+import { requireAuth } from '@/lib/auth-check';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -95,13 +95,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    // Check authentication - Admin role or higher can create inventory
+    const { error } = await requireAuth(request, 'Admin');
+    if (error) return error;
+
     const body = await request.json();
 
     // Validate inventory data with Zod
     const validation = loadInventorySchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
         { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
@@ -146,7 +149,10 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    // Check authentication - Admin role or higher can update inventory
+    const { error } = await requireAuth(request, 'Admin');
+    if (error) return error;
+
     const body = await request.json();
     const inventoryId = body.id || body.inventoryId;
 
@@ -189,7 +195,10 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    // Check authentication - Main Admin can delete inventory items
+    const { error } = await requireAuth(request, 'Main Admin');
+    if (error) return error;
+
     const searchParams = request.nextUrl.searchParams;
     const inventoryId = searchParams.get('id');
 

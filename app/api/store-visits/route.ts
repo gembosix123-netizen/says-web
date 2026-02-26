@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Internal server error';
+}
+
 // Get current user from session cookie
-async function getCurrentUser(request: Request) {
+async function getCurrentUser(request: NextRequest) {
   try {
-    const session = (request as any).cookies.get('session');
+    const session = request.cookies.get('session');
     if (!session) return null;
     const data = JSON.parse(session.value);
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -34,7 +38,7 @@ export async function GET(request: NextRequest) {
       .from('store_visits')
       .select(`
         *,
-        customer:customers(id, name, address, branch)
+        customer:customers(id, name, address)
       `);
 
     // Role-based filtering
@@ -69,9 +73,9 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(data || []);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API store-visits GET] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
@@ -132,7 +136,7 @@ export async function POST(request: NextRequest) {
       .insert(visitData)
       .select(`
         *,
-        customer:customers(id, name, address, branch)
+        customer:customers(id, name, address)
       `)
       .single();
 
@@ -142,9 +146,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(data, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API store-visits POST] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
@@ -190,7 +194,7 @@ export async function PUT(request: NextRequest) {
     }
     // Main Admin can update any visit
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     
     if (status) updateData.status = status;
     if (notes !== undefined) updateData.notes = notes;
@@ -208,7 +212,7 @@ export async function PUT(request: NextRequest) {
       .eq('id', visit_id)
       .select(`
         *,
-        customer:customers(id, name, address, branch)
+        customer:customers(id, name, address)
       `)
       .single();
 
@@ -218,8 +222,8 @@ export async function PUT(request: NextRequest) {
     }
 
     return NextResponse.json(data);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API store-visits PUT] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
