@@ -37,6 +37,21 @@ const isIdDefaultError = (error: unknown) => {
   );
 };
 
+const getErrorDetails = (error: unknown): string => {
+  if (!error || typeof error !== 'object') return 'Unknown database error';
+
+  const maybeError = error as {
+    message?: unknown;
+    details?: unknown;
+    hint?: unknown;
+  };
+
+  const firstDetail = [maybeError.message, maybeError.details, maybeError.hint]
+    .find((value) => typeof value === 'string' && value.trim().length > 0);
+
+  return typeof firstDetail === 'string' ? firstDetail : 'Unknown database error';
+};
+
 // ============================================================================
 // GET HANDLER
 // ============================================================================
@@ -192,7 +207,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'Failed to create customer',
-          details: createError.message || createError.details || createError.hint || 'Unknown database error',
+          details: getErrorDetails(createError),
         },
         { status: 500 }
       );
