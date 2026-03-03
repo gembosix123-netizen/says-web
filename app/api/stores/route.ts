@@ -1,27 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Store } from '@/types';
-
-async function getSessionRole(request: Request) {
-  try {
-    const session = (request as any).cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data.role || null;
-  } catch (e) {
-    return null;
-  }
-}
+import { getSessionUserFromRequest } from '@/lib/session';
+import { normalizeRole } from '@/lib/roles';
+import { canManageUsers } from '@/lib/permissions';
 
 export async function GET() {
   const stores = await db.stores.getAll();
   return NextResponse.json(stores);
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const role = await getSessionRole(request);
-    if (role !== 'Admin' && role !== 'Main Admin') {
+    const currentUser = getSessionUserFromRequest(request);
+    const role = normalizeRole(currentUser?.role);
+    if (!canManageUsers(role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
@@ -41,10 +34,11 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const role = await getSessionRole(request);
-    if (role !== 'Admin' && role !== 'Main Admin') {
+    const currentUser = getSessionUserFromRequest(request);
+    const role = normalizeRole(currentUser?.role);
+    if (!canManageUsers(role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
@@ -56,10 +50,11 @@ export async function PUT(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    const role = await getSessionRole(request);
-    if (role !== 'Admin' && role !== 'Main Admin') {
+    const currentUser = getSessionUserFromRequest(request);
+    const role = normalizeRole(currentUser?.role);
+    if (!canManageUsers(role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 

@@ -32,14 +32,14 @@ export default function CommissionPage() {
   }, []);
 
   if (loading) {
-    return <div className="text-white p-8">Loading commission data...</div>;
+    return <div className="text-slate-700 dark:text-white p-8">Loading commission data...</div>;
   }
 
   return (
     <div className="max-w-7xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">Commission Tracking</h1>
-        <p className="text-slate-400">Monitor staff earnings, calculate liabilities, and track payouts.</p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Commission Tracking</h1>
+        <p className="text-slate-600 dark:text-slate-400">Monitor staff earnings, calculate liabilities, and track payouts.</p>
       </div>
       
       <CommissionDashboard 

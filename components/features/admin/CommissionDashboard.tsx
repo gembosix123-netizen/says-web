@@ -14,6 +14,7 @@ interface CommissionDashboardProps {
 export default function CommissionDashboard({ transactions, users: initialUsers, payouts }: CommissionDashboardProps) {
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [searchTerm, setSearchTerm] = useState('');
+    const [selectedBranch, setSelectedBranch] = useState<'all' | 'Kota Kinabalu' | 'Kinabatangan'>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempRate, setTempRate] = useState<string>('');
 
@@ -67,12 +68,15 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
   }, [completedSales, users, payouts]);
 
   const filteredStaff = staffCommissions.filter(s => 
-    s.user?.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    s.user?.username.toLowerCase().includes(searchTerm.toLowerCase())
+        (selectedBranch === 'all' || s.user?.branch === selectedBranch) &&
+        (
+            s.user?.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            s.user?.username.toLowerCase().includes(searchTerm.toLowerCase())
+        )
   );
 
-  const totalPending = staffCommissions.reduce((sum, s) => sum + s.pendingAmount, 0);
-  const totalPaid = staffCommissions.reduce((sum, s) => sum + s.paidAmount, 0);
+    const totalPending = filteredStaff.reduce((sum, s) => sum + s.pendingAmount, 0);
+    const totalPaid = filteredStaff.reduce((sum, s) => sum + s.paidAmount, 0);
 
   const startEditing = (user: User) => {
     setEditingId(user.id);
@@ -105,43 +109,54 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
     <div className="space-y-6">
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-lg">
-            <p className="text-slate-400 text-sm font-medium mb-1">Total Commission Liability</p>
-            <h3 className="text-3xl font-bold text-white">{formatCurrency(totalPending + totalPaid)}</h3>
+                <div className="soft-card soft-card-blue p-6 rounded-2xl">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Total Commission Liability</p>
+            <h3 className="text-3xl font-bold text-slate-900 dark:text-white">{formatCurrency(totalPending + totalPaid)}</h3>
         </div>
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-lg">
-            <p className="text-slate-400 text-sm font-medium mb-1">Total Paid Out</p>
+                <div className="soft-card soft-card-green p-6 rounded-2xl">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Total Paid Out</p>
             <h3 className="text-3xl font-bold text-green-400">{formatCurrency(totalPaid)}</h3>
         </div>
-        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-lg relative overflow-hidden">
+                <div className="soft-card soft-card-rose p-6 rounded-2xl relative overflow-hidden">
             <div className="absolute right-0 top-0 w-24 h-24 bg-red-500/10 rounded-full -mr-10 -mt-10 animate-pulse" />
-            <p className="text-slate-400 text-sm font-medium mb-1">Pending Payouts</p>
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Pending Payouts</p>
             <h3 className="text-3xl font-bold text-red-400">{formatCurrency(totalPending)}</h3>
         </div>
       </div>
 
       {/* Staff Breakdown */}
-      <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-        <div className="p-6 border-b border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+    <div className="soft-panel overflow-hidden">
+        <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <UserIcon className="text-blue-500" />
                 Staff Commission Breakdown
             </h3>
-            <div className="relative w-full md:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                <input 
-                    type="text" 
-                    placeholder="Search staff..." 
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-slate-800 text-white border border-slate-700 rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+            <div className="flex w-full md:w-auto gap-3">
+                <select
+                    value={selectedBranch}
+                    onChange={(e) => setSelectedBranch(e.target.value as 'all' | 'Kota Kinabalu' | 'Kinabatangan')}
+                    className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                    <option value="all">All Branches</option>
+                    <option value="Kota Kinabalu">Kota Kinabalu</option>
+                    <option value="Kinabatangan">Kinabatangan</option>
+                </select>
+                <div className="relative w-full md:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                    <input 
+                        type="text" 
+                        placeholder="Search staff..." 
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                </div>
             </div>
         </div>
 
         <div className="overflow-x-auto">
             <table className="w-full text-left">
-                <thead className="bg-slate-900 text-slate-500 text-xs uppercase tracking-wider">
+                <thead className="soft-table-head text-xs uppercase tracking-wider">
                     <tr>
                         <th className="px-6 py-4">Staff Member</th>
                         <th className="px-6 py-4">Rate (%)</th>
@@ -152,28 +167,28 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
                         <th className="px-6 py-4 text-right">Action</th>
                     </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {filteredStaff.map((staff) => (
-                        <tr key={staff.user?.id} className="hover:bg-slate-800/50 transition-colors group">
+                        <tr key={staff.user?.id} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors group">
                             <td className="px-6 py-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white">
+                                    <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-700 dark:text-white">
                                         {staff.user?.name.charAt(0)}
                                     </div>
                                     <div>
-                                        <p className="font-medium text-white">{staff.user?.name}</p>
+                                        <p className="font-medium text-slate-900 dark:text-white">{staff.user?.name}</p>
                                         <p className="text-xs text-slate-500">@{staff.user?.username}</p>
                                     </div>
                                 </div>
                             </td>
-                            <td className="px-6 py-4 text-slate-400">
+                            <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
                                 {editingId === staff.user?.id ? (
                                     <div className="flex items-center gap-2">
                                         <input 
                                             type="number" 
                                             value={tempRate}
                                             onChange={(e) => setTempRate(e.target.value)}
-                                            className="w-16 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                            className="w-16 bg-white border border-slate-300 dark:bg-slate-800 dark:border-slate-600 rounded px-2 py-1 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                             autoFocus
                                         />
                                         <button onClick={() => saveRate(staff.user!.id)} className="text-green-400 hover:text-green-300">
@@ -192,7 +207,7 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
                                     </div>
                                 )}
                             </td>
-                            <td className="px-6 py-4 text-slate-300">
+                            <td className="px-6 py-4 text-slate-700 dark:text-slate-300">
                                 {formatCurrency(staff.totalSales)}
                             </td>
                             <td className="px-6 py-4 font-bold text-blue-400">
@@ -208,7 +223,7 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
                             </td>
                             <td className="px-6 py-4 text-right">
                                 <button 
-                                    className="text-slate-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                    className="text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                                     disabled={staff.pendingAmount <= 0}
                                     title="Mark as Paid (Feature coming soon)"
                                 >

@@ -11,7 +11,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { createCustomerSchema } from '@/lib/validations';
-import { requireAuth } from '@/lib/auth-check';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { normalizeRole } from '@/lib/roles';
+import { canAccessSalesRoutes } from '@/lib/permissions';
+import { canAccessStoreVisits } from '@/lib/permissions';
+
+const isMissingColumnError = (error: unknown, columnName: string) => {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  return message.includes(columnName.toLowerCase()) && (
+    message.includes('column') ||
+    message.includes('schema cache') ||
+    message.includes('does not exist')
+  );
+};
+
+const isIdDefaultError = (error: unknown) => {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  return (
+    message.includes('null value in column') &&
+    message.includes('id') &&
+    message.includes('violates not-null constraint')
+  ) || (
+    message.includes('id') &&
+    message.includes('default')
+  );
+};
 
 // ============================================================================
 // GET HANDLER
@@ -43,14 +67,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(customer);
     }
 
-    // Get all customers
-    const { data: customers, error } = await supabaseAdmin
+    // Get all customers (support schemas with/without is_active)
+    const activeQuery = await supabaseAdmin
       .from('customers')
       .select('*')
       .eq('is_active', true);
 
-    if (error) throw error;
-    return NextResponse.json(customers || []);
+    if (activeQuery.error && isMissingColumnError(activeQuery.error, 'is_active')) {
+      const fallbackQuery = await supabaseAdmin
+        .from('customers')
+        .select('*');
+
+      if (fallbackQuery.error) throw fallbackQuery.error;
+      return NextResponse.json(fallbackQuery.data || []);
+    }
+
+    if (activeQuery.error) throw activeQuery.error;
+    return NextResponse.json(activeQuery.data || []);
 
   } catch (error) {
     console.error('Error fetching customers:', error);
@@ -67,9 +100,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Check authentication - Sales role or higher can create customers
-    const { error } = await requireAuth(request, 'Sales');
-    if (error) return error;
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessStoreVisits(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const body = await request.json();
 
@@ -89,34 +128,74 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    // Create customer
-    const { data: newCustomer, error: createError } = await supabaseAdmin
-      .from('customers')
-      .insert({
-        name: validatedData.name,
-        phone: validatedData.phone || '',
-        email: validatedData.email || '',
-        address: validatedData.address || '',
-        city: validatedData.city || '',
-        state: validatedData.state || '',
-        postal_code: validatedData.postalCode || '',
-        branch: validatedData.branch,
-        type: validatedData.type,
-        status: validatedData.status,
-        total_purchases: 0,
-        total_spent: 0,
-        credit_limit: validatedData.creditLimit,
-        credits: validatedData.credits,
-        notes: validatedData.notes || '',
-        is_active: validatedData.isActive,
-        created_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+    const payloadWithTimestamps = {
+      name: validatedData.name,
+      phone: validatedData.phone || '',
+      address: validatedData.address || '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const payloadWithoutTimestamps = {
+      name: validatedData.name,
+      phone: validatedData.phone || '',
+      address: validatedData.address || '',
+    };
+
+    const insertPayloads: Record<string, unknown>[] = [
+      { ...payloadWithTimestamps, branch: validatedData.branch },
+      { ...payloadWithTimestamps, town: validatedData.branch },
+      { ...payloadWithoutTimestamps, branch: validatedData.branch },
+      { ...payloadWithoutTimestamps, town: validatedData.branch },
+    ];
+
+    let newCustomer: Record<string, unknown> | null = null;
+    let createError: unknown = null;
+
+    for (const payload of insertPayloads) {
+      const createResult = await supabaseAdmin
+        .from('customers')
+        .insert(payload)
+        .select()
+        .single();
+
+      if (!createResult.error) {
+        newCustomer = createResult.data;
+        createError = null;
+        break;
+      }
+
+      createError = createResult.error;
+
+      if (isIdDefaultError(createResult.error)) {
+        const retryWithId = await supabaseAdmin
+          .from('customers')
+          .insert({
+            ...payload,
+            id: crypto.randomUUID(),
+          })
+          .select()
+          .single();
+
+        if (!retryWithId.error) {
+          newCustomer = retryWithId.data;
+          createError = null;
+          break;
+        }
+
+        createError = retryWithId.error;
+      }
+    }
 
     if (createError) {
       console.error('Error creating customer:', createError);
-      return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: 'Failed to create customer',
+          details: createError.message || createError.details || createError.hint || 'Unknown database error',
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json(
@@ -142,9 +221,15 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // Check authentication - Sales role or higher can update customers
-    const { error } = await requireAuth(request, 'Sales');
-    if (error) return error;
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessSalesRoutes(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const body = await request.json();
     const customerId = body.id || body.customerId;
@@ -174,28 +259,60 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Update customer
-    const { error: updateError } = await supabaseAdmin
-      .from('customers')
-      .update({
+    const updatePayloads: Record<string, unknown>[] = [
+      {
         name: body.name,
         phone: body.phone,
-        email: body.email,
         address: body.address,
-        city: body.city,
-        state: body.state,
-        postal_code: body.postalCode,
         branch: body.branch,
-        type: body.type,
-        status: body.status,
-        notes: body.notes,
         updated_at: new Date().toISOString(),
-      })
-      .eq('id', customerId);
+      },
+      {
+        name: body.name,
+        phone: body.phone,
+        address: body.address,
+        branch: body.branch,
+      },
+      {
+        name: body.name,
+        phone: body.phone,
+        address: body.address,
+        town: body.branch,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        name: body.name,
+        phone: body.phone,
+        address: body.address,
+        town: body.branch,
+      },
+    ];
+
+    let updateError: unknown = null;
+
+    for (const payload of updatePayloads) {
+      const updateResult = await supabaseAdmin
+        .from('customers')
+        .update(payload)
+        .eq('id', customerId);
+
+      if (!updateResult.error) {
+        updateError = null;
+        break;
+      }
+
+      updateError = updateResult.error;
+    }
 
     if (updateError) {
       console.error('Error updating customer:', updateError);
-      return NextResponse.json({ error: 'Failed to update customer' }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: 'Failed to update customer',
+          details: (updateError as { message?: string })?.message || 'Unknown database error',
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json(
@@ -218,7 +335,16 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // TODO: Implement authentication check
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessSalesRoutes(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const customerId = searchParams.get('id');
 
@@ -247,14 +373,31 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Soft delete customer (set is_active to false)
-    const { error: deleteError } = await supabaseAdmin
+    // Delete customer (soft-delete if is_active exists, fallback to hard delete)
+    let softDeleteResult = await supabaseAdmin
       .from('customers')
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', customerId);
 
-    if (deleteError) {
-      console.error('Error deleting customer:', deleteError);
+    if (softDeleteResult.error && isMissingColumnError(softDeleteResult.error, 'updated_at')) {
+      softDeleteResult = await supabaseAdmin
+        .from('customers')
+        .update({ is_active: false })
+        .eq('id', customerId);
+    }
+
+    if (softDeleteResult.error && isMissingColumnError(softDeleteResult.error, 'is_active')) {
+      const hardDeleteResult = await supabaseAdmin
+        .from('customers')
+        .delete()
+        .eq('id', customerId);
+
+      if (hardDeleteResult.error) {
+        console.error('Error deleting customer:', hardDeleteResult.error);
+        return NextResponse.json({ error: 'Failed to delete customer' }, { status: 500 });
+      }
+    } else if (softDeleteResult.error) {
+      console.error('Error deleting customer:', softDeleteResult.error);
       return NextResponse.json({ error: 'Failed to delete customer' }, { status: 500 });
     }
 

@@ -5,11 +5,22 @@ import { useMerchandiser } from '@/context/MerchandiserContext';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Search, Store } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { Search, Store, Plus, MapPinned } from 'lucide-react';
 
 export function StoreSelector() {
-  const { allowedCustomers, setSelectedCustomer, setStep } = useMerchandiser();
+  const { allowedCustomers, setSelectedCustomer, setStep, refreshCustomers, userBranch } = useMerchandiser();
+  const { addToast } = useToast();
   const [search, setSearch] = React.useState('');
+  const [showAddForm, setShowAddForm] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [newStore, setNewStore] = React.useState({
+    name: '',
+    phone: '',
+    address: '',
+    mapLink: '',
+    branch: userBranch || 'Kota Kinabalu',
+  });
 
   const filteredCustomers = allowedCustomers.filter((customer) =>
     customer.name.toLowerCase().includes(search.toLowerCase())
@@ -20,12 +31,133 @@ export function StoreSelector() {
     setStep(2); // Move to check-in step
   };
 
+  const normalizeMapLink = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    return `https://${trimmed}`;
+  };
+
+  const handleCreateStore = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!newStore.name.trim()) {
+      addToast('Store name is required', 'warning');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const mapLink = normalizeMapLink(newStore.mapLink);
+      const formattedAddress = mapLink
+        ? `${newStore.address.trim()} | Map: ${mapLink}`.trim()
+        : newStore.address.trim();
+
+      const response = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newStore.name.trim(),
+          phone: newStore.phone.trim(),
+          address: formattedAddress,
+          branch: newStore.branch,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const details = Array.isArray(data?.details) ? data.details.join(', ') : data?.details;
+        addToast(details || data?.error || 'Failed to add new store', 'error');
+        return;
+      }
+
+      addToast('New store added successfully', 'success');
+      setNewStore({
+        name: '',
+        phone: '',
+        address: '',
+        mapLink: '',
+        branch: userBranch || 'Kota Kinabalu',
+      });
+      setShowAddForm(false);
+      await refreshCustomers();
+    } catch (error) {
+      console.error('Failed to create store', error);
+      addToast('Error creating store', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const getMapLink = (address?: string) => {
+    if (!address) return null;
+    const match = address.match(/(https?:\/\/[^\s|]+)/i);
+    return match ? match[1] : null;
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-white mb-2">Select Store to Visit</h2>
         <p className="text-slate-400">Choose a store from your assigned list</p>
       </div>
+
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="gap-2"
+          onClick={() => setShowAddForm((prev) => !prev)}
+        >
+          <Plus size={16} />
+          {showAddForm ? 'Close Form' : 'Add New Store'}
+        </Button>
+      </div>
+
+      {showAddForm && (
+        <Card className="bg-slate-900/70 border-slate-700">
+          <form onSubmit={handleCreateStore} className="space-y-3">
+            <h3 className="text-white font-semibold">New Store Details</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Input
+                placeholder="Store Name"
+                value={newStore.name}
+                onChange={(event) => setNewStore((prev) => ({ ...prev, name: event.target.value }))}
+                required
+              />
+              <Input
+                placeholder="Phone Number"
+                value={newStore.phone}
+                onChange={(event) => setNewStore((prev) => ({ ...prev, phone: event.target.value }))}
+              />
+              <Input
+                placeholder="Address"
+                value={newStore.address}
+                onChange={(event) => setNewStore((prev) => ({ ...prev, address: event.target.value }))}
+              />
+              <Input
+                placeholder="Branch (e.g. Kota Kinabalu)"
+                value={newStore.branch}
+                onChange={(event) => setNewStore((prev) => ({ ...prev, branch: event.target.value }))}
+                required
+              />
+            </div>
+            <Input
+              placeholder="Google Maps link (optional)"
+              value={newStore.mapLink}
+              onChange={(event) => setNewStore((prev) => ({ ...prev, mapLink: event.target.value }))}
+            />
+            <div className="flex justify-end">
+              <Button type="submit" variant="secondary" size="sm" disabled={saving}>
+                {saving ? 'Saving...' : 'Save Store'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
 
       {/* Search */}
       <div className="relative">
@@ -64,6 +196,18 @@ export function StoreSelector() {
                   {customer.address && (
                     <p className="text-sm text-slate-300 mt-1">{customer.address}</p>
 
+                  )}
+                  {getMapLink(customer.address) && (
+                    <a
+                      href={getMapLink(customer.address) || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-blue-400 mt-2 hover:text-blue-300"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <MapPinned size={12} />
+                      Open Map
+                    </a>
                   )}
                   {customer.branch && (
                    <p className="text-xs text-slate-400 mt-2">Branch: {customer.branch}</p>

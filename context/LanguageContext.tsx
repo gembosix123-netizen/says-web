@@ -203,6 +203,7 @@ const dictionary: Translations = {
   admin_section: { ms: 'Bahagian Admin', en: 'Admin Section' },
   dashboard: { ms: 'Papan Pemuka', en: 'Dashboard' },
   reports: { ms: 'Laporan', en: 'Reports' },
+  audit_center: { ms: 'Pusat Audit', en: 'Audit Center' },
   settings: { ms: 'Tetapan', en: 'Settings' },
   logout: { ms: 'Log Keluar', en: 'Logout' },
   user_info: { ms: 'Info Pengguna', en: 'User Info' },

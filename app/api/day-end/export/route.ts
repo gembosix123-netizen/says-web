@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { normalizeRole } from '@/lib/roles';
+import { canViewDayEnd } from '@/lib/permissions';
 
 interface SalesmanPerformanceEntry {
   name: string;
@@ -28,16 +31,6 @@ interface DayEndSummary {
   topProducts?: TopProductEntry[];
 }
 
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    return JSON.parse(session.value);
-  } catch {
-    return null;
-  }
-}
-
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-MY', { style: 'currency', currency: 'MYR' }).format(value || 0);
 
@@ -50,9 +43,14 @@ const formatDateTime = (value: Date) =>
 
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canViewDayEnd(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const body = await request.json();

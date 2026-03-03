@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
 
 // Helper: Get current user from session
 interface SaleItemRecord {
@@ -29,17 +31,6 @@ interface BranchEntry {
   transactionCount: number;
 }
 
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
 // Helper: Get sales table by branch
 function getSalesTable(branch: string) {
   if (branch === 'Kinabatangan') return 'sales_kinabatangan';
@@ -48,10 +39,12 @@ function getSalesTable(branch: string) {
 
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    const role = normalizeRole(currentUser.role);
 
     const { searchParams } = new URL(request.url);
     const month = searchParams.get('month'); // YYYY-MM
@@ -60,7 +53,7 @@ export async function GET(request: NextRequest) {
     let branch = searchParams.get('branch') || 'all';
 
     // Admin can only see their own branch
-    if (currentUser.role === 'Admin') {
+    if (role === 'Admin') {
       branch = currentUser.branch;
     }
 

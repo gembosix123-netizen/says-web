@@ -11,6 +11,7 @@ import { VisitSummary } from '@/components/features/merchandiser/VisitSummary';
 import { Button } from '@/components/ui/Button';
 import { ArrowLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { getSessionUserFromCookieString, type SessionUser } from '@/lib/session';
 
 function VisitWizard() {
   const { step, setStep } = useMerchandiser();
@@ -78,23 +79,12 @@ function VisitWizard() {
 }
 
 export default function VisitPage() {
-  const [sessionData, setSessionData] = React.useState<any>(null);
+  const [sessionData, setSessionData] = React.useState<SessionUser | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    
-    if (sessionCookie) {
-      try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
-        setSessionData(data);
-      } catch (e) {
-        console.error('Failed to parse session:', e);
-      }
-    }
+    const data = getSessionUserFromCookieString(document.cookie);
+    setSessionData(data);
     setLoading(false);
   }, []);
 

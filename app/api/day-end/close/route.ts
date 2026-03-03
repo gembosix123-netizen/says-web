@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
-}
+import { logAuditEvent } from '@/lib/audit';
+import { normalizeRole } from '@/lib/roles';
+import { canCloseDayEnd, canViewDayEnd } from '@/lib/permissions';
+import { getSessionUserFromRequest } from '@/lib/session';
 
 function resolveSalesTable(branch: string) {
   if (branch === 'Kinabatangan') {
@@ -22,9 +15,10 @@ function resolveSalesTable(branch: string) {
 
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
-    if (!currentUser || currentUser.role !== 'Admin') {
-      return NextResponse.json({ error: 'Only Admin can access day end status' }, { status: 403 });
+    const currentUser = getSessionUserFromRequest(request);
+    const role = normalizeRole(currentUser?.role);
+    if (!currentUser || !canViewDayEnd(role)) {
+      return NextResponse.json({ error: 'Only Admin/Main Admin can access day end status' }, { status: 403 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -67,16 +61,32 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
-    if (!currentUser || currentUser.role !== 'Admin') {
-      return NextResponse.json({ error: 'Only Admin can perform day end' }, { status: 403 });
+    const currentUser = getSessionUserFromRequest(request);
+    const role = normalizeRole(currentUser?.role);
+    if (!currentUser || !canCloseDayEnd(role)) {
+      await logAuditEvent({
+        request,
+        module: 'day_end',
+        action: 'close_day_end',
+        entityType: 'day_end_closing',
+        status: 'denied',
+        sourceSystem: 'supabase',
+        metadata: {
+          reason: 'Only Admin/Main Admin can perform day end',
+        },
+      });
+      return NextResponse.json({ error: 'Only Admin/Main Admin can perform day end' }, { status: 403 });
     }
 
     const body = await request.json();
-    const { date, branch, cashCount, reconciliationNotes, discrepancies } = body;
+    const { date, branch, cashCount, reconciliationNotes, discrepancies, referenceNo } = body;
 
     if (!date || !branch) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    if (!reconciliationNotes || !String(reconciliationNotes).trim()) {
+      return NextResponse.json({ error: 'Reason is required for day end closing' }, { status: 400 });
     }
 
     if (!supabaseAdmin) {
@@ -102,6 +112,21 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('Error creating day end record:', error);
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'day_end',
+        action: 'close_day_end',
+        entityType: 'day_end_closing',
+        branch,
+        status: 'failed',
+        reason: reconciliationNotes || null,
+        sourceSystem: 'supabase',
+        metadata: {
+          date,
+          error: error.message,
+        },
+      });
       return NextResponse.json({ error: 'Failed to save day end closing' }, { status: 500 });
     }
 
@@ -117,6 +142,26 @@ export async function POST(request: NextRequest) {
     if (lockError) {
       console.error('Error locking transactions:', lockError);
     }
+
+    await logAuditEvent({
+      request,
+      actor: currentUser,
+      module: 'day_end',
+      action: 'close_day_end',
+      entityType: 'day_end_closing',
+      entityId: dayEndRecord?.[0]?.id,
+      branch,
+      status: 'success',
+      reason: reconciliationNotes || null,
+      referenceNo: referenceNo || date,
+      sourceSystem: 'supabase',
+      metadata: {
+        date,
+        salesTable,
+        cashCount,
+        discrepancyCount: Array.isArray(discrepancies) ? discrepancies.length : 0,
+      },
+    });
 
     return NextResponse.json({
       success: true,

@@ -12,6 +12,8 @@ export default function AdminUsersPage() {
   const [currentUserBranch, setCurrentUserBranch] = useState<string>('');
   const [currentUserRole, setCurrentUserRole] = useState<string>('');
   const [showForm, setShowForm] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReferenceNo, setDeleteReferenceNo] = useState('');
   const [form, setForm] = useState({ 
     username: '', 
     password: '', 
@@ -85,8 +87,20 @@ export default function AdminUsersPage() {
 
   const deleteUser = async (id: string, name: string) => {
     if (!confirm(`Delete user "${name}"?`)) return;
+    if (!deleteReason.trim()) {
+      addToast('Reason is required to delete user', 'warning');
+      return;
+    }
     try {
-      const res = await fetch(`/api/users?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const params = new URLSearchParams({
+        id,
+        reason: deleteReason.trim(),
+      });
+      if (deleteReferenceNo.trim()) {
+        params.set('referenceNo', deleteReferenceNo.trim());
+      }
+
+      const res = await fetch(`/api/users?${params.toString()}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json();
         addToast(data?.error || 'Failed to delete', 'error');
@@ -150,6 +164,27 @@ export default function AdminUsersPage() {
           {currentUserRole === 'Admin' && (
             <p className="text-slate-400 text-xs mt-1">Admin accounts can only manage users in their assigned branch</p>
           )}
+        </div>
+      </div>
+
+      <div className="p-4 rounded-lg bg-slate-900 border border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-2">Delete Reason (Required)</label>
+          <input
+            value={deleteReason}
+            onChange={(e) => setDeleteReason(e.target.value)}
+            placeholder="Example: Left company"
+            className="w-full p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-blue-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-2">Reference No (Optional)</label>
+          <input
+            value={deleteReferenceNo}
+            onChange={(e) => setDeleteReferenceNo(e.target.value)}
+            placeholder="Example: HR-EXIT-2026-03"
+            className="w-full p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-blue-500 focus:outline-none"
+          />
         </div>
       </div>
 

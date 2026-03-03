@@ -1,28 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { canAccessStoreVisits } from '@/lib/permissions';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal server error';
 }
 
-// Get current user from session cookie
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
 // GET - List store visits with filtering
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessStoreVisits(role)) {
+      return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -42,10 +38,10 @@ export async function GET(request: NextRequest) {
       `);
 
     // Role-based filtering
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       // Merchandiser/Sales sees only their own visits
       query = query.eq('merchandiser_id', currentUser.id);
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       // Admin sees visits in their branch only
       query = query.eq('branch', currentUser.branch);
     }
@@ -82,13 +78,15 @@ export async function GET(request: NextRequest) {
 // POST - Create new store visit (check-in)
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Only Merchandiser, Sales, and Admin can create visits
-    if (currentUser.role !== 'Merchandiser' && currentUser.role !== 'Sales' && currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+    const role = normalizeRole(currentUser.role);
+
+    // Only allowed roles can create visits
+    if (!canAccessStoreVisits(role)) {
       return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
@@ -105,7 +103,7 @@ export async function POST(request: NextRequest) {
     }
 
     // For merchandisers, check if they're allowed to visit this store
-    if (currentUser.role === 'Merchandiser') {
+    if (role === 'Merchandiser') {
       const { data: userData } = await supabaseAdmin
         .from('users')
         .select('allowed_stores')
@@ -155,9 +153,14 @@ export async function POST(request: NextRequest) {
 // PUT - Update store visit (typically for check-out)
 export async function PUT(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessStoreVisits(role)) {
+      return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -183,11 +186,11 @@ export async function PUT(request: NextRequest) {
     }
 
     // Permission check
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       if (existingVisit.merchandiser_id !== currentUser.id) {
         return NextResponse.json({ error: 'Forbidden - you can only update your own visits' }, { status: 403 });
       }
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       if (existingVisit.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'Forbidden - you can only update visits in your branch' }, { status: 403 });
       }

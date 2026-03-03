@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { canAccessStoreVisits } from '@/lib/permissions';
+import { getSessionUserFromRequest } from '@/lib/session';
 
 interface AuditItemInput {
   product_id: string;
@@ -15,24 +18,17 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal server error';
 }
 
-// Get current user from session cookie
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
 // GET - Get audit items for a specific visit
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessStoreVisits(role)) {
+      return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -58,11 +54,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Permission check
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       if (visit.merchandiser_id !== currentUser.id) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       if (visit.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
@@ -90,13 +86,15 @@ export async function GET(request: NextRequest) {
 // POST - Create audit items for a visit
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+
     // Only Merchandiser, Sales, and Admin can create audits
-    if (currentUser.role !== 'Merchandiser' && currentUser.role !== 'Sales' && currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+    if (!canAccessStoreVisits(role)) {
       return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
@@ -127,11 +125,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Permission check
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       if (visit.merchandiser_id !== currentUser.id) {
         return NextResponse.json({ error: 'Forbidden - you can only add audits to your own visits' }, { status: 403 });
       }
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       if (visit.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { normalizeRole, type NormalizedRole } from '@/lib/roles';
+import { canAccessAdminPath, canAccessMerchandiserRoutes, canAccessSalesRoutes } from '@/lib/permissions';
 
 // Standard Next.js Middleware
 // Note: Do not rename to proxy.ts unless strictly required by specific custom server configs.
@@ -84,7 +86,8 @@ export function middleware(request: NextRequest) {
       }
       
       const sessionData = JSON.parse(sessionValue);
-      const { role, branch } = sessionData;
+      const role = normalizeRole(sessionData.role);
+      const { branch } = sessionData;
 
       // Redirect Main Admin (founder) to /admin
       if (role === 'Main Admin' && (pathname === '/' || pathname === '/dashboard')) {
@@ -102,8 +105,8 @@ export function middleware(request: NextRequest) {
       }
 
       if (pathname.startsWith('/admin')) {
-        if (role !== 'Admin' && role !== 'Main Admin') {
-          return NextResponse.redirect(new URL('/', request.url));
+        if (!canAccessAdminPath(role, pathname)) {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
         }
 
         // Branch restrictions for Admins
@@ -121,13 +124,13 @@ export function middleware(request: NextRequest) {
       }
       
       // Sales routes - only Sales role can create sales (not Merchandiser)
-      if (pathname.startsWith('/sales') && role !== 'Sales' && role !== 'Admin' && role !== 'Main Admin') {
+      if (pathname.startsWith('/sales') && !canAccessSalesRoutes(role)) {
          return NextResponse.redirect(new URL('/', request.url));
       }
       
       // Merchandiser routes - both Merchandiser and Sales can access (Sales can do merchandiser work)
       if (pathname.startsWith('/merchandiser')) {
-        if (role !== 'Merchandiser' && role !== 'Sales' && role !== 'Admin' && role !== 'Main Admin') {
+        if (!canAccessMerchandiserRoutes(role)) {
           return NextResponse.redirect(new URL('/', request.url));
         }
       }

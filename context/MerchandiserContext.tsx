@@ -53,6 +53,7 @@ interface MerchandiserContextType {
   startVisit: (customerId: string) => Promise<StoreVisit | null>;
   completeVisit: () => Promise<boolean>;
   resetVisitProcess: () => void;
+  refreshCustomers: () => Promise<void>;
   refreshVisits: () => Promise<void>;
   
   // User info
@@ -137,6 +138,18 @@ export function MerchandiserProvider({
   useEffect(() => {
     fetchData();
   }, []);
+
+  const refreshCustomers = async () => {
+    try {
+      const res = await fetch('/api/customers');
+      if (res.ok) {
+        const data = await readJson(res);
+        setAllowedCustomers(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error("[MerchandiserContext] Failed to refresh customers", error);
+    }
+  };
 
   // Refresh visits
   const refreshVisits = async () => {
@@ -336,6 +349,7 @@ export function MerchandiserProvider({
         startVisit,
         completeVisit,
         resetVisitProcess,
+        refreshCustomers,
         refreshVisits,
         userRole,
         userBranch,

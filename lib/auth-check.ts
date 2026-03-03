@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { getSessionUserFromRequest } from '@/lib/session';
 
 export interface AuthUser {
   id: string;
@@ -20,9 +20,9 @@ export interface AuthUser {
  */
 export async function checkAuth(request: NextRequest): Promise<{ user: AuthUser | null; error: NextResponse | null }> {
   try {
-    const sessionCookie = request.cookies.get('session');
-    
-    if (!sessionCookie) {
+    const sessionData = getSessionUserFromRequest(request);
+
+    if (!sessionData) {
       const errorResponse = NextResponse.json(
         { error: 'Not authenticated. Please login.' },
         { status: 401 }
@@ -30,34 +30,12 @@ export async function checkAuth(request: NextRequest): Promise<{ user: AuthUser 
       return { user: null, error: errorResponse };
     }
 
-    let sessionValue = sessionCookie.value;
-    try {
-      sessionValue = decodeURIComponent(sessionValue);
-    } catch (e) {
-      // Session value is not URL-encoded, use as-is
-    }
-
-    const sessionData = JSON.parse(sessionValue) as { id: string };
-
-    // Verify user still exists and get latest data
-    const users = await db.users.getAll();
-    const user = users.find(u => u.id === sessionData.id);
-
-    if (!user) {
-      const errorResponse = NextResponse.json(
-        { error: 'User not found' },
-        { status: 401 }
-      );
-      errorResponse.cookies.delete('session');
-      return { user: null, error: errorResponse };
-    }
-
     const authUser: AuthUser = {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      name: user.name || user.username,
-      branch: user.branch || 'HQ',
+      id: sessionData.id,
+      username: sessionData.username || sessionData.name || 'user',
+      role: sessionData.role,
+      name: sessionData.name || sessionData.username || 'User',
+      branch: sessionData.branch || 'HQ',
     };
 
     return { user: authUser, error: null };

@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { createSaleSchema } from '@/lib/validations';
+import { logAuditEvent } from '@/lib/audit';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { normalizeRole } from '@/lib/roles';
+import { canAccessSalesRoutes } from '@/lib/permissions';
 
 const SALES_TABLE = 'sales_transactions';
 const SALES_ITEMS_TABLE = 'sales_items';
-
-// Get current user from session cookie
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
-}
 
 function generateInvoice(branchCode = 'XX') {
   const timestamp = Date.now().toString(36);
@@ -26,9 +18,14 @@ function generateInvoice(branchCode = 'XX') {
 export async function GET(request: NextRequest) {
   try {
     // Check authorization
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessSalesRoutes(role)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -41,16 +38,16 @@ export async function GET(request: NextRequest) {
 
     // Branch access control
     // If Admin, only allow their own branch
-    if (currentUser.role === 'Admin') {
+    if (role === 'Admin') {
       branch = currentUser.branch;
-    } else if (currentUser.role === 'Sales') {
+    } else if (role === 'Sales') {
       // Sales can only see their own data - filter by user_id
       branch = currentUser.branch;
     }
     // Main Admin can query any branch (respects branch param if provided)
 
     // Only Main Admin can fetch all branches
-    if ((!branch || branch === 'all') && currentUser.role !== 'Main Admin') {
+    if ((!branch || branch === 'all') && role !== 'Main Admin') {
       return NextResponse.json({ error: 'Unauthorized - only Main Admin can view all sales' }, { status: 403 });
     }
 
@@ -64,7 +61,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Sales can only see their own transactions
-    if (currentUser.role === 'Sales') {
+    if (role === 'Sales') {
       query = query.eq('user_id', currentUser.id);
     }
 
@@ -169,13 +166,27 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Check authorization
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessSalesRoutes(role)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
     // Only Sales and Admin can create sales
-    if (currentUser.role !== 'Sales' && currentUser.role !== 'Admin') {
+    if (role !== 'Sales' && role !== 'Admin') {
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'sales',
+        action: 'create_sale',
+        entityType: 'sales_transaction',
+        status: 'denied',
+        sourceSystem: 'supabase',
+      });
       return NextResponse.json({ error: 'Unauthorized - only sales staff and admin can create sales' }, { status: 403 });
     }
 
@@ -188,9 +199,9 @@ export async function POST(request: NextRequest) {
     let branch = body.branch || currentUser.branch; // Default to user's branch
 
     // Ensure user can only create sales for their own branch
-    if (currentUser.role === 'Sales') {
+    if (role === 'Sales') {
       branch = currentUser.branch;
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       // Admin can create sales for their branch only
       if (body.branch && body.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'You can only create sales for your own branch' }, { status: 403 });
@@ -239,6 +250,20 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('Supabase error:', error);
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'sales',
+        action: 'create_sale',
+        entityType: 'sales_transaction',
+        branch,
+        status: 'failed',
+        sourceSystem: 'supabase',
+        metadata: {
+          error: error.message,
+          invoice,
+        },
+      });
       return NextResponse.json({ error: 'Failed to create sale', details: error.message }, { status: 500 });
     }
 
@@ -260,6 +285,21 @@ export async function POST(request: NextRequest) {
       console.error('Supabase error inserting sales items:', itemsError);
       // Best effort cleanup for orphaned transaction
       await supabaseAdmin.from(SALES_TABLE).delete().eq('id', sale.id);
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'sales',
+        action: 'create_sale',
+        entityType: 'sales_transaction',
+        entityId: sale.id,
+        branch,
+        status: 'failed',
+        sourceSystem: 'supabase',
+        metadata: {
+          error: itemsError.message,
+          invoice,
+        },
+      });
       return NextResponse.json({ error: 'Failed to create sale items', details: itemsError.message }, { status: 500 });
     }
 
@@ -310,6 +350,25 @@ export async function POST(request: NextRequest) {
       proofPhotoUrl: null
     };
 
+    await logAuditEvent({
+      request,
+      actor: currentUser,
+      module: 'sales',
+      action: 'create_sale',
+      entityType: 'sales_transaction',
+      entityId: sale.id,
+      branch,
+      status: 'success',
+      referenceNo: sale.invoice,
+      sourceSystem: 'supabase',
+      metadata: {
+        invoice: sale.invoice,
+        total: Number(sale.grand_total ?? sale.subtotal_amount ?? 0),
+        itemCount: saleItems.length,
+        paymentMethod: sale.payment_method,
+      },
+    });
+
     return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
     console.error('Error in POST /api/sales:', error);
@@ -320,13 +379,27 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     // Check authorization
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessSalesRoutes(role)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
     // Only Admin and Main Admin can delete sales
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+    if (role !== 'Admin' && role !== 'Main Admin') {
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'sales',
+        action: 'delete_sale',
+        entityType: 'sales_transaction',
+        status: 'denied',
+        sourceSystem: 'supabase',
+      });
       return NextResponse.json({ error: 'Unauthorized - only admin can delete sales' }, { status: 403 });
     }
 
@@ -338,11 +411,16 @@ export async function DELETE(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     let branch = searchParams.get('branch');
+    const reason = searchParams.get('reason');
+    const referenceNo = searchParams.get('referenceNo');
 
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    if (!reason || !reason.trim()) {
+      return NextResponse.json({ error: 'Reason is required for delete action' }, { status: 400 });
+    }
 
     // Branch access control
-    if (currentUser.role === 'Admin') {
+    if (role === 'Admin') {
       branch = currentUser.branch; // Admin can only delete from their branch
     }
 
@@ -358,7 +436,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Double check Admin can only delete from their branch
-    if (currentUser.role === 'Admin' && sale.branch !== currentUser.branch) {
+    if (role === 'Admin' && sale.branch !== currentUser.branch) {
       return NextResponse.json({ error: 'You cannot delete sales from other branches' }, { status: 403 });
     }
 
@@ -369,8 +447,39 @@ export async function DELETE(request: NextRequest) {
     const { error } = await supabaseAdmin.from(SALES_TABLE).delete().eq('id', id);
     if (error) {
       console.error('Supabase error deleting sale:', error);
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'sales',
+        action: 'delete_sale',
+        entityType: 'sales_transaction',
+        entityId: id,
+        branch: sale.branch,
+        status: 'failed',
+        sourceSystem: 'supabase',
+        metadata: {
+          error: error.message,
+        },
+      });
       return NextResponse.json({ error: 'Failed to delete sale' }, { status: 500 });
     }
+
+    await logAuditEvent({
+      request,
+      actor: currentUser,
+      module: 'sales',
+      action: 'delete_sale',
+      entityType: 'sales_transaction',
+      entityId: id,
+      branch: sale.branch,
+      status: 'success',
+      reason,
+      referenceNo: referenceNo || undefined,
+      sourceSystem: 'supabase',
+      metadata: {
+        deletedBranch: sale.branch,
+      },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

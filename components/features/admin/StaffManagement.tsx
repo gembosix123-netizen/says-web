@@ -46,6 +46,8 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReferenceNo, setDeleteReferenceNo] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', password: '', role: '', branch: '', salary: '' });
   const { addToast } = useToast();
@@ -125,9 +127,22 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
       return;
     }
 
+    if (!deleteReason.trim()) {
+      addToast('Reason is required to delete staff member', 'warning');
+      return;
+    }
+
     try {
       // Call API to delete
-      fetch(`/api/users?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const params = new URLSearchParams({
+        id,
+        reason: deleteReason.trim(),
+      });
+      if (deleteReferenceNo.trim()) {
+        params.set('referenceNo', deleteReferenceNo.trim());
+      }
+
+      fetch(`/api/users?${params.toString()}`, { method: 'DELETE' })
         .then(async (res) => {
           const json = await res.json();
           if (!res.ok) throw new Error(json?.error || 'Failed to delete');
@@ -266,6 +281,31 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
           className="w-full pl-10 pr-4 py-2 bg-says-card border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-says-accent focus:outline-none transition-colors"
         />
       </div>
+
+      {isSuperAdmin && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-slate-700/50 bg-slate-900/40">
+          <div>
+            <label className="block text-sm text-slate-300 mb-2">Delete Reason (Required)</label>
+            <input
+              type="text"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Example: Resigned / duplicate account"
+              className="w-full px-4 py-2 bg-says-card border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-says-accent focus:outline-none transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-2">Reference No (Optional)</label>
+            <input
+              type="text"
+              value={deleteReferenceNo}
+              onChange={(e) => setDeleteReferenceNo(e.target.value)}
+              placeholder="Example: HR-EXIT-2026-02"
+              className="w-full px-4 py-2 bg-says-card border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-says-accent focus:outline-none transition-colors"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Staff Table */}
       <div className="overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/40 to-slate-900/40 backdrop-blur-glass">

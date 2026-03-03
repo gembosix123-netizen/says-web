@@ -23,6 +23,7 @@ import {
 } from '@/lib/firestore-service';
 import { loadInventorySchema } from '@/lib/validations';
 import { requireAuth } from '@/lib/auth-check';
+import { logAuditEvent } from '@/lib/audit';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Check authentication - Admin role or higher can create inventory
-    const { error } = await requireAuth(request, 'Admin');
+    const { user, error } = await requireAuth(request, 'Admin');
     if (error) return error;
 
     const body = await request.json();
@@ -126,6 +127,22 @@ export async function POST(request: NextRequest) {
       batchNumbers: body.batchNumbers || [],
     });
 
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'inventory',
+      action: 'create_inventory_item',
+      entityType: 'inventory_item',
+      entityId: inventoryId,
+      branch: validatedData.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        productId: validatedData.items[0]?.productId || body.productId,
+        quantity: validatedData.items[0]?.quantity || body.quantity,
+      },
+    });
+
     return NextResponse.json(
       {
         message: 'Inventory item created successfully',
@@ -150,7 +167,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     // Check authentication - Admin role or higher can update inventory
-    const { error } = await requireAuth(request, 'Admin');
+    const { user, error } = await requireAuth(request, 'Admin');
     if (error) return error;
 
     const body = await request.json();
@@ -175,6 +192,21 @@ export async function PUT(request: NextRequest) {
     // Update inventory item
     await updateInventoryItem(inventoryId, body);
 
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'inventory',
+      action: 'update_inventory_item',
+      entityType: 'inventory_item',
+      entityId: inventoryId,
+      branch: item.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        updatedFields: Object.keys(body || {}),
+      },
+    });
+
     return NextResponse.json(
       { message: 'Inventory item updated successfully' },
       { status: 200 }
@@ -196,15 +228,24 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     // Check authentication - Main Admin can delete inventory items
-    const { error } = await requireAuth(request, 'Main Admin');
+    const { user, error } = await requireAuth(request, 'Main Admin');
     if (error) return error;
 
     const searchParams = request.nextUrl.searchParams;
     const inventoryId = searchParams.get('id');
+    const reason = searchParams.get('reason');
+    const referenceNo = searchParams.get('referenceNo');
 
     if (!inventoryId) {
       return NextResponse.json(
         { error: 'Inventory ID is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!reason || !reason.trim()) {
+      return NextResponse.json(
+        { error: 'Reason is required for delete action' },
         { status: 400 }
       );
     }
@@ -220,6 +261,31 @@ export async function DELETE(request: NextRequest) {
 
     // Delete inventory item
     await deleteInventoryItem(inventoryId);
+
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'inventory',
+      action: 'delete_inventory_item',
+      entityType: 'inventory_item',
+      entityId: inventoryId,
+      branch: item.branch,
+      status: 'success',
+      reason,
+      referenceNo: referenceNo || undefined,
+      sourceSystem: 'firestore',
+      changes: [
+        {
+          field: 'deleted_inventory_item',
+          oldValue: {
+            id: item.inventoryId,
+            productId: item.productId,
+            quantity: item.quantity,
+          },
+          newValue: null,
+        },
+      ],
+    });
 
     return NextResponse.json(
       { message: 'Inventory item deleted successfully' },

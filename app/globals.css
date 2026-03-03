@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@config "../tailwind.config.ts";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: var(--font-geist-sans);
@@ -7,17 +9,17 @@
 
 @layer base {
   body {
-    @apply bg-black text-white antialiased;
+    @apply bg-slate-50 text-slate-800 antialiased dark:bg-black dark:text-white;
   }
   
   /* High-Contrast Inputs Global Override */
   input, select, textarea {
-    @apply bg-slate-900 text-white placeholder-slate-400 border border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none;
+    @apply bg-white/90 text-slate-800 placeholder-slate-500 border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-400 outline-none dark:bg-slate-900 dark:text-white dark:placeholder-slate-400 dark:border-slate-700;
   }
   
   /* Ensure all text inputs are visible */
   input[type="text"], input[type="number"], input[type="email"], input[type="password"] {
-    @apply text-white bg-slate-900/80 backdrop-blur-sm;
+    @apply text-slate-900 bg-white/90 backdrop-blur-sm dark:text-white dark:bg-slate-900/80;
   }
   
   /* Button styling consistency */
@@ -30,9 +32,39 @@
     width: 8px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-slate-900;
+    @apply bg-slate-200 dark:bg-slate-900;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-slate-700 rounded-full;
+    @apply bg-slate-400 dark:bg-slate-700 rounded-full;
+  }
+}
+
+@layer components {
+  .soft-page-bg {
+    @apply bg-gradient-to-br from-slate-100 via-slate-50 to-indigo-50/40 dark:from-black dark:via-black dark:to-slate-900;
+  }
+
+  .soft-panel {
+    @apply bg-white/70 dark:bg-slate-900/55 border border-slate-200/60 dark:border-slate-800 rounded-2xl shadow-sm dark:shadow-xl backdrop-blur-sm;
+  }
+
+  .soft-card {
+    @apply bg-white/85 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 rounded-2xl shadow-sm dark:shadow-lg;
+  }
+
+  .soft-card-blue {
+    @apply bg-gradient-to-br from-sky-50/80 to-indigo-50/70 border border-sky-200/50 dark:from-slate-900 dark:to-slate-900 dark:border-slate-800;
+  }
+
+  .soft-card-green {
+    @apply bg-gradient-to-br from-emerald-50/80 to-teal-50/70 border border-emerald-200/50 dark:from-slate-900 dark:to-slate-900 dark:border-slate-800;
+  }
+
+  .soft-card-rose {
+    @apply bg-gradient-to-br from-rose-50/80 to-amber-50/70 border border-rose-200/50 dark:from-slate-900 dark:to-slate-900 dark:border-slate-800;
+  }
+
+  .soft-table-head {
+    @apply bg-white/70 dark:bg-slate-900 text-slate-500;
   }
 }

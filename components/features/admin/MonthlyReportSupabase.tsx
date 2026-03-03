@@ -161,8 +161,8 @@ export default function MonthlyReportSupabase() {
 
   if (!reportData && !loading) {
     return (
-      <div className="p-6 bg-slate-900/50 rounded-lg border border-slate-700 text-center">
-        <p className="text-slate-400">{t('loading_report')}</p>
+      <div className="soft-panel p-6 rounded-lg text-center">
+        <p className="text-slate-600 dark:text-slate-400">{t('loading_report')}</p>
       </div>
     );
   }
@@ -178,13 +178,13 @@ export default function MonthlyReportSupabase() {
   return (
     <div className="space-y-6">
       {/* Header & Controls */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900 p-5 rounded-xl border border-slate-700 backdrop-blur-sm">
+      <div className="soft-panel p-5 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2 mb-1">
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
             <Calendar className="text-blue-400" />
             {t('monthly_reports')}
           </h2>
-          <p className="text-sm text-slate-400">{t('sales_analysis')}</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">{t('sales_analysis')}</p>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
@@ -192,7 +192,7 @@ export default function MonthlyReportSupabase() {
             type="month"
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
-            className="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+            className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
             title={t('select_month')}
           />
 
@@ -200,7 +200,7 @@ export default function MonthlyReportSupabase() {
             value={selectedBranch}
             onChange={(e) => setSelectedBranch(e.target.value as any)}
             disabled={currentUserRole === 'Admin'}
-            className="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-sm disabled:opacity-50"
+            className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-sm disabled:opacity-50"
           >
             <option value="all">{t('all_branches')}</option>
             <option value="Kota Kinabalu">{t('kota_kinabalu')}</option>
@@ -230,22 +230,22 @@ export default function MonthlyReportSupabase() {
       </div>
 
       {currentUserRole === 'Admin' && (
-        <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 flex items-start gap-2">
+        <div className="soft-panel p-3 rounded-lg flex items-start gap-2">
           <AlertCircle size={16} className="text-blue-400 mt-0.5 flex-shrink-0" />
-          <p className="text-sm text-slate-300">
-            {t('branch_access_warning')} <span className="font-semibold text-white">{currentUserBranch}</span>
+          <p className="text-sm text-slate-700 dark:text-slate-300">
+            {t('branch_access_warning')} <span className="font-semibold text-slate-900 dark:text-white">{currentUserBranch}</span>
           </p>
         </div>
       )}
 
       {loading ? (
-        <div className="p-8 text-center text-slate-400">{t('loading_report')}</div>
+        <div className="p-8 text-center text-slate-600 dark:text-slate-400">{t('loading_report')}</div>
       ) : reportData ? (
         <div className="space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-slate-900 p-6 rounded-lg border border-slate-700">
-              <p className="text-slate-400 text-sm mb-2">{t('total_revenue')}</p>
+            <div className="soft-card soft-card-green p-6 rounded-lg">
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-2">{t('total_revenue')}</p>
               <h3 className="text-3xl font-bold text-green-400">
                 {formatCurrency(reportData.totalRevenue)}
               </h3>
@@ -254,16 +254,16 @@ export default function MonthlyReportSupabase() {
               </p>
             </div>
 
-            <div className="bg-slate-900 p-6 rounded-lg border border-slate-700">
-              <p className="text-slate-400 text-sm mb-2">{t('avg_transaction')}</p>
+            <div className="soft-card soft-card-blue p-6 rounded-lg">
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-2">{t('avg_transaction')}</p>
               <h3 className="text-3xl font-bold text-blue-400">
                 {formatCurrency(reportData.totalRevenue / reportData.totalTransactions || 0)}
               </h3>
               <p className="text-xs text-slate-500 mt-2">{t('revenue')}</p>
             </div>
 
-            <div className="bg-slate-900 p-6 rounded-lg border border-slate-700">
-              <p className="text-slate-400 text-sm mb-2">{t('active_branches')}</p>
+            <div className="soft-card soft-card-rose p-6 rounded-lg">
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-2">{t('active_branches')}</p>
               <h3 className="text-3xl font-bold text-purple-400">
                 {reportData.branchSummaries.length}
               </h3>
@@ -273,30 +273,30 @@ export default function MonthlyReportSupabase() {
 
           {/* Branch Breakdown */}
           {reportData.branchSummaries.length > 0 && (
-            <div className="bg-slate-900 p-6 rounded-lg border border-slate-700">
-              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <div className="soft-panel p-6 rounded-lg">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                 <Users size={20} className="text-orange-400" />
                 {t('branch_summary')}
               </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="border-b border-slate-700">
+                  <thead className="border-b border-slate-200 dark:border-slate-700">
                     <tr>
-                      <th className="text-left px-4 py-2 text-slate-300">{t('branch')}</th>
-                      <th className="text-right px-4 py-2 text-slate-300">{t('revenue')}</th>
-                      <th className="text-right px-4 py-2 text-slate-300">{t('transactions')}</th>
-                      <th className="text-right px-4 py-2 text-slate-300">{t('avg_transaction')}</th>
+                      <th className="text-left px-4 py-2 text-slate-600 dark:text-slate-300">{t('branch')}</th>
+                      <th className="text-right px-4 py-2 text-slate-600 dark:text-slate-300">{t('revenue')}</th>
+                      <th className="text-right px-4 py-2 text-slate-600 dark:text-slate-300">{t('transactions')}</th>
+                      <th className="text-right px-4 py-2 text-slate-600 dark:text-slate-300">{t('avg_transaction')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {reportData.branchSummaries.map((branch) => (
-                      <tr key={branch.branch} className="border-b border-slate-700/50 hover:bg-slate-800/30">
-                        <td className="px-4 py-3 text-white font-medium">{branch.branch}</td>
+                      <tr key={branch.branch} className="border-b border-slate-200 dark:border-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-800/30">
+                        <td className="px-4 py-3 text-slate-900 dark:text-white font-medium">{branch.branch}</td>
                         <td className="text-right px-4 py-3 text-green-400 font-semibold">
                           {formatCurrency(branch.totalRevenue)}
                         </td>
-                        <td className="text-right px-4 py-3 text-slate-300">{branch.transactionCount}</td>
-                        <td className="text-right px-4 py-3 text-slate-400">
+                        <td className="text-right px-4 py-3 text-slate-700 dark:text-slate-300">{branch.transactionCount}</td>
+                        <td className="text-right px-4 py-3 text-slate-500 dark:text-slate-400">
                           {formatCurrency(branch.avgTransaction)}
                         </td>
                       </tr>
@@ -311,8 +311,8 @@ export default function MonthlyReportSupabase() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Daily Sales Trend */}
             {reportData.dailyData.length > 0 && (
-              <div className="bg-slate-900 p-6 rounded-lg border border-slate-700">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <div className="soft-panel p-6 rounded-lg">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                   <TrendingUp size={20} className="text-blue-400" />
                   {t('daily_sales_trend')}
                 </h3>
@@ -333,8 +333,8 @@ export default function MonthlyReportSupabase() {
 
             {/* Top Products */}
             {reportData.topProducts.length > 0 && (
-              <div className="bg-slate-900 p-6 rounded-lg border border-slate-700">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <div className="soft-panel p-6 rounded-lg">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                   <Package size={20} className="text-orange-400" />
                   {t('top_products_chart')}
                 </h3>
@@ -352,7 +352,7 @@ export default function MonthlyReportSupabase() {
           </div>
         </div>
       ) : (
-        <div className="p-8 text-center text-slate-400">{t('no_data_available')}</div>
+        <div className="p-8 text-center text-slate-600 dark:text-slate-400">{t('no_data_available')}</div>
       )}
     </div>
   );

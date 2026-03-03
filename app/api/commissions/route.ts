@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
 
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
@@ -13,18 +15,6 @@ interface SalesRecord {
 interface CommissionPayoutRecord {
   user_id: string;
   amount: number | string;
-}
-
-// Get current user from session cookie
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
 }
 
 interface CommissionSummary {
@@ -49,13 +39,15 @@ interface CommissionSummary {
  */
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+
     // Only Admin and Main Admin can view commissions
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+    if (role !== 'Admin' && role !== 'Main Admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
@@ -69,7 +61,7 @@ export async function GET(request: NextRequest) {
     let branch = searchParams.get('branch');
 
     // Admin can only see their branch
-    if (currentUser.role === 'Admin') {
+    if (role === 'Admin') {
       branch = currentUser.branch;
     }
 
@@ -200,13 +192,15 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+
     // Only Main Admin can pay commissions
-    if (currentUser.role !== 'Main Admin') {
+    if (role !== 'Main Admin') {
       return NextResponse.json({ error: 'Unauthorized - only Main Admin can process payouts' }, { status: 403 });
     }
 

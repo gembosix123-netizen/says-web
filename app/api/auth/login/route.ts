@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { rateLimiters, getClientIp } from '@/lib/rateLimit';
 import { loginSchema } from '@/lib/validations';
+import { normalizeRole } from '@/lib/roles';
 
 const SALT_ROUNDS = 10;
 
@@ -24,15 +25,6 @@ type AuthUser = {
  */
 function isBcryptHash(hash: string): boolean {
   return hash.startsWith('$2a$') || hash.startsWith('$2b$') || hash.startsWith('$2y$');
-}
-
-function normalizeRole(role: string | null | undefined): string {
-  const value = (role || '').toLowerCase().trim();
-  if (value === 'main admin' || value === 'founder' || value === 'owner') return 'Main Admin';
-  if (value === 'admin') return 'Admin';
-  if (value === 'sales' || value === 'salesman') return 'Sales';
-  if (value === 'merchandiser') return 'Merchandiser';
-  return role || 'Sales';
 }
 
 /**
@@ -213,7 +205,7 @@ export async function POST(request: Request) {
     // Reset rate limit on successful login
     await rateLimiters.login.reset(clientIp, 'login');
 
-    const normalizedRole = normalizeRole(user.role);
+    const normalizedRole = normalizeRole(user.role) || 'Sales';
     const displayName = user.name || user.full_name || user.username || 'User';
     const branch = user.branch || 'HQ';
 

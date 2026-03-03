@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { logAuditEvent } from '@/lib/audit';
 
 export async function POST(request: Request) {
   try {
@@ -34,6 +35,19 @@ export async function POST(request: Request) {
 
     // 3. Save to DB
     await db.vanInventories.save(currentInv);
+
+    await logAuditEvent({
+      module: 'van_inventory',
+      action: 'load_van_stock',
+      entityType: 'van_inventory',
+      entityId: inventoryId,
+      status: 'success',
+      sourceSystem: 'db_json',
+      metadata: {
+        userId,
+        loadedItems: items,
+      },
+    });
 
     return NextResponse.json({ success: true, stock: currentInv });
   } catch (error) {

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { VanInventory } from '@/types';
 import { checkAuth } from '@/lib/auth-check';
 import { supabaseAdmin } from '@/lib/supabase';
+import { logAuditEvent } from '@/lib/audit';
 
 type ProductRecord = {
   id: string;
@@ -103,7 +104,7 @@ export async function GET(request: NextRequest) {
         lastUpdated: baseInventory.lastUpdated,
         products: vanProducts,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch inventory' }, { status: 500 });
   }
 }
@@ -159,8 +160,24 @@ export async function PUT(request: NextRequest) {
         currentInv.lastUpdated = new Date().toISOString();
         await db.vanInventories.save(currentInv);
 
+        await logAuditEvent({
+          request,
+          actor: user,
+          module: 'van_inventory',
+          action: 'deduct_van_stock',
+          entityType: 'van_inventory',
+          entityId: inventoryId,
+          branch: user.branch,
+          status: 'success',
+          sourceSystem: 'db_json',
+          metadata: {
+            affectedUserId: resolvedUserId,
+            deductedItems: items,
+          },
+        });
+
         return NextResponse.json(currentInv);
-    } catch (error) {
+    } catch {
         return NextResponse.json({ error: 'Failed to update inventory' }, { status: 500 });
     }
 }

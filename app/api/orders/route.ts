@@ -23,6 +23,7 @@ import {
 } from '@/lib/firestore-service';
 import { createOrderSchema } from '@/lib/validations';
 import { requireAuth } from '@/lib/auth-check';
+import { logAuditEvent } from '@/lib/audit';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -97,7 +98,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Check authentication - Sales role or higher can create orders
-    const { error } = await requireAuth(request, 'Sales');
+    const { user, error } = await requireAuth(request, 'Sales');
     if (error) return error;
 
     const body = await request.json();
@@ -155,6 +156,23 @@ export async function POST(request: NextRequest) {
       metadata: body.metadata || {},
     });
 
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'orders',
+      action: 'create_order',
+      entityType: 'transaction',
+      entityId: transactionId,
+      branch: validatedData.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        orderType: validatedData.orderType,
+        totalAmount: validatedData.totalAmount,
+        itemCount: validatedData.items.length,
+      },
+    });
+
     return NextResponse.json(
       {
         message: 'Transaction created successfully',
@@ -179,7 +197,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     // Check authentication - Admin role or higher can update orders
-    const { error } = await requireAuth(request, 'Admin');
+    const { user, error } = await requireAuth(request, 'Admin');
     if (error) return error;
 
     const body = await request.json();
@@ -204,6 +222,21 @@ export async function PUT(request: NextRequest) {
     // Update transaction
     await updateTransaction(transactionId, body);
 
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'orders',
+      action: 'update_order',
+      entityType: 'transaction',
+      entityId: transactionId,
+      branch: transaction.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        updatedFields: Object.keys(body || {}),
+      },
+    });
+
     return NextResponse.json(
       { message: 'Transaction updated successfully' },
       { status: 200 }
@@ -225,15 +258,24 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     // Check authentication - Main Admin only can delete orders
-    const { error } = await requireAuth(request, 'Main Admin');
+    const { user, error } = await requireAuth(request, 'Main Admin');
     if (error) return error;
 
     const searchParams = request.nextUrl.searchParams;
     const transactionId = searchParams.get('id');
+    const reason = searchParams.get('reason');
+    const referenceNo = searchParams.get('referenceNo');
 
     if (!transactionId) {
       return NextResponse.json(
         { error: 'Transaction ID is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!reason || !reason.trim()) {
+      return NextResponse.json(
+        { error: 'Reason is required for delete action' },
         { status: 400 }
       );
     }
@@ -249,6 +291,31 @@ export async function DELETE(request: NextRequest) {
 
     // Delete transaction
     await deleteTransaction(transactionId);
+
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'orders',
+      action: 'delete_order',
+      entityType: 'transaction',
+      entityId: transactionId,
+      branch: transaction.branch,
+      status: 'success',
+      reason,
+      referenceNo: referenceNo || undefined,
+      sourceSystem: 'firestore',
+      changes: [
+        {
+          field: 'deleted_transaction',
+          oldValue: {
+            id: transaction.transactionId,
+            status: transaction.status,
+            amount: transaction.amount,
+          },
+          newValue: null,
+        },
+      ],
+    });
 
     return NextResponse.json(
       { message: 'Transaction deleted successfully' },

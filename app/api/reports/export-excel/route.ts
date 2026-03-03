@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { canExportReports } from '@/lib/permissions';
 
 interface ReportProduct {
   name: string;
@@ -27,23 +30,16 @@ interface ExportReportData {
   dailyData?: ReportDailyData[];
 }
 
-// Helper: Get current user from session
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canExportReports(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const body = await request.json();

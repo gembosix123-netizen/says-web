@@ -11,6 +11,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { createProductSchema, updateProductSchema } from '@/lib/validations';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { canManageProducts } from '@/lib/permissions';
 
 // ============================================================================
 // GET HANDLER
@@ -18,6 +21,11 @@ import { createProductSchema, updateProductSchema } from '@/lib/validations';
 
 export async function GET(request: NextRequest) {
   try {
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
@@ -73,6 +81,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canManageProducts(role)) {
+      return NextResponse.json({ error: 'Unauthorized - admin only' }, { status: 403 });
+    }
+
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
@@ -137,7 +155,16 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canManageProducts(role)) {
+      return NextResponse.json({ error: 'Unauthorized - admin only' }, { status: 403 });
+    }
+
     const body = await request.json();
     const productId = body.id || body.productId;
 
@@ -208,7 +235,16 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Main Admin only
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canManageProducts(role)) {
+      return NextResponse.json({ error: 'Unauthorized - admin only' }, { status: 403 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const productId = searchParams.get('id');
 
@@ -237,15 +273,38 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Soft delete product
-    const { error: deleteError } = await supabaseAdmin
+    // Soft delete product with schema fallbacks
+    let deleteError: any = null;
+
+    // Preferred: is_active + updated_at
+    const firstAttempt = await supabaseAdmin
       .from('products')
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', productId);
 
+    deleteError = firstAttempt.error;
+
+    // Fallback 1: older schema without updated_at
+    if (deleteError) {
+      const secondAttempt = await supabaseAdmin
+        .from('products')
+        .update({ is_active: false })
+        .eq('id', productId);
+      deleteError = secondAttempt.error;
+    }
+
+    // Fallback 2: very old schema without is_active -> hard delete
+    if (deleteError) {
+      const thirdAttempt = await supabaseAdmin
+        .from('products')
+        .delete()
+        .eq('id', productId);
+      deleteError = thirdAttempt.error;
+    }
+
     if (deleteError) {
       console.error('Error deleting product:', deleteError);
-      return NextResponse.json({ error: 'Failed to delete product' }, { status: 500 });
+      return NextResponse.json({ error: deleteError.message || 'Failed to delete product' }, { status: 500 });
     }
 
     return NextResponse.json(

@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { collectPaymentSchema } from '@/lib/validations';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { normalizeRole } from '@/lib/roles';
+import { canAccessSalesRoutes } from '@/lib/permissions';
 
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
-
-// Get current user from session cookie
-async function getCurrentUser(request: NextRequest) {
-  try {
-    const session = request.cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * POST /api/sales/collect-payment
@@ -23,9 +14,14 @@ async function getCurrentUser(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessSalesRoutes(role)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -133,9 +129,14 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessSalesRoutes(role)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -147,7 +148,7 @@ export async function GET(request: NextRequest) {
     let branch = searchParams.get('branch');
 
     // Branch access control
-    if (currentUser.role === 'Admin' || currentUser.role === 'Sales') {
+    if (role === 'Admin' || role === 'Sales') {
       branch = currentUser.branch;
     }
 

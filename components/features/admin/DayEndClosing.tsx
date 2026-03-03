@@ -58,6 +58,7 @@ export default function DayEndClosing() {
   // Reconciliation form state
   const [cashCount, setCashCount] = useState(0);
   const [reconciliationNotes, setReconciliationNotes] = useState('');
+  const [closeReferenceNo, setCloseReferenceNo] = useState('');
 
   const toSafeNumber = (value: unknown) => {
     const parsed = Number(value);
@@ -170,8 +171,15 @@ export default function DayEndClosing() {
       return;
     }
 
+    if (!reconciliationNotes.trim()) {
+      addToast('Please provide reconciliation notes before closing day end', 'warning');
+      return;
+    }
+
     setIsClosing(true);
     try {
+      const referenceNo = closeReferenceNo.trim() || `DAYEND-${selectedDate}-${userBranch}`;
+
       // Close day end
       const closeResponse = await fetch('/api/day-end/close', {
         method: 'POST',
@@ -181,6 +189,7 @@ export default function DayEndClosing() {
           branch: userBranch,
           cashCount,
           reconciliationNotes,
+          referenceNo,
           discrepancies: [],
         }),
       });
@@ -608,6 +617,17 @@ export default function DayEndClosing() {
                     onChange={(e) => setReconciliationNotes(e.target.value)}
                     placeholder="Add any notes about discrepancies or issues..."
                     rows={4}
+                    className="w-full bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">Reference No (Optional)</label>
+                  <input
+                    type="text"
+                    value={closeReferenceNo}
+                    onChange={(e) => setCloseReferenceNo(e.target.value)}
+                    placeholder="Example: DAYEND-APPROVAL-001"
                     className="w-full bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
