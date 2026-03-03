@@ -58,11 +58,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
-    let branch = searchParams.get('branch');
+    let branch: string | null = searchParams.get('branch');
 
     // Admin can only see their branch
     if (role === 'Admin') {
-      branch = currentUser.branch;
+      branch = currentUser.branch ?? null;
     }
 
     // Default to current month
