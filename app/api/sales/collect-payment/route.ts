@@ -145,11 +145,11 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') || 'pending';
-    let branch = searchParams.get('branch');
+    let branch: string | null = searchParams.get('branch');
 
     // Branch access control
     if (role === 'Admin' || role === 'Sales') {
-      branch = currentUser.branch;
+      branch = currentUser.branch ?? null;
     }
 
     let pendingSales = [];
