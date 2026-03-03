@@ -50,11 +50,11 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month'); // YYYY-MM
     const startDate = searchParams.get('startDate'); // For date range
     const endDate = searchParams.get('endDate'); // For date range
-    let branch = searchParams.get('branch') || 'all';
+    let branch: string = searchParams.get('branch') || 'all';
 
     // Admin can only see their own branch
     if (role === 'Admin') {
-      branch = currentUser.branch;
+      branch = currentUser.branch || 'all';
     }
 
     if (!month && !startDate) {
