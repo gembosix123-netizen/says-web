@@ -1,5 +1,5 @@
 'use client';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Transaction, Product, User, StockAudit, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
@@ -20,6 +20,17 @@ interface LowStockAlert {
     auditDate: string;
 }
 
+interface ExchangeReturn {
+  id: string;
+  product_name: string;
+  quantity: number;
+  type: 'exchange' | 'return' | 'disposal';
+  reason: string;
+  reason_details?: string;
+  status: string;
+  created_at: string;
+}
+
 const AGENT_BRANCH_MAP: Record<string, string> = {
     u2: 'Kota Kinabalu',
     u3: 'Kinabatangan'
@@ -28,6 +39,27 @@ const AGENT_BRANCH_MAP: Record<string, string> = {
 export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
   const { t } = useLanguage();
   const [selectedBranch, setSelectedBranch] = useState('all');
+  const [exchangeReturns, setExchangeReturns] = useState<ExchangeReturn[]>([]);
+
+  // Fetch exchange/return data
+  useEffect(() => {
+    const fetchExchangeReturns = async () => {
+      try {
+        const params = new URLSearchParams();
+        if (selectedBranch !== 'all') {
+          params.set('branch', selectedBranch);
+        }
+        const response = await fetch(`/api/exchange-returns?${params.toString()}`);
+        if (response.ok) {
+          const data = await response.json();
+          setExchangeReturns(data || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch exchange/returns:', error);
+      }
+    };
+    fetchExchangeReturns();
+  }, [selectedBranch]);
 
   // Get unique branches from transactions
   const branches = useMemo(() => {
@@ -89,12 +121,23 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
      stockAudits?.forEach(audit => {
          audit.items?.forEach(item => {
              if (item.physicalStock < 10) {
+                 // Try to find customer by ID
                  const customer = customers.find(c => c.id === audit.customerId);
+                 
+                 // Determine customer/location name with better fallbacks
+                 let customerName = 'Unknown';
+                 if (customer?.name) {
+                   customerName = customer.name;
+                 } else if (audit.customerId) {
+                   // Use customer ID as fallback if no match found
+                   customerName = `Customer ${audit.customerId.slice(0, 8)}`;
+                 }
+                 
                  alerts.push({
                      productId: item.productId,
                      productName: item.productName,
                      physicalStock: item.physicalStock,
-                     customerName: customer?.name || 'Unknown',
+                     customerName: customerName,
                      auditDate: audit.createdAt,
                  });
              }
@@ -126,23 +169,17 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
 
   const maxSales = Math.max(...salesTrend.map(d => d.total), 1);
 
-  // Exchange/Return Tracking
+  // Exchange/Return Tracking - Use real data from API
   const exchangeReport = useMemo(() => {
-    const report: { productName: string; quantity: number; reason: string }[] = [];
-    filteredTransactions?.forEach(t => {
-      if (t.exchangeItems) {
-        t.exchangeItems.forEach(item => {
-            const product = products.find(p => p.id === item.productId);
-            report.push({
-                productName: product?.name || 'Unknown',
-                quantity: item.quantity,
-                reason: item.reason
-            });
-        });
-      }
-    });
-    return report;
-  }, [filteredTransactions, products]);
+    return exchangeReturns.map(item => ({
+      productName: item.product_name,
+      quantity: item.quantity,
+      reason: item.reason,
+      type: item.type,
+      status: item.status,
+      createdAt: item.created_at
+    }));
+  }, [exchangeReturns]);
 
   return (
     <div className="space-y-6">
@@ -194,24 +231,44 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                     Exchange & Return Tracking (Disposal)
                 </h3>
                 <div className="overflow-x-auto max-h-64">
-                    <table className="w-full text-left">
+                    <table className="w-full text-left text-sm">
                         <thead className="sticky top-0 soft-table-head">
                             <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
                                 <th className="pb-3 pl-2">Product</th>
+                                <th className="pb-3">Type</th>
                                 <th className="pb-3">Qty</th>
                                 <th className="pb-3">Reason</th>
+                                <th className="pb-3">Status</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                            {exchangeReport.map((item, idx) => (
+                            {exchangeReport.map((item: any, idx) => (
                                 <tr key={idx} className="group hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
                                     <td className="py-3 pl-2 font-medium text-slate-700 dark:text-slate-300">{item.productName}</td>
+                                    <td className="py-3">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                            item.type === 'exchange' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                            item.type === 'return' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                        }`}>
+                                            {item.type}
+                                        </span>
+                                    </td>
                                     <td className="py-3 font-bold text-amber-600 dark:text-orange-400">{item.quantity}</td>
                                     <td className="py-3 text-slate-500 dark:text-slate-400 text-sm">{item.reason}</td>
+                                    <td className="py-3">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                            item.status === 'approved' || item.status === 'completed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                            item.status === 'rejected' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                            'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                        }`}>
+                                            {item.status}
+                                        </span>
+                                    </td>
                                 </tr>
                             ))}
                             {exchangeReport.length === 0 && (
-                                <tr><td colSpan={3} className="py-8 text-center text-slate-500 italic">No returns recorded</td></tr>
+                                <tr><td colSpan={5} className="py-8 text-center text-slate-500 italic">No returns recorded</td></tr>
                             )}
                         </tbody>
                     </table>

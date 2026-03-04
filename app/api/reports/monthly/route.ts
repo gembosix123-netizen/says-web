@@ -31,11 +31,7 @@ interface BranchEntry {
   transactionCount: number;
 }
 
-// Helper: Get sales table by branch
-function getSalesTable(branch: string) {
-  if (branch === 'Kinabatangan') return 'sales_kinabatangan';
-  return 'sales_kota_kinabalu';
-}
+const SALES_TABLE = 'sales_transactions';
 
 export async function GET(request: NextRequest) {
   try {
@@ -65,14 +61,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    // Determine which tables to query
-    const tables = [];
-    if (branch === 'all') {
-      tables.push('sales_kota_kinabalu', 'sales_kinabatangan');
-    } else {
-      tables.push(getSalesTable(branch));
-    }
-
     // Determine date range
     let dateStart = `${month}-01T00:00:00Z`;
     let dateEnd = `${month}-31T23:59:59Z`;
@@ -82,32 +70,37 @@ export async function GET(request: NextRequest) {
       dateEnd = `${endDate}T23:59:59Z`;
     }
 
-    // Fetch sales data for the month
-    let allSales: MonthlySaleRecord[] = [];
-    for (const table of tables) {
-      const { data: sales, error } = await supabaseAdmin
-        .from(table)
-        .select('*')
-        .gte('created_at', dateStart)
-        .lte('created_at', dateEnd);
+    // Build query for sales_transactions table
+    let query = supabaseAdmin
+      .from(SALES_TABLE)
+      .select('*')
+      .gte('created_at', dateStart)
+      .lte('created_at', dateEnd);
 
-      if (error) {
-        console.error(`Error fetching from ${table}:`, error);
-        continue;
-      }
-
-      allSales = allSales.concat(sales || []);
+    // Filter by branch if specified
+    if (branch && branch !== 'all') {
+      query = query.eq('branch', branch);
     }
+
+    // Fetch sales data
+    const { data: allSales, error } = await query;
+
+    if (error) {
+      console.error('Error fetching sales:', error);
+      return NextResponse.json({ error: 'Failed to fetch sales data' }, { status: 500 });
+    }
+
+    const salesData = allSales || [];
 
     // Process data for report
     const dailyData: Record<string, DailyEntry> = {};
     const branchData: Record<string, BranchEntry> = {};
     const productData: Record<string, number> = {};
 
-    allSales.forEach((sale) => {
+    salesData.forEach((sale: any) => {
       const date = sale.created_at?.split('T')[0] || 'unknown';
       const branchName = sale.branch || 'Unknown';
-      const amount = Number(sale.amount ?? sale.total_amount ?? 0);
+      const amount = Number(sale.grand_total ?? sale.subtotal_amount ?? sale.amount ?? sale.total_amount ?? 0);
 
       // Daily data
       if (!dailyData[date]) {
@@ -123,10 +116,10 @@ export async function GET(request: NextRequest) {
       branchData[branchName].totalRevenue += amount;
       branchData[branchName].transactionCount += 1;
 
-      // Product data
+      // Product data (if items are embedded in the sale record)
       if (sale.items && Array.isArray(sale.items)) {
-        sale.items.forEach((item) => {
-          const productName = item.name || 'Unknown Product';
+        sale.items.forEach((item: any) => {
+          const productName = item.name || item.product_name || 'Unknown Product';
           productData[productName] = (productData[productName] || 0) + (item.quantity || 1);
         });
       } else if (sale.item_name) {
@@ -136,7 +129,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate summary
     const totalRevenue = Object.values(dailyData).reduce((sum, d) => sum + d.amount, 0);
-    const totalTransactions = allSales.length;
+    const totalTransactions = salesData.length;
 
     // Branch summaries with avg
     const branchSummaries = Object.values(branchData).map((b) => ({

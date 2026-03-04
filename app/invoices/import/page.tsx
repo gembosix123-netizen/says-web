@@ -26,19 +26,20 @@ export default function BulkImportPage() {
     setError(null);
     setResult(null);
 
-    Papa.parse(file, {
+    Papa.parse(file as any, {
       header: true,
       skipEmptyLines: true,
-      complete: (results) => {
+      complete: (results: Papa.ParseResult<any>) => {
+        if (results.errors && results.errors.length > 0) {
+          setError(`CSV parsing error: ${results.errors[0].message}`);
+          return;
+        }
         if (results.data && results.data.length > 0) {
           setCsvData(results.data as any[]);
           setPreview(true);
         } else {
           setError('No data found in CSV file');
         }
-      },
-      error: (error) => {
-        setError(`CSV parsing error: ${error.message}`);
       }
     });
   };

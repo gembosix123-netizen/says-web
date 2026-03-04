@@ -117,201 +117,122 @@ export async function POST(request: NextRequest) {
 
     for (const invoice of validInvoices) {
       try {
-        const {
-          invoice_no,
-          invoice_date,
-          due_date,
-          customer_id,
-          subtotal,
-          discount = 0,
-          tax = 0,
-          total,
-          payment_status = 'UNPAID',
-          amount_paid = 0,
-          items = [],
-          notes = null,
-          is_backdate = true,
-          backdate_reason = 'Historical data import'
-        } = invoiceData;
+        const balanceDue = invoice.total - (invoice.amount_paid || 0);
 
-        // Validate required fields
-        if (!invoice_no || !customer_id || !total) {
-          results.failed++;
-          results.errors.push({
-            invoiceNo: invoice_no,
-            error: 'Missing required fields: invoice_no, customer_id, total'
-          });
-          continue;
-        }
-
-        // Check if invoice already exists
-        const { data: existingInvoice } = await supabaseAdmin
+        const { data: newInvoice, error: invoiceError } = await supabaseAdmin
           .from(INVOICES_TABLE)
-          .select('id')
-          .eq('invoice_no', invoice_no)
+          .insert({
+            invoice_no: invoice.invoice_no,
+            invoice_date: invoice.invoice_date,
+            due_date: invoice.due_date,
+            branch: currentUser.branch || 'IMPORT',
+            customer_id: invoice.customer_id,
+            subtotal: invoice.subtotal,
+            tax: invoice.tax,
+            discount: 0,
+            total: invoice.total,
+            payment_status: invoice.payment_status,
+            amount_paid: invoice.amount_paid,
+            balance_due: balanceDue,
+            notes: 'Imported from legacy system',
+            created_at: invoice.invoice_date
+          })
+          .select()
           .single();
 
-        if (existingInvoice && !overwrite) {
-          results.failed++;
-          results.errors.push({
-            invoiceNo: invoice_no,
-            error: 'Invoice already exists (use overwrite=true to replace)'
-          });
+        if (invoiceError) {
+          console.error(`Error importing invoice ${invoice.invoice_no}:`, invoiceError);
+          errorCount++;
           continue;
         }
 
-        const balanceDue = total - amount_paid;
-
-        const invoiceInsertData = {
-          invoice_no,
-          invoice_date: invoice_date || new Date().toISOString(),
-          due_date: due_date || invoice_date,
-          branch: '', // Import doesn't have branch info
-          customer_id,
-          subtotal,
-          discount,
-          tax,
-          total,
-          payment_status,
-          amount_paid,
-          balance_due: balanceDue,
-          notes: notes,
-          created_at: invoice_date || new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-
-        let invoiceId;
-
-        if (existingInvoice && overwrite) {
-          // Update existing invoice
-          const { error: updateError } = await supabaseAdmin
-            .from(INVOICES_TABLE)
-            .update(invoiceInsertData)
-            .eq('id', existingInvoice.id);
-
-          if (updateError) {
-            results.failed++;
-            results.errors.push({
-              invoiceNo: invoice_no,
-              error: updateError.message
-            });
-            continue;
-          }
-          invoiceId = existingInvoice.id;
-        } else {
-          // Insert new invoice
-          const { data: newInvoice, error: insertError } = await supabaseAdmin
-            .from(INVOICES_TABLE)
-            .insert(invoiceInsertData)
-            .select('id')
-            .single();
-
-          if (insertError || !newInvoice) {
-            results.failed++;
-            results.errors.push({
-              invoiceNo: invoice_no,
-              error: insertError?.message || 'Failed to insert invoice'
-            });
-            continue;
-          }
-          invoiceId = newInvoice.id;
-        }
-
-        // Insert invoice items
-        if (items && items.length > 0) {
-          const invoiceItems = items.map((item: any) => ({
-            invoice_id: invoiceId,
-            product_code: item.product_code || null,
+        if (newInvoice && invoice.items && invoice.items.length > 0) {
+          const items = invoice.items.map((item: any) => ({
+            invoice_id: newInvoice.id,
             product_name: item.product_name,
             quantity: item.quantity,
             unit_price: item.unit_price,
-            discount_percent: item.discount_percent || 0,
-            discount_amount: item.discount_amount || 0,
-            tax_percent: item.tax_percent || 0,
-            tax_amount: item.tax_amount || 0,
             line_total: item.line_total || (item.quantity * item.unit_price),
-            notes: item.notes || null,
-            created_at: invoice_date || new Date().toISOString()
+            created_at: invoice.invoice_date
           }));
-
-          // Delete existing items if overwrite
-          if (existingInvoice && overwrite) {
-            await supabaseAdmin
-              .from(INVOICE_ITEMS_TABLE)
-              .delete()
-              .eq('invoice_id', invoiceId);
-          }
 
           const { error: itemsError } = await supabaseAdmin
             .from(INVOICE_ITEMS_TABLE)
-            .insert(invoiceItems);
+            .insert(items);
 
           if (itemsError) {
-            results.failed++;
-            results.errors.push({
-              invoiceNo: invoice_no,
-              error: `Invoice created but items failed: ${itemsError.message}`
-            });
-            continue;
+            console.error(`Error importing items for ${invoice.invoice_no}:`, itemsError);
           }
         }
 
-        results.successful++;
-
-        // Log the import
-        await logAuditEvent({
-          request,
-          actor: currentUser,
-          module: 'invoices',
-          action: 'batch_import',
-          entityType: 'invoice',
-          entityId: invoiceId,
-          branch: '',
-          status: 'success',
-          referenceNo: invoice_no,
-          sourceSystem: 'supabase',
-          metadata: {
-            invoiceNo: invoice_no,
-            total,
-            itemCount: items.length,
-            isBackdate: is_backdate,
-            backkdateReason: backdate_reason,
-            overwrite: existingInvoice ? true : false
-          }
-        });
-
+        successCount++;
+        importedIds.push(newInvoice.id);
       } catch (err) {
-        results.failed++;
-        results.errors.push({
-          invoiceNo: invoiceData.invoice_no,
-          error: err instanceof Error ? err.message : 'Unknown error'
-        });
+        console.error(`Error processing invoice ${invoice.invoice_no}:`, err);
+        errorCount++;
       }
     }
 
-    // Log batch import completion
+    // Audit log
     await logAuditEvent({
       request,
       actor: currentUser,
       module: 'invoices',
-      action: 'batch_import_complete',
+      action: 'batch_import',
       entityType: 'invoice',
-      status: results.failed === 0 ? 'success' : 'partial',
+      branch: currentUser.branch || 'IMPORT',
+      status: 'success',
       sourceSystem: 'supabase',
       metadata: {
-        totalCount: invoices.length,
-        successCount: results.successful,
-        failedCount: results.failed,
-        errors: results.errors
+        totalRows: validInvoices.length,
+        successCount,
+        errorCount,
+        importedIds: importedIds.slice(0, 10)
       }
     });
 
-    return NextResponse.json(results, { 
-      status: results.failed === 0 ? 200 : 207 
+    return NextResponse.json({
+      success: true,
+      message: `Import completed: ${successCount} invoices imported, ${errorCount} failed`,
+      successCount,
+      errorCount,
+      totalRows: validInvoices.length,
+      importedInvoiceCount: successCount
     });
 
   } catch (error) {
     console.error('Error in POST /api/invoices/import:', error);
     return NextResponse.json({ error: 'Failed to import invoices' }, { status: 500 });
+  }
+}
+
+// GET endpoint untuk download template
+export async function GET(request: NextRequest) {
+  try {
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (role !== 'Admin' && role !== 'Main Admin') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    // Return CSV template
+    const template = `invoice_no,invoice_date,due_date,customer_id,subtotal,tax,total,payment_status,amount_paid
+INV-2025-001,2025-01-15,2025-02-15,CUST-001,500.00,50.00,550.00,PAID,550.00
+INV-2025-002,2025-01-20,2025-02-20,CUST-002,1000.00,100.00,1100.00,PARTIAL,600.00
+INV-2025-003,2025-02-01,2025-03-01,CUST-003,750.00,75.00,825.00,UNPAID,0.00`;
+
+    return new Response(template, {
+      headers: {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': 'attachment; filename="invoice-import-template.csv"'
+      }
+    });
+  } catch (error) {
+    console.error('Error in GET /api/invoices/import:', error);
+    return NextResponse.json({ error: 'Failed to get template' }, { status: 500 });
   }
 }

@@ -18,9 +18,59 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempRate, setTempRate] = useState<string>('');
 
-  // 1. Filter only completed sales
-  const completedSales = useMemo(() => {
-    return transactions.filter(t => t.status === 'Completed' && t.salesmanId);
+  // 1. Filter completed sales and calculate commission eligibility
+  const eligibleSalesWithCommission = useMemo(() => {
+    return transactions
+      .filter(t => t.status === 'Completed' && t.salesmanId)
+      .map(t => {
+        const saleDate = t.createdAt ? new Date(t.createdAt) : new Date();
+        const paymentMethod = (t as any).payment_method || t.payment?.method || 'cash';
+        const payStatus = (t as any).paymentStatus || 'paid';
+        let commissionAmount = 0;
+        let commissionType = 'none';
+
+        // Cash sales: 4% commission immediately
+        if (paymentMethod === 'cash') {
+          commissionAmount = t.total * 0.04;
+          commissionType = 'cash';
+        }
+        // Credit sales: depends on payment status and timing
+        else if (paymentMethod === 'credit') {
+          // Check if paid
+          if (payStatus === 'paid') {
+            // TODO: Need to implement paid_at field in database to track payment date
+            // For now, check if transaction is old (> 30 days from creation)
+            const daysSinceCreation = Math.floor((Date.now() - saleDate.getTime()) / (1000 * 60 * 60 * 24));
+            
+            // If paid_at field exists, use it:
+            const paidAt = (t as any).paid_at;
+            let daysDiff = daysSinceCreation;
+            if (paidAt) {
+              const paidDate = new Date(paidAt);
+              daysDiff = Math.floor((paidDate.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24));
+            }
+            
+            if (daysDiff <= 30) {
+              // Paid within 30 days: 4% commission
+              commissionAmount = t.total * 0.04;
+              commissionType = 'credit-30days';
+            } else {
+              // Paid after 30 days: RM 0.10 per product unit
+              const totalQuantity = (t.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
+              commissionAmount = totalQuantity * 0.10;
+              commissionType = 'credit-late';
+            }
+          }
+          // If not paid yet (paymentStatus === 'pending'), no commission earned yet
+        }
+
+        return {
+          ...t,
+          commissionAmount,
+          commissionType
+        };
+      })
+      .filter(t => t.commissionAmount > 0);
   }, [transactions]);
 
   // 2. Aggregate by Salesman
@@ -28,8 +78,12 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
     const stats: Record<string, {
       user: User | undefined;
       totalSales: number;
+      totalEligibleSales: number;
       commissionEarned: number;
       paidAmount: number;
+      cashCommission: number;
+      creditCommission: number;
+      lateCommission: number;
     }> = {};
 
     // Initialize for all sales users
@@ -37,19 +91,36 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
       stats[u.id] = {
         user: u,
         totalSales: 0,
+        totalEligibleSales: 0,
         commissionEarned: 0,
-        paidAmount: 0
+        paidAmount: 0,
+        cashCommission: 0,
+        creditCommission: 0,
+        lateCommission: 0
       };
     });
 
     // Sum Sales & Commissions
-    completedSales.forEach(t => {
+    eligibleSalesWithCommission.forEach(t => {
+      if (stats[t.salesmanId!]) {
+        stats[t.salesmanId!].totalEligibleSales += t.total;
+        stats[t.salesmanId!].commissionEarned += t.commissionAmount;
+        
+        // Track commission by type
+        if (t.commissionType === 'cash') {
+          stats[t.salesmanId!].cashCommission += t.commissionAmount;
+        } else if (t.commissionType === 'credit-30days') {
+          stats[t.salesmanId!].creditCommission += t.commissionAmount;
+        } else if (t.commissionType === 'credit-late') {
+          stats[t.salesmanId!].lateCommission += t.commissionAmount;
+        }
+      }
+    });
+    
+    // Also count all completed sales (including unpaid credit)
+    transactions.filter(t => t.status === 'Completed' && t.salesmanId).forEach(t => {
       if (stats[t.salesmanId!]) {
         stats[t.salesmanId!].totalSales += t.total;
-        
-        // Use user specific rate or default 5%
-        const rate = stats[t.salesmanId!].user?.commissionRate || 0.05;
-        stats[t.salesmanId!].commissionEarned += t.total * rate;
       }
     });
 
@@ -65,7 +136,7 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
         pendingAmount: s.commissionEarned - s.paidAmount
     })).sort((a, b) => b.pendingAmount - a.pendingAmount);
 
-  }, [completedSales, users, payouts]);
+  }, [eligibleSalesWithCommission, transactions, users, payouts]);
 
   const filteredStaff = staffCommissions.filter(s => 
         (selectedBranch === 'all' || s.user?.branch === selectedBranch) &&

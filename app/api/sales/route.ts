@@ -34,15 +34,15 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    let branch = searchParams.get('branch');
+    let branch: string | null = searchParams.get('branch');
 
     // Branch access control
     // If Admin, only allow their own branch
     if (role === 'Admin') {
-      branch = currentUser.branch;
+      branch = currentUser.branch ?? null;
     } else if (role === 'Sales') {
       // Sales can only see their own data - filter by user_id
-      branch = currentUser.branch;
+      branch = currentUser.branch ?? null;
     }
     // Main Admin can query any branch (respects branch param if provided)
 
@@ -196,17 +196,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    let branch = body.branch || currentUser.branch; // Default to user's branch
+    let branch: string = String(body.branch || currentUser.branch || ''); // Default to user's branch
 
     // Ensure user can only create sales for their own branch
     if (role === 'Sales') {
-      branch = currentUser.branch;
+      branch = currentUser.branch ?? branch;
     } else if (role === 'Admin') {
       // Admin can create sales for their branch only
       if (body.branch && body.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'You can only create sales for your own branch' }, { status: 403 });
       }
-      branch = currentUser.branch;
+      branch = currentUser.branch ?? branch;
     }
 
     // Set branch for validation
@@ -410,7 +410,7 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    let branch = searchParams.get('branch');
+    let branch: string | null = searchParams.get('branch');
     const reason = searchParams.get('reason');
     const referenceNo = searchParams.get('referenceNo');
 
@@ -421,7 +421,7 @@ export async function DELETE(request: NextRequest) {
 
     // Branch access control
     if (role === 'Admin') {
-      branch = currentUser.branch; // Admin can only delete from their branch
+      branch = currentUser.branch ?? null; // Admin can only delete from their branch
     }
 
     // Verify the sale exists before deleting

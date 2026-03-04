@@ -1,14 +1,19 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { ShoppingCart, Search, FileText } from 'lucide-react';
+import { ShoppingCart, Search, FileText, Package } from 'lucide-react';
+import ExchangeReturnModal from './ExchangeReturnModal';
 
 interface Order {
   id: string;
-  customerId: string;
-  items: { id: string; quantity: number; price: number }[];
+  customer_id: string | null;
+  customer_name: string | null;
+  customerId?: string; // Legacy support
+  items: { id: string; name?: string; product_name?: string; quantity: number; price: number; unit_price?: number }[];
   total: number;
   status: string;
   createdAt: string;
+  created_at?: string;
+  invoice?: string;
 }
 
 interface Customer {
@@ -27,6 +32,8 @@ export default function OrderManagement() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  const [exchangeModalOpen, setExchangeModalOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -48,13 +55,24 @@ export default function OrderManagement() {
     fetchData();
   }, []);
 
-  const getCustomerName = (id: string) => customers.find(c => c.id === id)?.name || 'Unknown Shop';
+  const getCustomerName = (order: Order) => {
+    // Use customer_name from API if available
+    if (order.customer_name) return order.customer_name;
+    // Fallback to lookup if we have customerId
+    const customerId = order.customer_id || order.customerId;
+    if (customerId) {
+      const customer = customers.find(c => c.id === customerId);
+      if (customer) return customer.name;
+    }
+    return 'Unknown Shop';
+  };
+  
   const getProductName = (id: string) => products.find(p => p.id === id)?.name || id;
 
-  const filteredOrders = orders.filter(o => 
-      getCustomerName(o.customerId).toLowerCase().includes(filter.toLowerCase()) ||
-      o.id.includes(filter)
-  );
+  const filteredOrders = orders.filter(o => {
+    const customerName = getCustomerName(o);
+    return customerName.toLowerCase().includes(filter.toLowerCase()) || o.id.includes(filter);
+  });
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -85,19 +103,21 @@ export default function OrderManagement() {
                         <div key={order.id} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800/60 transition-all">
                             <div className="flex flex-col md:flex-row justify-between md:items-start gap-4 mb-4">
                                 <div>
-                                    <h3 className="text-lg font-bold text-white">{getCustomerName(order.customerId)}</h3>
+                                    <h3 className="text-lg font-bold text-white">{getCustomerName(order)}</h3>
                                     <p className="text-slate-400 text-xs">
-                                        {new Date(order.createdAt).toLocaleString()}
+                                        {new Date(order.createdAt || order.created_at || '').toLocaleString()}
                                     </p>
                                     <span className={`inline-block mt-2 px-2 py-0.5 rounded text-xs font-bold ${
-                                        order.status === 'Completed' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'
+                                        order.status === 'Completed' || order.status === 'completed' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'
                                     }`}>
                                         {order.status}
                                     </span>
                                 </div>
                                 <div className="text-right">
                                     <p className="text-2xl font-bold text-white">RM {order.total.toFixed(2)}</p>
-                                    <p className="text-xs text-slate-500 font-mono">ID: {order.id.slice(0,8)}</p>
+                                    <p className="text-xs text-slate-500 font-mono">
+                                        {order.invoice ? `INV: ${order.invoice.slice(-8)}` : `ID: ${order.id.slice(0,8)}`}
+                                    </p>
                                 </div>
                             </div>
 
@@ -107,16 +127,29 @@ export default function OrderManagement() {
                                     <span className="text-center">Qty</span>
                                     <span className="text-right">Total</span>
                                 </div>
-                                {(order.items || []).map((item, idx) => (
+                                {(order.items || []).map((item: any, idx) => (
                                     <div key={idx} className="grid grid-cols-3 gap-2 text-sm py-1">
-                                        <span className="text-slate-300 truncate">{getProductName(item.id)}</span>
+                                        <span className="text-slate-300 truncate">
+                                            {item.name || item.product_name || getProductName(item.id || item.product_id)}
+                                        </span>
                                         <span className="text-slate-400 text-center">x{item.quantity}</span>
-                                        <span className="text-slate-400 text-right">RM {(item.price * item.quantity).toFixed(2)}</span>
+                                        <span className="text-slate-400 text-right">
+                                            RM {((item.price || item.unit_price || 0) * item.quantity).toFixed(2)}
+                                        </span>
                                     </div>
                                 ))}
                             </div>
                             
-                            <div className="mt-4 flex justify-end">
+                            <div className="mt-4 flex justify-end gap-3">
+                                <button 
+                                  onClick={() => {
+                                    setSelectedOrder(order);
+                                    setExchangeModalOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 text-orange-400 hover:text-white text-sm font-medium transition-colors"
+                                >
+                                    <Package size={16} /> Return/Exchange
+                                </button>
                                 <button className="flex items-center gap-2 text-blue-400 hover:text-white text-sm font-medium transition-colors">
                                     <FileText size={16} /> Print Invoice
                                 </button>
@@ -125,6 +158,32 @@ export default function OrderManagement() {
                     ))
                 )}
             </div>
+        )}
+        
+        {/* Exchange/Return Modal */}
+        {selectedOrder && (
+          <ExchangeReturnModal 
+            isOpen={exchangeModalOpen}
+            onClose={() => {
+              setExchangeModalOpen(false);
+              setSelectedOrder(null);
+            }}
+            onSuccess={() => {
+              // Optionally refresh orders
+              setExchangeModalOpen(false);
+              setSelectedOrder(null);
+            }}
+            saleData={{
+              id: selectedOrder.id,
+              invoice: selectedOrder.invoice,
+              items: selectedOrder.items.map(item => ({
+                id: item.id,
+                name: item.name || item.product_name,
+                product_name: item.product_name,
+                quantity: item.quantity
+              }))
+            }}
+          />
         )}
       </div>
     </div>
