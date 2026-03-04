@@ -105,12 +105,20 @@ export default function InvoicesPage() {
 
         {/* Action Bar */}
         <div className="mb-6 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-          <Link
-            href="/invoices/create"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
-          >
-            Create Invoice
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/invoices/create"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
+            >
+              Create Invoice
+            </Link>
+            <Link
+              href="/invoices/import"
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition"
+            >
+              Bulk Import
+            </Link>
+          </div>
 
           <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
             <input
