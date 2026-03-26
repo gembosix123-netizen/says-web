@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Payment methods and status
-const PAYMENT_METHODS = ['cash', 'bill_to_bill', 'bank_transfer', 'qr_code', 'card', 'ewallet'] as const;
+const PAYMENT_METHODS = ['cash', 'bill_to_bill', 'bank_transfer', 'qr_code', 'card', 'ewallet', 'credit'] as const;
 const PAYMENT_STATUS = ['paid', 'pending', 'partial', 'cancelled'] as const;
 
 // Custom error messages in Bahasa Melayu
