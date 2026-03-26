@@ -9,7 +9,7 @@ const CUSTOMERS_TABLE = 'customers';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const currentUser = getSessionUserFromRequest(request);
@@ -23,7 +23,7 @@ export async function GET(
       return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
     }
 
-    const { id } = params;
+    const { id } = await params;
 
     if (!id) {
       return NextResponse.json({ error: 'Missing invoice id' }, { status: 400 });
@@ -119,7 +119,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const currentUser = getSessionUserFromRequest(request);
@@ -137,7 +137,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
     }
 
-    const { id } = params;
+    const { id } = await params;
     const body = await request.json();
 
     // Fetch invoice to verify access
