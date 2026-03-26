@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { Transaction, Product, User, StockAudit, Customer } from '@/types';
+import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 
 type SalesTransactionRow = {
   id: string;
@@ -86,13 +87,14 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
     txQuery = txQuery.eq('branch', branch);
   }
 
+  // Get the correct customers table based on branch
+  const customersTable = getCustomersTableByBranch(branch);
+
   const [{ data: txRowsRaw, error: txError }, { data: productRows, error: productError }, { data: userRows, error: userError }, { data: customerRows, error: customerError }] = await Promise.all([
     txQuery,
     supabaseAdmin.from('products').select('*'),
     supabaseAdmin.from('users').select('*'),
-    useBranchFilter
-      ? supabaseAdmin.from('customers').select('*').eq('branch', branch)
-      : supabaseAdmin.from('customers').select('*')
+    supabaseAdmin.from(customersTable).select('*')
   ]);
 
   if (txError || productError || userError || customerError) {

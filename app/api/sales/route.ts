@@ -6,14 +6,113 @@ import { logAuditEvent } from '@/lib/audit';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { canAccessSalesRoutes } from '@/lib/permissions';
+import { getCustomersTableByBranch, type Branch } from '@/lib/branchPermissions';
+import { VanInventory } from '@/types';
 
 const SALES_TABLE = 'sales_transactions';
 const SALES_ITEMS_TABLE = 'sales_items';
 
+function toSafeNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeBranchCode(branch = 'XX') {
+  const compact = branch
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim();
+
+  if (!compact) return 'XX';
+
+  const parts = compact.split(/\s+/).filter(Boolean);
+  const initials = parts.map((part) => part[0]).join('').slice(0, 4);
+  return initials || compact.slice(0, 4);
+}
+
+function generateDocumentNumber(prefix: string, branch: string) {
+  const branchCode = normalizeBranchCode(branch);
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+
+  return `${prefix}-${branchCode}-${today}-${timestamp}-${rand}`;
+}
+
+async function generateUniqueCashReceiptNo(branch: string) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = generateDocumentNumber('RCPT', branch);
+
+    const { data, error } = await supabaseAdmin!
+      .from(SALES_TABLE)
+      .select('id')
+      .eq('receipt_no', candidate)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to validate receipt number uniqueness: ${error.message}`);
+    }
+
+    if (!data) {
+      return candidate;
+    }
+  }
+
+  throw new Error('Gagal menjana nombor resit unik. Sila cuba lagi.');
+}
+
+async function restoreVanInventory(inventoryId: string, previousItems: Record<string, number>, userId: string) {
+  await db.vanInventories.save({
+    id: inventoryId,
+    userId,
+    items: previousItems,
+    lastUpdated: new Date().toISOString(),
+  });
+}
+
+function normalizeProofPhotoUrls(value: unknown, fallback?: string | null) {
+  const urls: string[] = [];
+
+  if (Array.isArray(value)) {
+    urls.push(...value.map((item) => String(item || '').trim()).filter(Boolean));
+  } else if (typeof value === 'string' && value.trim()) {
+    const raw = value.trim();
+
+    if (raw.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          urls.push(...parsed.map((item) => String(item || '').trim()).filter(Boolean));
+        }
+      } catch {
+        urls.push(raw);
+      }
+    } else {
+      urls.push(raw);
+    }
+  }
+
+  if (fallback && fallback.trim()) {
+    urls.unshift(fallback.trim());
+  }
+
+  return Array.from(new Set(urls.filter(Boolean))).slice(0, 4);
+}
+
 function generateInvoice(branchCode = 'XX') {
-  const timestamp = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `INV-${branchCode.toUpperCase().replace(/\s+/g, '_')}-${timestamp}-${rand}`;
+  return generateDocumentNumber('INV', branchCode);
+}
+
+function generatePaymentReference(paymentMethod: string, branch: string) {
+  const prefixMap: Record<string, string> = {
+    bill_to_bill: 'B2B',
+    bank_transfer: 'TRF',
+    qr_code: 'QR',
+  };
+
+  const prefix = prefixMap[paymentMethod];
+  return prefix ? generateDocumentNumber(prefix, branch) : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -122,8 +221,9 @@ export async function GET(request: NextRequest) {
 
     let customersById: Record<string, string> = {};
     if (customerIds.length > 0) {
+      const customersTable = getCustomersTableByBranch(currentUser.branch as Branch | undefined);
       const { data: customerRows } = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .select('id,name')
         .in('id', customerIds);
 
@@ -135,13 +235,47 @@ export async function GET(request: NextRequest) {
 
     let usersById: Record<string, string> = {};
     if (userIds.length > 0) {
-      const { data: userRows } = await supabaseAdmin
-        .from('users')
-        .select('id,name,full_name,username')
-        .in('id', userIds);
+      const selectCandidates = [
+        'id,name,full_name,username',
+        'id,name,username',
+        'id,full_name,username',
+      ];
 
-      usersById = (userRows || []).reduce<Record<string, string>>((acc, user) => {
-        acc[user.id] = user.name || user.full_name || user.username || '';
+      let userRows: Array<Record<string, unknown>> = [];
+      let lastUserError: { message?: string } | null = null;
+
+      for (const selectClause of selectCandidates) {
+        const { data, error } = await supabaseAdmin
+          .from('users')
+          .select(selectClause)
+          .in('id', userIds);
+
+        if (!error) {
+          userRows = (data as unknown as Array<Record<string, unknown>> | null) || [];
+          lastUserError = null;
+          break;
+        }
+
+        lastUserError = error;
+      }
+
+      if (lastUserError) {
+        console.error('Supabase error fetching sales users:', lastUserError);
+      }
+
+      usersById = userRows.reduce<Record<string, string>>((acc, user) => {
+        const userId = String(user.id || '');
+        if (!userId) return acc;
+
+        const resolvedName =
+          String(user.name || '').trim() ||
+          String(user.full_name || '').trim() ||
+          String(user.username || '').trim();
+
+        if (resolvedName) {
+          acc[userId] = resolvedName;
+        }
+
         return acc;
       }, {});
     }
@@ -150,6 +284,15 @@ export async function GET(request: NextRequest) {
       const items = itemsBySaleId[sale.id] || [];
       const total = Number(sale.grand_total ?? sale.subtotal_amount ?? 0);
       const paymentStatus = sale.status === 'pending' ? 'pending' : 'paid';
+      const paymentReferenceNo =
+        sale.billing_ref_no ||
+        sale.transfer_ref_no ||
+        sale.qr_txn_ref_no ||
+        null;
+      const proofPhotoUrls = normalizeProofPhotoUrls(
+        sale.proof_photo_urls,
+        sale.proof_photo_url || sale.receipt_url || null
+      );
 
       return {
         id: sale.id,
@@ -166,9 +309,24 @@ export async function GET(request: NextRequest) {
         customer_id: sale.customer_id || null,
         customer_name: customersById[sale.customer_id] || null,
         salesmanId: sale.user_id || null,
-        salesmanName: usersById[sale.user_id] || null,
+        salesmanName:
+          usersById[sale.user_id] ||
+          sale.salesman_name ||
+          sale.user_name ||
+          null,
         payment: { method: sale.payment_method || 'cash', amount: total },
-        payment_method: sale.payment_method || 'cash'
+        payment_method: sale.payment_method || 'cash',
+        receiptNo: sale.receipt_no || null,
+        billingRefNo: sale.billing_ref_no || null,
+        transferRefNo: sale.transfer_ref_no || null,
+        qrTxnRefNo: sale.qr_txn_ref_no || null,
+        paymentReferenceNo,
+        receiptUrl: sale.receipt_url || proofPhotoUrls[0] || null,
+        proofPhotoUrl: proofPhotoUrls[0] || null,
+        proofPhotoUrls: proofPhotoUrls.length > 0 ? proofPhotoUrls : null,
+        notes: sale.notes || null,
+        transactionDate: sale.transaction_date || sale.created_at || null,
+        updatedAt: sale.updated_at || null
       };
     });
 
@@ -240,22 +398,66 @@ export async function POST(request: NextRequest) {
 
     const validatedData = validation.data;
 
-    const invoice = validatedData.invoice || generateInvoice(branch.replace(/\s+/g, '_'));
+    const invoice = validatedData.invoice?.trim() || generateInvoice(branch);
     const isCredit = validatedData.payment_method === 'bill_to_bill';
+    const requestedQuantities = validatedData.items.reduce<Record<string, number>>((acc, item) => {
+      acc[item.productId] = (acc[item.productId] || 0) + Number(item.quantity || 0);
+      return acc;
+    }, {});
+    const inventoryId = `van_${currentUser.id}`;
+    const currentVanInventory = (await db.vanInventories.getById(inventoryId)) as VanInventory | null;
+    const vanItems = Object.entries(currentVanInventory?.items || {}).reduce<Record<string, number>>((acc, [productId, quantity]) => {
+      acc[productId] = toSafeNumber(quantity);
+      return acc;
+    }, {});
 
-    // Validate required reference number per payment method
-    if (validatedData.payment_method === 'cash' && !validatedData.receipt_no) {
-      return NextResponse.json({ error: 'Nombor resit diperlukan untuk pembayaran tunai' }, { status: 400 });
+    const resolvedBillingRefNo = validatedData.payment_method === 'bill_to_bill'
+      ? validatedData.billing_ref_no?.trim() || generatePaymentReference('bill_to_bill', validatedData.branch)
+      : null;
+    const resolvedTransferRefNo = validatedData.payment_method === 'bank_transfer'
+      ? validatedData.transfer_ref_no?.trim() || generatePaymentReference('bank_transfer', validatedData.branch)
+      : null;
+    const resolvedQrTxnRefNo = validatedData.payment_method === 'qr_code'
+      ? validatedData.qr_txn_ref_no?.trim() || generatePaymentReference('qr_code', validatedData.branch)
+      : null;
+    const normalizedProofPhotoUrls = normalizeProofPhotoUrls(
+      validatedData.proof_photo_urls,
+      validatedData.proof_photo_url || validatedData.receipt_url || null
+    );
+    const primaryProofPhotoUrl = normalizedProofPhotoUrls[0] || null;
+    const resolvedReceiptUrl = validatedData.receipt_url?.trim() || primaryProofPhotoUrl;
+
+    const vanStockErrors: string[] = [];
+    for (const item of validatedData.items) {
+      const availableVanStock = vanItems[item.productId] || 0;
+      if (item.quantity > availableVanStock) {
+        vanStockErrors.push(`${item.name}: stok van tidak mencukupi. Baki semasa ${availableVanStock}, diminta ${item.quantity}`);
+      }
     }
-    if (validatedData.payment_method === 'bill_to_bill' && !validatedData.billing_ref_no) {
-      return NextResponse.json({ error: 'Nombor rujukan invois diperlukan untuk bill-to-bill' }, { status: 400 });
+
+    if (vanStockErrors.length > 0) {
+      return NextResponse.json(
+        { error: 'Stok van tidak mencukupi untuk meneruskan jualan', details: vanStockErrors },
+        { status: 409 }
+      );
     }
-    if (validatedData.payment_method === 'bank_transfer' && !validatedData.transfer_ref_no) {
-      return NextResponse.json({ error: 'Nombor rujukan pemindahan diperlukan untuk bank transfer' }, { status: 400 });
+
+    const resolvedReceiptNo = validatedData.payment_method === 'cash'
+      ? await generateUniqueCashReceiptNo(validatedData.branch)
+      : null;
+    const nextVanItems = { ...vanItems };
+
+    for (const [productId, requestedQty] of Object.entries(requestedQuantities)) {
+      nextVanItems[productId] = Math.max(0, (nextVanItems[productId] || 0) - requestedQty);
     }
-    if (validatedData.payment_method === 'qr_code' && !validatedData.qr_txn_ref_no) {
-      return NextResponse.json({ error: 'Nombor transaksi QR diperlukan untuk pembayaran QR' }, { status: 400 });
-    }
+
+    await db.vanInventories.save({
+      id: inventoryId,
+      userId: currentUser.id,
+      items: nextVanItems,
+      lastUpdated: new Date().toISOString(),
+    });
+
 
     const subtotalAmount = validatedData.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const saleData: Record<string, unknown> = {
@@ -267,22 +469,53 @@ export async function POST(request: NextRequest) {
       subtotal_amount: subtotalAmount,
       grand_total: validatedData.total_amount,
       payment_method: validatedData.payment_method,
-      receipt_no: validatedData.receipt_no || null,
-      billing_ref_no: validatedData.billing_ref_no || null,
-      transfer_ref_no: validatedData.transfer_ref_no || null,
-      qr_txn_ref_no: validatedData.qr_txn_ref_no || null,
+      receipt_no: resolvedReceiptNo,
+      billing_ref_no: resolvedBillingRefNo,
+      transfer_ref_no: resolvedTransferRefNo,
+      qr_txn_ref_no: resolvedQrTxnRefNo,
+      receipt_url: resolvedReceiptUrl,
+      proof_photo_url: primaryProofPhotoUrl,
+      proof_photo_urls: normalizedProofPhotoUrls.length > 0 ? normalizedProofPhotoUrls : null,
       status: isCredit ? 'pending' : 'completed',
       notes: validatedData.notes || null,
       created_at: new Date().toISOString()
     };
 
-    const { data: sale, error } = await supabaseAdmin
-      .from(SALES_TABLE)
-      .insert(saleData)
-      .select()
-      .single();
+    const insertPayload: Record<string, unknown> = { ...saleData };
+    let sale: Record<string, any> | null = null;
+    let error: { message?: string } | null = null;
+
+    // Backward-compatible fallback: some deployments may not have all optional columns yet.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const insertResult = await supabaseAdmin
+        .from(SALES_TABLE)
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      sale = (insertResult.data as Record<string, any> | null) || null;
+      error = insertResult.error;
+
+      if (!error) {
+        break;
+      }
+
+      const missingColumnMatch = /Could not find the '([^']+)' column/i.exec(String(error.message || ''));
+      if (!missingColumnMatch) {
+        break;
+      }
+
+      const missingColumn = missingColumnMatch[1];
+      if (!(missingColumn in insertPayload)) {
+        break;
+      }
+
+      delete insertPayload[missingColumn];
+      console.warn(`[sales] Missing optional column '${missingColumn}', retrying insert without it.`);
+    }
 
     if (error) {
+      await restoreVanInventory(inventoryId, vanItems, currentUser.id);
       console.error('Supabase error:', error);
       await logAuditEvent({
         request,
@@ -301,8 +534,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create sale', details: error.message }, { status: 500 });
     }
 
+    if (!sale) {
+      await restoreVanInventory(inventoryId, vanItems, currentUser.id);
+      return NextResponse.json({ error: 'Failed to create sale' }, { status: 500 });
+    }
+
+    const createdSale = sale;
+
     const saleItems = validatedData.items.map((item) => ({
-      transaction_id: sale.id,
+      transaction_id: createdSale.id,
       product_id: item.productId,
       product_name: item.name,
       quantity: item.quantity,
@@ -318,14 +558,15 @@ export async function POST(request: NextRequest) {
     if (itemsError) {
       console.error('Supabase error inserting sales items:', itemsError);
       // Best effort cleanup for orphaned transaction
-      await supabaseAdmin.from(SALES_TABLE).delete().eq('id', sale.id);
+      await supabaseAdmin.from(SALES_TABLE).delete().eq('id', createdSale.id);
+      await restoreVanInventory(inventoryId, vanItems, currentUser.id);
       await logAuditEvent({
         request,
         actor: currentUser,
         module: 'sales',
         action: 'create_sale',
         entityType: 'sales_transaction',
-        entityId: sale.id,
+        entityId: createdSale.id,
         branch,
         status: 'failed',
         sourceSystem: 'supabase',
@@ -340,9 +581,10 @@ export async function POST(request: NextRequest) {
     // Update customer outstanding balance if credit payment
     if (isCredit && body.customer_id) {
       try {
+        const customersTable = getCustomersTableByBranch(currentUser.branch as Branch | undefined);
         // Get current outstanding balance
         const { data: customer } = await supabaseAdmin
-          .from('customers')
+          .from(customersTable)
           .select('current_balance')
           .eq('id', body.customer_id)
           .single();
@@ -352,7 +594,7 @@ export async function POST(request: NextRequest) {
 
         // Update customer's outstanding balance
         await supabaseAdmin
-          .from('customers')
+          .from(customersTable)
           .update({ current_balance: newBalance })
           .eq('id', body.customer_id);
           
@@ -364,10 +606,10 @@ export async function POST(request: NextRequest) {
     }
 
     const transaction = {
-      id: sale.id,
-      invoice: sale.invoice,
-      total: Number(sale.grand_total ?? sale.subtotal_amount ?? 0),
-      branch: sale.branch,
+      id: createdSale.id,
+      invoice: createdSale.invoice,
+      total: Number(createdSale.grand_total ?? createdSale.subtotal_amount ?? 0),
+      branch: createdSale.branch,
       items: saleItems.map((item) => ({
         productId: item.product_id,
         name: item.product_name,
@@ -376,12 +618,31 @@ export async function POST(request: NextRequest) {
         subtotal: item.subtotal
       })),
       status: isCredit ? 'Pending Payment' : 'Completed',
-      paymentStatus: sale.status === 'pending' ? 'pending' : 'paid',
-      createdAt: sale.created_at,
-      customer: { id: sale.customer_id, name: validatedData.customer_name || null },
-      salesmanId: sale.user_id,
+      paymentStatus: createdSale.status === 'pending' ? 'pending' : 'paid',
+      createdAt: createdSale.created_at,
+      customer: { id: createdSale.customer_id, name: validatedData.customer_name || null },
+      salesmanId: createdSale.user_id,
       salesmanName: currentUser.name || currentUser.username || null,
-      proofPhotoUrl: null
+      receiptNo: createdSale.receipt_no || resolvedReceiptNo,
+      billingRefNo: createdSale.billing_ref_no || resolvedBillingRefNo,
+      transferRefNo: createdSale.transfer_ref_no || resolvedTransferRefNo,
+      qrTxnRefNo: createdSale.qr_txn_ref_no || resolvedQrTxnRefNo,
+      paymentReferenceNo:
+        createdSale.billing_ref_no ||
+        createdSale.transfer_ref_no ||
+        createdSale.qr_txn_ref_no ||
+        resolvedBillingRefNo ||
+        resolvedTransferRefNo ||
+        resolvedQrTxnRefNo,
+      receiptUrl: createdSale.receipt_url || resolvedReceiptUrl || null,
+      proofPhotoUrl: normalizeProofPhotoUrls(
+        createdSale.proof_photo_urls,
+        createdSale.proof_photo_url || resolvedReceiptUrl || null
+      )[0] || null,
+      proofPhotoUrls: normalizeProofPhotoUrls(
+        createdSale.proof_photo_urls,
+        createdSale.proof_photo_url || resolvedReceiptUrl || null
+      )
     };
 
     await logAuditEvent({
@@ -390,16 +651,16 @@ export async function POST(request: NextRequest) {
       module: 'sales',
       action: 'create_sale',
       entityType: 'sales_transaction',
-      entityId: sale.id,
+      entityId: createdSale.id,
       branch,
       status: 'success',
-      referenceNo: sale.invoice,
+      referenceNo: createdSale.invoice,
       sourceSystem: 'supabase',
       metadata: {
-        invoice: sale.invoice,
-        total: Number(sale.grand_total ?? sale.subtotal_amount ?? 0),
+        invoice: createdSale.invoice,
+        total: Number(createdSale.grand_total ?? createdSale.subtotal_amount ?? 0),
         itemCount: saleItems.length,
-        paymentMethod: sale.payment_method,
+        paymentMethod: createdSale.payment_method,
       },
     });
 

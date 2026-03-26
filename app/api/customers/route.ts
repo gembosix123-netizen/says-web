@@ -16,6 +16,7 @@ import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { canAccessSalesRoutes } from '@/lib/permissions';
 import { canAccessStoreVisits } from '@/lib/permissions';
+import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 
 const isMissingColumnError = (error: unknown, columnName: string) => {
   const message = String((error as { message?: string })?.message || '').toLowerCase();
@@ -61,6 +62,11 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get('id');
+    
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     if (!supabaseAdmin) {
       if (id) {
@@ -69,10 +75,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([]);
     }
 
+    // Get the correct customers table based on user's branch
+    const customersTable = getCustomersTableByBranch(currentUser.branch);
+
     // Get single customer
     if (id) {
       const { data: customer, error } = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .select('*')
         .eq('id', id)
         .single();
@@ -88,13 +97,13 @@ export async function GET(request: NextRequest) {
 
     // Get all customers (support schemas with/without is_active)
     const activeQuery = await supabaseAdmin
-      .from('customers')
+      .from(customersTable)
       .select('*')
       .eq('is_active', true);
 
     if (activeQuery.error && isMissingColumnError(activeQuery.error, 'is_active')) {
       const fallbackQuery = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .select('*');
 
       if (fallbackQuery.error) throw fallbackQuery.error;
@@ -145,6 +154,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
+    // Get the correct customers table based on user's branch
+    const customersTable = getCustomersTableByBranch(currentUser.branch);
+
     const payloadWithTimestamps = {
       name: validatedData.name,
       phone: validatedData.phone || '',
@@ -171,7 +183,7 @@ export async function POST(request: NextRequest) {
 
     for (const payload of insertPayloads) {
       const createResult = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .insert(payload)
         .select()
         .single();
@@ -186,7 +198,7 @@ export async function POST(request: NextRequest) {
 
       if (isIdDefaultError(createResult.error)) {
         const retryWithId = await supabaseAdmin
-          .from('customers')
+          .from(customersTable)
           .insert({
             ...payload,
             id: crypto.randomUUID(),
@@ -262,9 +274,12 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
+    // Get the correct customers table based on user's branch
+    const customersTable = getCustomersTableByBranch(currentUser.branch);
+
     // Check customer exists
     const { data: customer, error: fetchError } = await supabaseAdmin
-      .from('customers')
+      .from(customersTable)
       .select('*')
       .eq('id', customerId)
       .single();
@@ -309,7 +324,7 @@ export async function PUT(request: NextRequest) {
 
     for (const payload of updatePayloads) {
       const updateResult = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .update(payload)
         .eq('id', customerId);
 
@@ -376,9 +391,12 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
+    // Get the correct customers table based on user's branch
+    const customersTable = getCustomersTableByBranch(currentUser.branch);
+
     // Check customer exists
     const { data: customer, error: fetchError } = await supabaseAdmin
-      .from('customers')
+      .from(customersTable)
       .select('*')
       .eq('id', customerId)
       .single();
@@ -392,20 +410,20 @@ export async function DELETE(request: NextRequest) {
 
     // Delete customer (soft-delete if is_active exists, fallback to hard delete)
     let softDeleteResult = await supabaseAdmin
-      .from('customers')
+      .from(customersTable)
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', customerId);
 
     if (softDeleteResult.error && isMissingColumnError(softDeleteResult.error, 'updated_at')) {
       softDeleteResult = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .update({ is_active: false })
         .eq('id', customerId);
     }
 
     if (softDeleteResult.error && isMissingColumnError(softDeleteResult.error, 'is_active')) {
       const hardDeleteResult = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .delete()
         .eq('id', customerId);
 

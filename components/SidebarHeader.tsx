@@ -8,7 +8,7 @@ type SidebarHeaderProps = {
   className?: string;
 };
 
-const DEFAULT_LOGO = '/unnamed.png';
+const DEFAULT_LOGO = '/logo_print.png';
 
 export default function SidebarHeader({
   logoSrc = DEFAULT_LOGO,

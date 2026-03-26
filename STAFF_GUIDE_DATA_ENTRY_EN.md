@@ -91,10 +91,12 @@ Make sure to fill in **exactly** as listed below:
 
 Based on the payment method chosen, **fill in only one** corresponding reference number:
 
-- Choose `cash` → fill `receipt_no`, leave others empty
-- Choose `bill_to_bill` → fill `billing_ref_no`, leave others empty
-- Choose `bank_transfer` → fill `transfer_ref_no`, leave others empty
-- Choose `qr_code` → fill `qr_txn_ref_no`, leave others empty
+- Choose `cash` → the system will auto-generate `receipt_no` when the sale is saved
+- Choose `bill_to_bill` → the system suggests `billing_ref_no` automatically, and staff may keep or edit it
+- Choose `bank_transfer` → the system suggests `transfer_ref_no` automatically, and staff may keep or edit it
+- Choose `qr_code` → the system suggests `qr_txn_ref_no` automatically, and staff may keep or edit it
+
+The sales invoice number is now also generated automatically in the new sales form, but it can still be edited if needed.
 
 ---
 
@@ -108,6 +110,8 @@ Use this format so numbers stay consistent and do not get mixed up:
 | Bill-to-Bill | `B2B-[BRANCH]-[YYYYMM]-[NO]` | `B2B-KB-202511-001` |
 | Bank Transfer | `TRF-[BRANCH]-[YYYYMM]-[NO]` | `TRF-KK-202511-001` |
 | QR Code | `QR-[BRANCH]-[YYYYMM]-[NO]` | `QR-KK-202511-001` |
+
+In the new sales module, the system now uses automatic formats such as `INV-...`, `RCPT-...`, `B2B-...`, `TRF-...`, and `QR-...` to speed up staff work and reduce typing errors.
 
 > Branch abbreviations: `KK` = Kota Kinabalu, `KB` = Kinabatangan
 

@@ -40,11 +40,18 @@ const AGENT_BRANCH_MAP: Record<string, string> = {
 export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
   const { t } = useLanguage();
   const [selectedBranch, setSelectedBranch] = useState('all');
-  const [dateRange, setDateRange] = useState<DateRange>({
-    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0],
-  });
+  const [dateRange, setDateRange] = useState<DateRange>({ start: '', end: '' });
   const [exchangeReturns, setExchangeReturns] = useState<ExchangeReturn[]>([]);
+
+  useEffect(() => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const firstDay = `${yyyy}-${mm}-01`;
+    const today = `${yyyy}-${mm}-${dd}`;
+    setDateRange({ start: firstDay, end: today });
+  }, []);
 
   // Fetch exchange/return data
   useEffect(() => {

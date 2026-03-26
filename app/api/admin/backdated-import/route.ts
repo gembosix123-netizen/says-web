@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { logAuditEvent } from '@/lib/audit';
+import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 
 const VALID_PAYMENT_METHODS = ['cash', 'bill_to_bill', 'bank_transfer', 'qr_code', 'card', 'ewallet'];
 const REQUIRED_COLUMNS = ['month', 'branch', 'payment_method', 'amount'];
@@ -149,13 +150,15 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
 
     // Lookup customer IDs by name (case-insensitive) for all unique names in the import
+    // Note: Search in the user's branch customer table
     const uniqueCustomerNames = Array.from(
       new Set(rows.map((r) => String(r.customer_name || '').trim()).filter(Boolean))
     );
     const customerNameToId: Record<string, string> = {};
     if (uniqueCustomerNames.length > 0) {
+      const customersTable = getCustomersTableByBranch(currentUser.branch);
       const { data: customerRows } = await supabaseAdmin
-        .from('customers')
+        .from(customersTable)
         .select('id, name')
         .in('name', uniqueCustomerNames);
       (customerRows || []).forEach((c) => {
@@ -252,9 +255,35 @@ export async function GET(request: NextRequest) {
   if (!supabaseAdmin) {
     return NextResponse.json({ customers: [] });
   }
-  const { data } = await supabaseAdmin
-    .from('customers')
-    .select('id, name, branch')
-    .order('name', { ascending: true });
-  return NextResponse.json({ customers: data || [] });
+  
+  // Main Admin sees all customers from both branches, Admin sees only their branch
+  if (role === 'Main Admin') {
+    // Fetch from both customer tables and combine
+    const [{ data: kbCustomers }, { data: kkCustomers }] = await Promise.all([
+      supabaseAdmin
+        .from('customers_kb')
+        .select('id, name, branch')
+        .order('name', { ascending: true }),
+      supabaseAdmin
+        .from('customers_kk')
+        .select('id, name, branch')
+        .order('name', { ascending: true })
+    ]);
+
+    const allCustomers = [
+      ...(kbCustomers || []).map(c => ({ ...c, branch: 'Kota Kinabalu' })),
+      ...(kkCustomers || []).map(c => ({ ...c, branch: 'Kinabatangan' }))
+    ];
+    
+    return NextResponse.json({ customers: allCustomers });
+  } else {
+    // Admin sees only their branch customers
+    const customersTable = getCustomersTableByBranch(currentUser.branch);
+    const { data } = await supabaseAdmin
+      .from(customersTable)
+      .select('id, name, branch')
+      .order('name', { ascending: true });
+    
+    return NextResponse.json({ customers: data || [] });
+  }
 }

@@ -82,7 +82,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
   // Hanya menu yang kau mahu
   const navItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/daily-sales', label: 'Daily Sales', icon: ShoppingCart },
+    { to: '/sales/daily-report', label: 'Daily Sales', icon: ShoppingCart },
   ];
 
   return (

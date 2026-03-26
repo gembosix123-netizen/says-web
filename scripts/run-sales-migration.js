@@ -15,13 +15,20 @@ async function runSalesTablesMigration() {
     console.log('Dropping old sales table...');
     await supabase.rpc('exec_sql', { query: 'DROP TABLE IF EXISTS sales CASCADE' });
     
-    // 2. Create customers table
-    console.log('✓ Creating customers table...');
-    const { error: customersError } = await supabase.from('customers').select('id').limit(0);
-    if (customersError && customersError.message.includes('relation') && customersError.message.includes('does not exist')) {
-      console.log('  Table needs to be created via Supabase Dashboard');
+    // 2. Create customers tables (branch-specific)
+    console.log('✓ Creating branch-specific customers tables...');
+    const { error: customersKbError } = await supabase.from('customers_kb').select('id').limit(0);
+    if (customersKbError && customersKbError.message.includes('relation') && customersKbError.message.includes('does not exist')) {
+      console.log('  customers_kb table needs to be created via Supabase Dashboard');
     } else {
-      console.log('  ✓ Customers table ready');
+      console.log('  ✓ customers_kb table ready');
+    }
+    
+    const { error: customersKkError } = await supabase.from('customers_kk').select('id').limit(0);
+    if (customersKkError && customersKkError.message.includes('relation') && customersKkError.message.includes('does not exist')) {
+      console.log('  customers_kk table needs to be created via Supabase Dashboard');
+    } else {
+      console.log('  ✓ customers_kk table ready');
     }
     
     // 3. Create products table

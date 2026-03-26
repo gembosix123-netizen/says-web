@@ -15,6 +15,16 @@ import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { canManageProducts } from '@/lib/permissions';
 
+const normalizeProductResponse = (product: Record<string, any>) => {
+  const resolvedStock = Number(product.current_stock ?? product.stock ?? 0);
+
+  return {
+    ...product,
+    stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
+    current_stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
+  };
+};
+
 // ============================================================================
 // GET HANDLER
 // ============================================================================
@@ -47,7 +57,7 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         );
       }
-      return NextResponse.json(product);
+      return NextResponse.json(normalizeProductResponse(product));
     }
 
     // Get all products
@@ -64,7 +74,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(products || []);
+    return NextResponse.json((products || []).map((product) => normalizeProductResponse(product as Record<string, any>)));
 
   } catch (error) {
     console.error('Error fetching products:', error);

@@ -131,9 +131,35 @@ export default function SalesHistoryPage() {
     const labels: Record<string, string> = {
       cash: 'Tunai',
       card: 'Kad',
-      transfer: 'Transfer'
+      transfer: 'Transfer',
+      bill_to_bill: 'Kredit (Bill-to-Bill)',
+      bank_transfer: 'Pindahan Bank',
+      qr_code: 'QR Code',
     };
     return labels[method] || method;
+  };
+
+  const handleExport = () => {
+    if (filteredSales.length === 0) return;
+    const headers = ['ID', 'Pelanggan', 'Jumlah (RM)', 'Kaedah Bayaran', 'Status', 'Tarikh'];
+    const rows = filteredSales.map(sale => [
+      sale.id,
+      sale.customer_name,
+      sale.total_amount.toFixed(2),
+      getPaymentLabel(sale.payment_method),
+      sale.status,
+      formatDate(sale.created_at),
+    ]);
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sejarah-jualan-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const formatDate = (dateString: string) => {
@@ -165,9 +191,9 @@ export default function SalesHistoryPage() {
               <p className="text-white/60">Lihat semua transaksi jualan</p>
             </div>
           </div>
-          <Button variant="secondary" size="sm">
+          <Button variant="secondary" size="sm" onClick={handleExport}>
             <Download size={16} className="mr-2" />
-            Export
+            Export CSV
           </Button>
         </div>
 

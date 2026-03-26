@@ -139,6 +139,11 @@ export const createSaleSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal('')),
+  proof_photo_urls: z
+    .array(z.string().url('URL gambar tidak sah'))
+    .max(4, 'Maksimum 4 gambar bukti pembayaran')
+    .optional()
+    .nullable(),
   check_in_time: z
     .string()
     .datetime('Format tarikh tidak sah')
@@ -167,6 +172,21 @@ export const createSaleSchema = z.object({
   {
     message: 'Pelanggan diperlukan untuk pembayaran kredit',
     path: ['customer_id']
+  }
+).refine(
+  (data) => {
+    if (data.payment_method !== 'bank_transfer' && data.payment_method !== 'qr_code') {
+      return true;
+    }
+
+    const hasSingleProof = Boolean(String(data.proof_photo_url || data.receipt_url || '').trim());
+    const hasMultipleProofs = Array.isArray(data.proof_photo_urls) && data.proof_photo_urls.length > 0;
+
+    return hasSingleProof || hasMultipleProofs;
+  },
+  {
+    message: 'Bukti pembayaran wajib untuk bank transfer atau QR code',
+    path: ['proof_photo_urls']
   }
 ).refine(
   (data) => {

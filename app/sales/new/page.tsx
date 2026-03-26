@@ -12,16 +12,31 @@ import {
   ShoppingCart,
   Check,
   User,
-  Package
+  Package,
+  Printer,
+  CheckCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { supabase } from '@/lib/supabase';
+
+const MAX_PAYMENT_PROOF_IMAGES = 4;
+
+type PaymentProofItem = {
+  id: string;
+  file: File;
+  previewUrl: string;
+};
 
 interface Product {
   id: string;
   name: string;
   price: number;
   stock: number;
-  category: string;
+  unit?: string;
+  current_stock?: number;
+  category?: string;
 }
 
 interface Customer {
@@ -36,9 +51,123 @@ interface CartItem {
   quantity: number;
 }
 
+function normalizeBranchCode(branch = 'XX') {
+  const compact = branch
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim();
+
+  if (!compact) return 'XX';
+
+  const parts = compact.split(/\s+/).filter(Boolean);
+  const initials = parts.map((part) => part[0]).join('').slice(0, 4);
+  return initials || compact.slice(0, 4);
+}
+
+function generateDocumentNumber(prefix: string, branch: string) {
+  const branchCode = normalizeBranchCode(branch);
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+
+  return `${prefix}-${branchCode}-${today}-${timestamp}-${rand}`;
+}
+
+function getPaymentLabel(paymentMethod: string) {
+  const labels: Record<string, string> = {
+    cash: 'Tunai',
+    bill_to_bill: 'Kredit (Bill-to-Bill)',
+    bank_transfer: 'Pindahan Bank',
+    qr_code: 'QR Code',
+    card: 'Kad',
+  };
+
+  return labels[paymentMethod] || paymentMethod;
+}
+
+function getReferenceLabel(paymentMethod: string) {
+  const labels: Record<string, string> = {
+    bill_to_bill: 'No. Invois / Rujukan Kredit',
+    bank_transfer: 'No. Rujukan Pemindahan',
+    qr_code: 'No. Transaksi QR',
+  };
+
+  return labels[paymentMethod] || 'No. Rujukan';
+}
+
+function getDocumentTitle(paymentMethod: string) {
+  const labels: Record<string, string> = {
+    cash: 'RESIT',
+    bill_to_bill: 'INVOIS KREDIT',
+    bank_transfer: 'SLIP BAYARAN',
+    qr_code: 'SLIP BAYARAN',
+    card: 'SLIP BAYARAN',
+  };
+
+  return labels[paymentMethod] || 'DOKUMEN TRANSAKSI';
+}
+
+function getDownloadLabel(paymentMethod: string) {
+  const labels: Record<string, string> = {
+    cash: 'Muat Turun Resit PDF',
+    bill_to_bill: 'Muat Turun Invois Kredit PDF',
+    bank_transfer: 'Muat Turun Slip Bayaran PDF',
+    qr_code: 'Muat Turun Slip Bayaran PDF',
+    card: 'Muat Turun Slip Bayaran PDF',
+  };
+
+  return labels[paymentMethod] || 'Muat Turun Dokumen PDF';
+}
+
+function requiresPaymentProof(paymentMethod: string) {
+  return paymentMethod === 'bank_transfer' || paymentMethod === 'qr_code';
+}
+
+async function toDataUrlFromUrl(url: string) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const blob = await response.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function uploadPaymentProof(file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const filename = `payment-proof/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${extension}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('sales-receipts')
+    .upload(filename, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+
+  if (uploadError) {
+    throw uploadError;
+  }
+
+  const { data: publicUrlData } = supabase.storage
+    .from('sales-receipts')
+    .getPublicUrl(filename);
+
+  return publicUrlData.publicUrl;
+}
+
 export default function NewSalePage() {
   const router = useRouter();
   const [step, setStep] = useState(1); // 1: Select Customer, 2: Add Products, 3: Payment
+  const [userBranch, setUserBranch] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -46,12 +175,25 @@ export default function NewSalePage() {
   const [searchCustomer, setSearchCustomer] = useState('');
   const [searchProduct, setSearchProduct] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [receiptNo, setReceiptNo] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
   const [billingRefNo, setBillingRefNo] = useState('');
   const [transferRefNo, setTransferRefNo] = useState('');
   const [qrTxnRefNo, setQrTxnRefNo] = useState('');
+  const [paymentProofs, setPaymentProofs] = useState<PaymentProofItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [successData, setSuccessData] = useState<{
+    invoiceNo: string;
+    receiptNo: string | null;
+    referenceNo: string | null;
+    referenceLabel: string | null;
+    proofUploaded: boolean;
+    customerName: string;
+    total: number;
+    paymentMethod: string;
+    items: CartItem[];
+    proofImageUrls: string[];
+  } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -59,19 +201,58 @@ export default function NewSalePage() {
 
   const fetchData = async () => {
     try {
-      const [customersRes, productsRes] = await Promise.all([
+      const [customersRes, productsRes, userRes] = await Promise.all([
         fetch('/api/customers').then(res => res.json()),
-        fetch('/api/products').then(res => res.json())
+        fetch('/api/inventory/van').then(res => res.json()),
+        fetch('/api/auth/me').then(res => res.json())
       ]);
 
       if (Array.isArray(customersRes)) setCustomers(customersRes);
-      if (Array.isArray(productsRes)) setProducts(productsRes);
+      if (userRes?.branch) {
+        setUserBranch(String(userRes.branch));
+      }
+      const rawProducts = Array.isArray(productsRes?.products) ? productsRes.products : [];
+      if (Array.isArray(rawProducts)) {
+        setProducts(rawProducts.map((product) => {
+          const resolvedStock = Number(product.stock ?? product.current_stock ?? 0);
+
+          return {
+            id: String(product.id || ''),
+            name: String(product.name || 'Unnamed Product'),
+            price: Number(product.price || 0),
+            unit: String(product.unit || 'unit'),
+            stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
+          };
+        }));
+      }
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (userBranch && !invoiceNo) {
+      setInvoiceNo(generateDocumentNumber('INV', userBranch));
+    }
+  }, [userBranch, invoiceNo]);
+
+  useEffect(() => {
+    if (!userBranch) return;
+
+    if (paymentMethod === 'bill_to_bill' && !billingRefNo) {
+      setBillingRefNo(generateDocumentNumber('B2B', userBranch));
+    }
+
+    if (paymentMethod === 'bank_transfer' && !transferRefNo) {
+      setTransferRefNo(generateDocumentNumber('TRF', userBranch));
+    }
+
+    if (paymentMethod === 'qr_code' && !qrTxnRefNo) {
+      setQrTxnRefNo(generateDocumentNumber('QR', userBranch));
+    }
+  }, [paymentMethod, userBranch, billingRefNo, transferRefNo, qrTxnRefNo]);
 
   const filteredCustomers = customers.filter(c => 
     c.name.toLowerCase().includes(searchCustomer.toLowerCase()) ||
@@ -83,9 +264,33 @@ export default function NewSalePage() {
     p.category?.toLowerCase().includes(searchProduct.toLowerCase())
   );
 
+  const getAvailableStock = (productId: string) => {
+    const product = products.find((item) => item.id === productId);
+    return product?.stock || 0;
+  };
+
+  const getInCartQuantity = (productId: string) => {
+    const existing = cart.find((item) => item.product.id === productId);
+    return existing?.quantity || 0;
+  };
+
+  const getRemainingStock = (productId: string) => Math.max(0, getAvailableStock(productId) - getInCartQuantity(productId));
+
   const addToCart = (product: Product) => {
     const existing = cart.find(item => item.product.id === product.id);
+    const remainingStock = getRemainingStock(product.id);
+
+    if (remainingStock <= 0) {
+      alert(`${product.name} sudah habis dalam baki stok van semasa.`);
+      return;
+    }
+
     if (existing) {
+      if (existing.quantity + 1 > product.stock) {
+        alert(`Stok ${product.name} tidak mencukupi. Baki semasa ${product.stock}.`);
+        return;
+      }
+
       setCart(cart.map(item => 
         item.product.id === product.id 
           ? { ...item, quantity: item.quantity + 1 }
@@ -97,6 +302,16 @@ export default function NewSalePage() {
   };
 
   const updateQuantity = (productId: string, delta: number) => {
+    if (delta > 0) {
+      const existing = cart.find((item) => item.product.id === productId);
+      const availableStock = getAvailableStock(productId);
+
+      if (existing && existing.quantity + delta > availableStock) {
+        alert(`Stok ${existing.product.name} tidak mencukupi. Baki semasa ${availableStock}.`);
+        return;
+      }
+    }
+
     setCart(cart.map(item => {
       if (item.product.id === productId) {
         const newQty = Math.max(0, item.quantity + delta);
@@ -112,41 +327,227 @@ export default function NewSalePage() {
 
   const totalAmount = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
 
+  const regenerateInvoiceNo = () => {
+    setInvoiceNo(generateDocumentNumber('INV', userBranch || 'XX'));
+  };
+
+  const regenerateReferenceNo = () => {
+    if (paymentMethod === 'bill_to_bill') {
+      setBillingRefNo(generateDocumentNumber('B2B', userBranch || 'XX'));
+      return;
+    }
+
+    if (paymentMethod === 'bank_transfer') {
+      setTransferRefNo(generateDocumentNumber('TRF', userBranch || 'XX'));
+      return;
+    }
+
+    if (paymentMethod === 'qr_code') {
+      setQrTxnRefNo(generateDocumentNumber('QR', userBranch || 'XX'));
+    }
+  };
+
+  const handlePrintReceipt = async (data: NonNullable<typeof successData>) => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    try {
+      const logoImg = new Image();
+      logoImg.crossOrigin = 'anonymous';
+      const logoLoaded = await new Promise<boolean>((resolve) => {
+        logoImg.onload = () => {
+          if (logoImg.naturalWidth > 0 && logoImg.naturalHeight > 0) {
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        };
+        logoImg.onerror = () => resolve(false);
+        logoImg.src = '/logo_print.png';
+      });
+      
+      if (logoLoaded && logoImg.naturalWidth > 0 && logoImg.naturalHeight > 0) {
+        const canvas = document.createElement('canvas');
+        canvas.width = logoImg.naturalWidth;
+        canvas.height = logoImg.naturalHeight;
+        canvas.getContext('2d')?.drawImage(logoImg, 0, 0);
+
+        const maxLogoWidth = 28;
+        const maxLogoHeight = 20;
+        const aspectRatio = logoImg.naturalWidth / logoImg.naturalHeight;
+        let logoWidth = maxLogoWidth;
+        let logoHeight = logoWidth / aspectRatio;
+
+        if (logoHeight > maxLogoHeight) {
+          logoHeight = maxLogoHeight;
+          logoWidth = logoHeight * aspectRatio;
+        }
+
+        doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, 16, logoWidth, logoHeight);
+      }
+    } catch {
+      // proceed without logo
+    }
+
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(12, 12, pageWidth - 24, 40, 5, 5, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text('HAJA YANONGS INDUSTRIES', 48, 24);
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(203, 213, 225);
+    doc.text('Dokumen jualan rasmi dijana secara automatik', 48, 30);
+    doc.text('Sales receipt prepared for field operations', 48, 35);
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text(getDocumentTitle(data.paymentMethod), pageWidth - 14, 23, { align: 'right' });
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(203, 213, 225);
+    doc.text(`Tarikh: ${new Date().toLocaleDateString('ms-MY')}`, pageWidth - 14, 31, { align: 'right' });
+    doc.text(`No. Invois: ${data.invoiceNo}`, pageWidth - 14, 36, { align: 'right' });
+    doc.text(`No. Resit: ${data.receiptNo || '-'}`, pageWidth - 14, 41, { align: 'right' });
+
+    doc.setDrawColor(226, 232, 240);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(12, 60, pageWidth - 24, 26, 3, 3, 'FD');
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'bold');
+    doc.text('BIL KEPADA', 15, 67);
+    doc.text('BUTIRAN PEMBAYARAN', pageWidth / 2 + 8, 67);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(11);
+    doc.text(data.customerName, 15, 75);
+    doc.setFontSize(9);
+    doc.text(`Kaedah: ${getPaymentLabel(data.paymentMethod)}`, pageWidth / 2 + 8, 75);
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(
+      `${data.referenceLabel || 'Rujukan'}: ${data.referenceNo || '-'}`,
+      pageWidth / 2 + 8,
+      81
+    );
+
+    autoTable(doc, {
+      startY: 92,
+      margin: { left: 12, right: 12 },
+      head: [['Produk', 'Unit', 'Harga (RM)', 'Kuantiti', 'Jumlah (RM)']],
+      body: data.items.map((item) => [
+        item.product.name,
+        item.product.unit || 'unit',
+        item.product.price.toFixed(2),
+        item.quantity.toString(),
+        (item.product.price * item.quantity).toFixed(2),
+      ]),
+      theme: 'grid',
+      styles: {
+        fontSize: 8.5,
+        cellPadding: 3.5,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.3,
+        textColor: [15, 23, 42],
+        halign: 'left',
+        overflow: 'linebreak',
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      bodyStyles: {
+        fillColor: [255, 255, 255],
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 78, halign: 'left' },
+        1: { cellWidth: 20, halign: 'center' },
+        2: { halign: 'right', cellWidth: 28 },
+        3: { halign: 'center', cellWidth: 24 },
+        4: { halign: 'right', cellWidth: 34 },
+      },
+    });
+    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 92;
+    let currentY = finalY + 8;
+
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(pageWidth - 76, currentY, 64, 22, 3, 3, 'F');
+    doc.setTextColor(203, 213, 225);
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'bold');
+    doc.text('JUMLAH BAYARAN', pageWidth - 70, currentY + 6);
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text(`RM ${data.total.toFixed(2)}`, pageWidth - 14, currentY + 16, { align: 'right' });
+    currentY += 28;
+
+    doc.setFontSize(7);
+    doc.setTextColor(107, 114, 128);
+    doc.setFont(undefined, 'normal');
+    doc.text('Dokumen ini sah tanpa tandatangan. Disediakan untuk kegunaan operasi jualan lapangan.', 12, pageHeight - 8);
+    doc.save(`${getDocumentTitle(data.paymentMethod).replace(/\s+/g, '_')}_${data.receiptNo || data.invoiceNo || Date.now()}.pdf`);
+  };
+
   const handleSubmit = async () => {
     if (!selectedCustomer || cart.length === 0) return;
 
-    // Validate reference number per payment method
-    if (paymentMethod === 'cash' && !receiptNo.trim()) {
-      alert('Sila masukkan nombor resit untuk pembayaran tunai.');
-      return;
-    }
-    if (paymentMethod === 'bill_to_bill' && !billingRefNo.trim()) {
-      alert('Sila masukkan nombor invois/rujukan kredit untuk bill-to-bill.');
-      return;
-    }
-    if (paymentMethod === 'bank_transfer' && !transferRefNo.trim()) {
-      alert('Sila masukkan nombor rujukan pemindahan bank.');
-      return;
-    }
-    if (paymentMethod === 'qr_code' && !qrTxnRefNo.trim()) {
-      alert('Sila masukkan nombor transaksi QR.');
+    const resolvedInvoiceNo = invoiceNo.trim() || generateDocumentNumber('INV', userBranch || 'XX');
+    const resolvedBillingRefNo = paymentMethod === 'bill_to_bill'
+      ? billingRefNo.trim() || generateDocumentNumber('B2B', userBranch || 'XX')
+      : null;
+    const resolvedTransferRefNo = paymentMethod === 'bank_transfer'
+      ? transferRefNo.trim() || generateDocumentNumber('TRF', userBranch || 'XX')
+      : null;
+    const resolvedQrTxnRefNo = paymentMethod === 'qr_code'
+      ? qrTxnRefNo.trim() || generateDocumentNumber('QR', userBranch || 'XX')
+      : null;
+
+    if (requiresPaymentProof(paymentMethod) && paymentProofs.length === 0) {
+      alert('Sila muat naik bukti pembayaran untuk transaksi QR atau bank transfer.');
       return;
     }
 
     setSubmitting(true);
     try {
+      let uploadedProofUrls: string[] = [];
+
+      if (paymentProofs.length > 0) {
+        try {
+          uploadedProofUrls = await Promise.all(paymentProofs.map((proof) => uploadPaymentProof(proof.file)));
+        } catch (uploadError) {
+          console.error('Error uploading payment proof:', uploadError);
+          throw new Error('Gagal memuat naik bukti pembayaran');
+        }
+      }
+
+      const primaryProofUrl = uploadedProofUrls[0] || null;
+
       const salePayload = {
+        invoice: resolvedInvoiceNo,
         customer_id: selectedCustomer.id,
         customer_name: selectedCustomer.name,
         total_amount: totalAmount,
         payment_method: paymentMethod,
-        receipt_no: paymentMethod === 'cash' ? receiptNo : null,
-        billing_ref_no: paymentMethod === 'bill_to_bill' ? billingRefNo : null,
-        transfer_ref_no: paymentMethod === 'bank_transfer' ? transferRefNo : null,
-        qr_txn_ref_no: paymentMethod === 'qr_code' ? qrTxnRefNo : null,
+        receipt_no: null,
+        billing_ref_no: resolvedBillingRefNo,
+        transfer_ref_no: resolvedTransferRefNo,
+        qr_txn_ref_no: resolvedQrTxnRefNo,
         return_amount: 0,
         exchange_amount: 0,
         foc_amount: 0,
+        receipt_url: primaryProofUrl,
+        proof_photo_url: primaryProofUrl,
+        proof_photo_urls: uploadedProofUrls,
         items: cart.map((item) => ({
           productId: item.product.id,
           name: item.product.name,
@@ -175,23 +576,44 @@ export default function NewSalePage() {
         throw new Error(details || result?.error || 'Ralat semasa menyimpan jualan');
       }
 
-      // Show success and redirect
-      alert('Jualan berjaya disimpan! Anda akan kembali ke halaman Sales.');
+      // Store result and show success screen
+      const resolvedReferenceNo =
+        result?.billingRefNo ??
+        result?.transferRefNo ??
+        result?.qrTxnRefNo ??
+        resolvedBillingRefNo ??
+        resolvedTransferRefNo ??
+        resolvedQrTxnRefNo ??
+        null;
+      const soldQuantities = cart.reduce<Record<string, number>>((acc, item) => {
+        acc[item.product.id] = (acc[item.product.id] || 0) + item.quantity;
+        return acc;
+      }, {});
 
-      // Reset local wizard state immediately (fallback if redirect is delayed)
-      setStep(1);
-      setSelectedCustomer(null);
-      setCart([]);
-      setSearchCustomer('');
-      setSearchProduct('');
-      setPaymentMethod('cash');
-      setReceiptNo('');
-      setBillingRefNo('');
-      setTransferRefNo('');
-      setQrTxnRefNo('');
+      setProducts((currentProducts) =>
+        currentProducts.map((product) => {
+          const soldQty = soldQuantities[product.id] || 0;
+          return soldQty > 0
+            ? { ...product, stock: Math.max(0, product.stock - soldQty) }
+            : product;
+        })
+      );
 
-      // Redirect to sales landing page
-      router.replace('/sales');
+      setSuccessData({
+        invoiceNo: result?.invoice ?? resolvedInvoiceNo,
+        receiptNo: result?.receiptNo ?? null,
+        referenceNo: paymentMethod === 'cash' ? null : resolvedReferenceNo,
+        referenceLabel: paymentMethod === 'cash' ? null : getReferenceLabel(paymentMethod),
+        proofUploaded: uploadedProofUrls.length > 0,
+        customerName: selectedCustomer.name,
+        total: totalAmount,
+        paymentMethod,
+        items: [...cart],
+        proofImageUrls: Array.isArray(result?.proofPhotoUrls) && result.proofPhotoUrls.length > 0
+          ? result.proofPhotoUrls
+          : uploadedProofUrls,
+      });
+      setStep(4);
     } catch (err: unknown) {
       console.error('Error creating sale:', err);
       const message = err instanceof Error ? err.message : 'Ralat semasa menyimpan jualan';
@@ -224,7 +646,7 @@ export default function NewSalePage() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold text-white">Jualan Baru</h1>
-            <p className="text-white/60">Langkah {step} daripada 3</p>
+            <p className="text-white/60">Langkah {Math.min(step, 3)} daripada 3</p>
           </div>
         </div>
 
@@ -248,7 +670,73 @@ export default function NewSalePage() {
           ))}
         </div>
 
+        {/* Step 4: Success Screen */}
+        {step === 4 && successData && (
+          <div className="flex flex-col items-center justify-center py-12 space-y-6">
+            <div className="relative">
+              <div className="absolute inset-0 bg-emerald-500/20 blur-3xl rounded-full animate-pulse" />
+              <div className="w-28 h-28 bg-emerald-500/10 rounded-full flex items-center justify-center relative border border-emerald-500/20">
+                <CheckCircle className="text-emerald-400" size={56} />
+              </div>
+            </div>
+            <div className="text-center space-y-1">
+              <h2 className="text-3xl font-bold text-white">Jualan Berjaya!</h2>
+              <p className="text-white/60">Transaksi telah berjaya disimpan.</p>
+            </div>
+            <Card className="w-full max-w-md p-6 space-y-4">
+              <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3 gap-4">
+                <span className="text-white/60">No. Invois</span>
+                <span className="font-mono text-blue-300 text-right break-all">{successData.invoiceNo}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3">
+                <span className="text-white/60">Pelanggan</span>
+                <span className="font-bold text-white">{successData.customerName}</span>
+              </div>
+              {successData.receiptNo && (
+                <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3">
+                  <span className="text-white/60">No. Resit</span>
+                  <span className="font-mono text-blue-300">{successData.receiptNo}</span>
+                </div>
+              )}
+              {successData.referenceNo && successData.referenceLabel && (
+                <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3 gap-4">
+                  <span className="text-white/60">{successData.referenceLabel}</span>
+                  <span className="font-mono text-blue-300 text-right break-all">{successData.referenceNo}</span>
+                </div>
+              )}
+              {successData.proofUploaded && (
+                <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3">
+                  <span className="text-white/60">Bukti Bayaran</span>
+                  <span className="text-emerald-400">{successData.proofImageUrls.length} gambar</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center text-sm border-b border-slate-700 pb-3">
+                <span className="text-white/60">Kaedah Bayaran</span>
+                <span className="text-white">{getPaymentLabel(successData.paymentMethod)}</span>
+              </div>
+              <div className="flex justify-between items-center text-lg font-bold">
+                <span className="text-white">Jumlah</span>
+                <span className="text-emerald-400">RM {successData.total.toFixed(2)}</span>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full border-slate-700 hover:bg-slate-800 text-slate-300 flex items-center justify-center"
+                onClick={() => handlePrintReceipt(successData)}
+              >
+                <Printer className="mr-2" size={18} /> {getDownloadLabel(successData.paymentMethod)}
+              </Button>
+              <Button
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                onClick={() => router.replace('/sales')}
+              >
+                <ArrowLeft className="mr-2" size={18} /> Kembali ke Jualan
+              </Button>
+            </Card>
+          </div>
+        )}
+
         {/* Step Content */}
+        {step !== 4 && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2">
@@ -323,28 +811,46 @@ export default function NewSalePage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
-                  {filteredProducts.map((product) => (
+                  {filteredProducts.map((product) => {
+                    const remainingStock = getRemainingStock(product.id);
+
+                    return (
                     <div
                       key={product.id}
-                      className="p-4 bg-slate-800 rounded-lg border border-slate-700 hover:border-purple-500/50 transition-all"
+                      className={`p-4 rounded-lg border transition-all ${
+                        remainingStock > 0
+                          ? 'bg-slate-800 border-slate-700 hover:border-purple-500/50'
+                          : 'bg-slate-900 border-slate-800 opacity-70'
+                      }`}
                     >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <p className="font-semibold text-white">{product.name}</p>
                           <p className="text-purple-400 font-bold">RM {product.price?.toFixed(2)}</p>
+                          <p className="text-white/30 text-xs uppercase tracking-wide mt-1">{product.unit || 'unit'}</p>
                         </div>
                         <Button
                           variant="primary"
                           size="sm"
+                          disabled={remainingStock <= 0}
                           onClick={() => addToCart(product)}
                         >
                           <Plus size={16} />
                         </Button>
                       </div>
-                      <p className="text-white/40 text-xs">Stok: {product.stock || 0}</p>
+                      <p className={`text-xs ${remainingStock > 0 ? 'text-white/40' : 'text-red-400'}`}>
+                        {remainingStock > 0 ? `Baki stok van: ${remainingStock}` : 'Stok habis'}
+                      </p>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
+
+                {!loading && filteredProducts.length === 0 && (
+                  <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-8 text-center text-white/50">
+                    Tiada stok dalam van untuk dijual.
+                  </div>
+                )}
 
                 <div className="flex gap-3 mt-4">
                   <Button
@@ -378,6 +884,29 @@ export default function NewSalePage() {
 
                 <div className="space-y-4">
                   <div>
+                    <div className="flex items-center justify-between mb-1 gap-3">
+                      <label className="block text-white/60 text-sm">
+                        No. Invois
+                      </label>
+                      <button
+                        type="button"
+                        onClick={regenerateInvoiceNo}
+                        className="text-xs text-blue-300 hover:text-blue-200"
+                      >
+                        Jana semula
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={invoiceNo}
+                      onChange={(e) => setInvoiceNo(e.target.value)}
+                      placeholder="Akan dijana automatik"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-xs text-white/40 mt-1">Cadangan nombor invois dijana automatik dan masih boleh diubah.</p>
+                  </div>
+
+                  <div>
                     <label className="block text-white/60 text-sm mb-2">Kaedah Pembayaran</label>
                     <div className="grid grid-cols-2 gap-3">
                       {[
@@ -405,22 +934,27 @@ export default function NewSalePage() {
                   {paymentMethod === 'cash' && (
                     <div>
                       <label className="block text-white/60 text-sm mb-1">
-                        No. Resit <span className="text-red-400">*</span>
+                        No. Resit
                       </label>
-                      <input
-                        type="text"
-                        value={receiptNo}
-                        onChange={(e) => setReceiptNo(e.target.value)}
-                        placeholder="cth: CB-KK-20260326-001"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
-                      />
+                      <div className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white/70 text-sm">
+                        Akan dijana automatik semasa jualan disimpan.
+                      </div>
                     </div>
                   )}
                   {paymentMethod === 'bill_to_bill' && (
                     <div>
-                      <label className="block text-white/60 text-sm mb-1">
-                        No. Invois / Rujukan Kredit <span className="text-red-400">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1 gap-3">
+                        <label className="block text-white/60 text-sm">
+                          No. Invois / Rujukan Kredit
+                        </label>
+                        <button
+                          type="button"
+                          onClick={regenerateReferenceNo}
+                          className="text-xs text-blue-300 hover:text-blue-200"
+                        >
+                          Jana semula
+                        </button>
+                      </div>
                       <input
                         type="text"
                         value={billingRefNo}
@@ -428,13 +962,23 @@ export default function NewSalePage() {
                         placeholder="cth: B2B-KK-202603-001"
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
                       />
+                      <p className="text-xs text-white/40 mt-1">Nombor ini dijana automatik untuk memudahkan staf, tetapi masih boleh diubah.</p>
                     </div>
                   )}
                   {paymentMethod === 'bank_transfer' && (
                     <div>
-                      <label className="block text-white/60 text-sm mb-1">
-                        No. Rujukan Pemindahan <span className="text-red-400">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1 gap-3">
+                        <label className="block text-white/60 text-sm">
+                          No. Rujukan Pemindahan
+                        </label>
+                        <button
+                          type="button"
+                          onClick={regenerateReferenceNo}
+                          className="text-xs text-blue-300 hover:text-blue-200"
+                        >
+                          Jana semula
+                        </button>
+                      </div>
                       <input
                         type="text"
                         value={transferRefNo}
@@ -442,13 +986,23 @@ export default function NewSalePage() {
                         placeholder="cth: TRF-20260326-001"
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
                       />
+                      <p className="text-xs text-white/40 mt-1">Gunakan nombor cadangan ini atau ubah ikut slip bank sebenar.</p>
                     </div>
                   )}
                   {paymentMethod === 'qr_code' && (
                     <div>
-                      <label className="block text-white/60 text-sm mb-1">
-                        No. Transaksi QR <span className="text-red-400">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1 gap-3">
+                        <label className="block text-white/60 text-sm">
+                          No. Transaksi QR
+                        </label>
+                        <button
+                          type="button"
+                          onClick={regenerateReferenceNo}
+                          className="text-xs text-blue-300 hover:text-blue-200"
+                        >
+                          Jana semula
+                        </button>
+                      </div>
                       <input
                         type="text"
                         value={qrTxnRefNo}
@@ -456,6 +1010,76 @@ export default function NewSalePage() {
                         placeholder="cth: QR-20260326-001"
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
                       />
+                      <p className="text-xs text-white/40 mt-1">Boleh terus guna nombor cadangan atau ganti dengan nombor transaksi QR sebenar.</p>
+                    </div>
+                  )}
+
+                  {requiresPaymentProof(paymentMethod) && (
+                    <div>
+                      <div className="flex items-center justify-between gap-3 mb-1">
+                        <label className="block text-white/60 text-sm">
+                        Bukti Pembayaran <span className="text-red-400">*</span>
+                        </label>
+                        <span className="text-xs text-white/40">{paymentProofs.length}/{MAX_PAYMENT_PROOF_IMAGES} gambar</span>
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          if (files.length === 0) return;
+
+                          const availableSlots = MAX_PAYMENT_PROOF_IMAGES - paymentProofs.length;
+                          const selectedFiles = files.slice(0, availableSlots).filter((file) => file.type.startsWith('image/'));
+
+                          if (selectedFiles.length === 0) {
+                            e.target.value = '';
+                            return;
+                          }
+
+                          setPaymentProofs((currentProofs) => [
+                            ...currentProofs,
+                            ...selectedFiles.map((file) => ({
+                              id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                              file,
+                              previewUrl: URL.createObjectURL(file),
+                            })),
+                          ]);
+
+                          e.target.value = '';
+                        }}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm file:mr-3 file:border-0 file:bg-blue-600 file:px-3 file:py-1 file:text-white file:rounded-md"
+                      />
+                      <p className="text-xs text-white/40 mt-1">Muat naik 1 hingga 4 gambar screenshot atau slip pembayaran untuk bank transfer atau QR.</p>
+                      {paymentProofs.length > 0 && (
+                        <div className="mt-3 grid grid-cols-2 gap-3">
+                          {paymentProofs.map((proof, index) => (
+                            <div key={proof.id} className="rounded-lg overflow-hidden border border-slate-700 bg-slate-900">
+                              <img src={proof.previewUrl} alt={`Bukti pembayaran ${index + 1}`} className="w-full h-36 object-cover" />
+                              <div className="flex items-center justify-between px-3 py-2 text-xs text-white/70">
+                                <span>Gambar {index + 1}</span>
+                                <button
+                                  type="button"
+                                  className="text-red-300 hover:text-red-200"
+                                  onClick={() => {
+                                    setPaymentProofs((currentProofs) => {
+                                      const target = currentProofs.find((item) => item.id === proof.id);
+                                      if (target) {
+                                        URL.revokeObjectURL(target.previewUrl);
+                                      }
+
+                                      return currentProofs.filter((item) => item.id !== proof.id);
+                                    });
+                                  }}
+                                >
+                                  Buang
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -566,6 +1190,7 @@ export default function NewSalePage() {
             </Card>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

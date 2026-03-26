@@ -78,6 +78,7 @@ export interface PaymentData {
   returnAmount?: number;
   exchangeAmount?: number;
   focAmount?: number;
+  amount?: number;
 }
 
 export interface Transaction {
@@ -95,9 +96,20 @@ export interface Transaction {
   exchangeItems?: { productId: string; quantity: number; reason: string }[];
   assignedShopId?: string;
   salesmanId?: string;
+  salesmanName?: string | null;
   createdAt?: string;
   updatedAt?: string;
   branch?: string;
+  invoice?: string;
+  receiptNo?: string | null;
+  billingRefNo?: string | null;
+  transferRefNo?: string | null;
+  qrTxnRefNo?: string | null;
+  paymentReferenceNo?: string | null;
+  receiptUrl?: string | null;
+  proofPhotoUrl?: string | null;
+  proofPhotoUrls?: string[] | null;
+  paymentStatus?: 'paid' | 'pending' | 'partial' | 'cancelled';
 }
 
 export interface StockAudit {

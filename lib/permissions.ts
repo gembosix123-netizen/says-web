@@ -11,6 +11,7 @@ export function canAccessAdminPath(role: NormalizedRole, pathname: string): bool
     '/admin',
     '/admin/kota-kinabalu',
     '/admin/kinabatangan',
+    '/admin/live-sales',
     '/admin/reports',
     '/admin/commissions',
     '/admin/loading',

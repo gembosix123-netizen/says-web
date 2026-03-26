@@ -91,10 +91,12 @@ Pastikan isi **tepat** seperti dalam senarai ini:
 
 Ikut kaedah bayaran yang dipilih, **hanya isi satu nombor rujukan** yang berkaitan:
 
-- Pilih `cash` → isi `receipt_no`, kosongkan yang lain
-- Pilih `bill_to_bill` → isi `billing_ref_no`, kosongkan yang lain
-- Pilih `bank_transfer` → isi `transfer_ref_no`, kosongkan yang lain
-- Pilih `qr_code` → isi `qr_txn_ref_no`, kosongkan yang lain
+- Pilih `cash` → sistem akan jana `receipt_no` automatik semasa jualan disimpan
+- Pilih `bill_to_bill` → sistem cadangkan `billing_ref_no` automatik, boleh terus guna atau ubah
+- Pilih `bank_transfer` → sistem cadangkan `transfer_ref_no` automatik, boleh terus guna atau ubah
+- Pilih `qr_code` → sistem cadangkan `qr_txn_ref_no` automatik, boleh terus guna atau ubah
+
+No. invois jualan juga kini dijana automatik dalam borang jualan baru, tetapi masih boleh disunting jika perlu.
 
 ---
 
@@ -108,6 +110,8 @@ Guna format ini supaya nombor tidak bercampur:
 | Bill-to-Bill | `B2B-[CAWANGAN]-[YYYYMM]-[NO]` | `B2B-KB-202511-001` |
 | Bank Transfer | `TRF-[CAWANGAN]-[YYYYMM]-[NO]` | `TRF-KK-202511-001` |
 | QR Code | `QR-[CAWANGAN]-[YYYYMM]-[NO]` | `QR-KK-202511-001` |
+
+Dalam modul jualan baru, sistem menggunakan format automatik seperti `INV-...`, `RCPT-...`, `B2B-...`, `TRF-...`, dan `QR-...` untuk mempercepat kerja staf serta mengurangkan kesilapan menaip.
 
 > Singkatan cawangan: `KK` = Kota Kinabalu, `KB` = Kinabatangan
 

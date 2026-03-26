@@ -69,6 +69,22 @@ export function getSalesTableByBranch(branch: Branch): 'sales_kota_kinabalu' | '
 }
 
 /**
+ * Get the appropriate customers table name based on branch
+ * - Kota Kinabalu -> customers_kb
+ * - Kinabatangan -> customers_kk
+ */
+export function getCustomersTableByBranch(branch?: Branch): 'customers_kb' | 'customers_kk' {
+  if (!branch || branch === 'Kota Kinabalu' || branch === 'KB') {
+    return 'customers_kb';
+  }
+  if (branch === 'Kinabatangan' || branch === 'KK') {
+    return 'customers_kk';
+  }
+  // Default to KB if branch is unclear
+  return 'customers_kb';
+}
+
+/**
  * Filter data query by user's branch
  * Used in API routes to enforce data segregation at query level
  */

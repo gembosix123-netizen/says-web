@@ -4,6 +4,7 @@ import { collectPaymentSchema } from '@/lib/validations';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { canAccessSalesRoutes } from '@/lib/permissions';
+import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
@@ -89,8 +90,9 @@ export async function POST(request: NextRequest) {
     // Update customer outstanding balance
     if (sale.customer_id) {
       try {
+        const customersTable = getCustomersTableByBranch(currentUser.branch);
         const { data: customer } = await supabaseAdmin
-          .from('customers')
+          .from(customersTable)
           .select('outstandingBalance')
           .eq('id', sale.customer_id)
           .single();
@@ -100,7 +102,7 @@ export async function POST(request: NextRequest) {
         const newBalance = Math.max(0, currentBalance - saleAmount);
 
         await supabaseAdmin
-          .from('customers')
+          .from(customersTable)
           .update({ outstandingBalance: newBalance })
           .eq('id', sale.customer_id);
 

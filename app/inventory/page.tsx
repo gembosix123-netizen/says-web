@@ -1,11 +1,12 @@
 'use client';
 
-import SalesLayout from '@/components/layouts/SalesLayout';
-import { Package, Search, AlertTriangle, CheckCircle, TrendingDown, ArrowUpDown } from 'lucide-react';
+import { Package, Search, AlertTriangle, CheckCircle, TrendingDown, ArrowUpDown, ArrowLeft } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Product } from '@/types';
 
 export default function InventoryPage() {
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -69,13 +70,21 @@ export default function InventoryPage() {
   };
 
   return (
-    <SalesLayout>
-      <div className="space-y-6">
+    <div className="min-h-screen bg-slate-950 p-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Inventory</h1>
-            <p className="text-slate-400">View stock levels and product availability.</p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/sales')}
+              className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <div>
+              <h1 className="text-2xl font-bold text-white tracking-tight">Inventori Van</h1>
+              <p className="text-slate-400">Lihat paras stok dan ketersediaan produk.</p>
+            </div>
           </div>
         </div>
 
@@ -216,6 +225,6 @@ export default function InventoryPage() {
           )}
         </div>
       </div>
-    </SalesLayout>
+    </div>
   );
 }
