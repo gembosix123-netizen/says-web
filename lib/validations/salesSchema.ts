@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Payment methods and status
-const PAYMENT_METHODS = ['cash', 'credit', 'card', 'transfer', 'ewallet'] as const;
+const PAYMENT_METHODS = ['cash', 'bill_to_bill', 'bank_transfer', 'qr_code', 'card', 'ewallet'] as const;
 const PAYMENT_STATUS = ['paid', 'pending', 'partial', 'cancelled'] as const;
 
 // Custom error messages in Bahasa Melayu
@@ -99,6 +99,31 @@ export const createSaleSchema = z.object({
   notes: z
     .string()
     .max(500, 'Nota terlalu panjang')
+    .trim()
+    .optional()
+    .nullable(),
+  // Payment reference numbers — required depends on payment_method (validated in API/frontend)
+  receipt_no: z
+    .string()
+    .max(100)
+    .trim()
+    .optional()
+    .nullable(),
+  billing_ref_no: z
+    .string()
+    .max(100)
+    .trim()
+    .optional()
+    .nullable(),
+  transfer_ref_no: z
+    .string()
+    .max(100)
+    .trim()
+    .optional()
+    .nullable(),
+  qr_txn_ref_no: z
+    .string()
+    .max(100)
     .trim()
     .optional()
     .nullable(),

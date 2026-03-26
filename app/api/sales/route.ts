@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { db } from '@/lib/db';
 import { createSaleSchema } from '@/lib/validations';
 import { logAuditEvent } from '@/lib/audit';
 import { getSessionUserFromRequest } from '@/lib/session';
@@ -28,13 +29,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    if (!supabaseAdmin) {
-      console.error('Supabase admin client not available');
-      return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
-    }
-
     const { searchParams } = new URL(request.url);
     let branch: string | null = searchParams.get('branch');
+    const startDate: string | null = searchParams.get('startDate');
+    const endDate: string | null = searchParams.get('endDate');
+
+    if (!supabaseAdmin) {
+      // Fallback to local db so analytics pages still render when Supabase is temporarily unavailable
+      const allTx = await db.transactions.getAll();
+      let filtered = (!branch || branch === 'all')
+        ? allTx
+        : allTx.filter((t) => t.branch === branch);
+      if (startDate) filtered = filtered.filter((t) => t.createdAt && t.createdAt >= startDate);
+      if (endDate)   filtered = filtered.filter((t) => t.createdAt && t.createdAt <= endDate + 'T23:59:59.999Z');
+      return NextResponse.json(filtered);
+    }
 
     // Branch access control
     // If Admin, only allow their own branch
@@ -58,6 +67,13 @@ export async function GET(request: NextRequest) {
 
     if (branch && branch !== 'all') {
       query = query.eq('branch', branch);
+    }
+
+    if (startDate) {
+      query = query.gte('created_at', startDate);
+    }
+    if (endDate) {
+      query = query.lte('created_at', endDate + 'T23:59:59.999Z');
     }
 
     // Sales can only see their own transactions
@@ -225,7 +241,21 @@ export async function POST(request: NextRequest) {
     const validatedData = validation.data;
 
     const invoice = validatedData.invoice || generateInvoice(branch.replace(/\s+/g, '_'));
-    const isCredit = validatedData.payment_method === 'credit';
+    const isCredit = validatedData.payment_method === 'bill_to_bill';
+
+    // Validate required reference number per payment method
+    if (validatedData.payment_method === 'cash' && !validatedData.receipt_no) {
+      return NextResponse.json({ error: 'Nombor resit diperlukan untuk pembayaran tunai' }, { status: 400 });
+    }
+    if (validatedData.payment_method === 'bill_to_bill' && !validatedData.billing_ref_no) {
+      return NextResponse.json({ error: 'Nombor rujukan invois diperlukan untuk bill-to-bill' }, { status: 400 });
+    }
+    if (validatedData.payment_method === 'bank_transfer' && !validatedData.transfer_ref_no) {
+      return NextResponse.json({ error: 'Nombor rujukan pemindahan diperlukan untuk bank transfer' }, { status: 400 });
+    }
+    if (validatedData.payment_method === 'qr_code' && !validatedData.qr_txn_ref_no) {
+      return NextResponse.json({ error: 'Nombor transaksi QR diperlukan untuk pembayaran QR' }, { status: 400 });
+    }
 
     const subtotalAmount = validatedData.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const saleData: Record<string, unknown> = {
@@ -237,6 +267,10 @@ export async function POST(request: NextRequest) {
       subtotal_amount: subtotalAmount,
       grand_total: validatedData.total_amount,
       payment_method: validatedData.payment_method,
+      receipt_no: validatedData.receipt_no || null,
+      billing_ref_no: validatedData.billing_ref_no || null,
+      transfer_ref_no: validatedData.transfer_ref_no || null,
+      qr_txn_ref_no: validatedData.qr_txn_ref_no || null,
       status: isCredit ? 'pending' : 'completed',
       notes: validatedData.notes || null,
       created_at: new Date().toISOString()

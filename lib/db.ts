@@ -148,7 +148,7 @@ export class DB<T extends { id: string }> {
   }
 }
 
-import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory, Settlement, CommissionPayout, Store } from '@/types';
+import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory, Settlement, CommissionPayout, Store, MonthlyReportHistory } from '@/types';
 
 // We need to export instances. 
 // Note: methods are now async, so we need to update usage in API routes.
@@ -163,4 +163,5 @@ export const db = {
   vanInventories: new DB<VanInventory>('van_inventories.json'),
   settlements: new DB<Settlement>('settlements.json'),
   payouts: new DB<CommissionPayout>('payouts.json'),
+  monthlyReportHistory: new DB<MonthlyReportHistory>('monthly_report_history.json'),
 };

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest } from '@/lib/session';
+import { db } from '@/lib/db';
 
 // Helper: Get current user from session
 interface SaleItemRecord {
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month'); // YYYY-MM
     const startDate = searchParams.get('startDate'); // For date range
     const endDate = searchParams.get('endDate'); // For date range
+    const useClosedSnapshot = searchParams.get('useClosed') === 'true';
     let branch: string = searchParams.get('branch') || 'all';
 
     // Admin can only see their own branch
@@ -55,6 +57,55 @@ export async function GET(request: NextRequest) {
 
     if (!month && !startDate) {
       return NextResponse.json({ error: 'Missing month or date range parameter' }, { status: 400 });
+    }
+
+    if (useClosedSnapshot && month) {
+      if (supabaseAdmin) {
+        let closedQuery = supabaseAdmin
+          .from('monthly_report_history')
+          .select('*')
+          .eq('month', month)
+          .eq('status', 'closed')
+          .limit(1);
+
+        if (branch !== 'all') {
+          closedQuery = closedQuery.eq('branch', branch);
+        }
+
+        const { data: closedRows, error: closedError } = await closedQuery;
+        if (!closedError && closedRows && closedRows.length > 0) {
+          const closedRow = closedRows[0] as any;
+          return NextResponse.json({
+            ...closedRow.snapshot,
+            month: closedRow.month,
+            branch: closedRow.branch,
+            isClosed: true,
+            submittedAt: closedRow.submitted_at,
+            submittedBy: closedRow.submitted_by,
+            notes: closedRow.notes || '',
+          });
+        }
+      }
+
+      const localClosedHistory = await db.monthlyReportHistory.getAll();
+      const matchingClosed = localClosedHistory.find((entry) => {
+        if (entry.month !== month || entry.status !== 'closed') {
+          return false;
+        }
+        return branch === 'all' || entry.branch === branch;
+      });
+
+      if (matchingClosed) {
+        return NextResponse.json({
+          ...matchingClosed.snapshot,
+          month: matchingClosed.month,
+          branch: matchingClosed.branch,
+          isClosed: true,
+          submittedAt: matchingClosed.submittedAt,
+          submittedBy: matchingClosed.submittedBy,
+          notes: matchingClosed.notes || '',
+        });
+      }
     }
 
     if (!supabaseAdmin) {
@@ -151,11 +202,13 @@ export async function GET(request: NextRequest) {
 
     const report = {
       month: month || `${startDate} to ${endDate}`,
+      branch,
       totalRevenue,
       totalTransactions,
       dailyData: dailyDataArray,
       branchSummaries,
       topProducts,
+      isClosed: false,
     };
 
     return NextResponse.json(report);

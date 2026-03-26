@@ -3,6 +3,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Transaction, Product, User, StockAudit, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
+import DateRangePicker, { DateRange } from '@/components/ui/DateRangePicker';
 
 interface AnalyticsDashboardProps {
   transactions: Transaction[];
@@ -39,6 +40,10 @@ const AGENT_BRANCH_MAP: Record<string, string> = {
 export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
   const { t } = useLanguage();
   const [selectedBranch, setSelectedBranch] = useState('all');
+  const [dateRange, setDateRange] = useState<DateRange>({
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0],
+  });
   const [exchangeReturns, setExchangeReturns] = useState<ExchangeReturn[]>([]);
 
   // Fetch exchange/return data
@@ -78,10 +83,27 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
     return (transactions || []).filter(t => t.branch === selectedBranch);
   }, [transactions, selectedBranch]);
 
+    const monthlyTransactions = useMemo(() => {
+        if (!dateRange.start && !dateRange.end) return filteredTransactions;
+        return filteredTransactions.filter((transaction) => {
+            const d = transaction.createdAt?.split('T')[0] ?? '';
+            if (dateRange.start && d < dateRange.start) return false;
+            if (dateRange.end   && d > dateRange.end)   return false;
+            return true;
+        });
+    }, [filteredTransactions, dateRange]);
+
+    const filteredSalesUsers = useMemo(() => {
+        if (selectedBranch === 'all') {
+            return salesUsers;
+        }
+        return salesUsers.filter((user) => user.branch === selectedBranch);
+    }, [salesUsers, selectedBranch]);
+
   // Top 5 Products
   const topProducts = useMemo(() => {
     const productSales: Record<string, number> = {};
-    filteredTransactions?.forEach(t => {
+        monthlyTransactions.forEach(t => {
       t.items?.forEach(item => {
         productSales[item.id] = (productSales[item.id] || 0) + Number(item.quantity || 0);
       });
@@ -94,26 +116,41 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
       .filter(item => item.product)
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 5);
-  }, [filteredTransactions, products]);
+    }, [monthlyTransactions, products]);
 
   // Top Sales Agent with location mapping
-    const topAgents = (() => {
+    const topAgents = useMemo(() => {
     const agentSales: Record<string, number> = {};
-    filteredTransactions?.forEach(t => {
+        monthlyTransactions.forEach(t => {
       if (t.salesmanId) {
-          agentSales[t.salesmanId] = (agentSales[t.salesmanId] || 0) + Number(t.total || 0);
+                agentSales[t.salesmanId] = (agentSales[t.salesmanId] || 0) + Number(t.total || 0);
       }
     });
+
     return Object.entries(agentSales)
       .map(([id, total]) => ({
-        user: salesUsers.find(u => u.id === id),
+                user: filteredSalesUsers.find(u => u.id === id),
         total: Number(total) || 0,
                 location: AGENT_BRANCH_MAP[id] || 'Unknown'
       }))
       .filter(item => item.user)
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
-    })();
+    }, [monthlyTransactions, filteredSalesUsers]);
+
+    const monthlySummary = useMemo(() => {
+        const totalRevenue = monthlyTransactions.reduce((acc, transaction) => acc + Number(transaction.total || 0), 0);
+        const totalTransactions = monthlyTransactions.length;
+        const averageOrderValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+        const activeAgents = new Set(monthlyTransactions.map((transaction) => transaction.salesmanId).filter(Boolean)).size;
+
+        return {
+            totalRevenue,
+            totalTransactions,
+            averageOrderValue,
+            activeAgents,
+        };
+    }, [monthlyTransactions]);
 
   // Stock Alerts (Latest audit for each product < 10)
   const lowStockAlerts = useMemo(() => {
@@ -155,7 +192,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
           return { date: d.toISOString().split('T')[0], total: 0 };
       });
       
-      filteredTransactions?.forEach(t => {
+      monthlyTransactions.forEach(t => {
           if (t.createdAt) {
               const date = t.createdAt.split('T')[0];
               const dayData = data.find(d => d.date === date);
@@ -165,7 +202,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
           }
       });
       return data;
-  }, [filteredTransactions]);
+  }, [monthlyTransactions]);
 
   const maxSales = Math.max(...salesTrend.map(d => d.total), 1);
 
@@ -184,42 +221,51 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
   return (
     <div className="space-y-6">
         {/* Branch Filter */}
-                <div className="soft-panel p-4 rounded-lg">
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mr-3">Filter by Branch:</label>
-          <select
-            value={selectedBranch}
-            onChange={(e) => setSelectedBranch(e.target.value)}
-                        className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
-          >
-            <option value="all">All Branches</option>
-            {branches.map(branch => (
-              <option key={branch} value={branch}>{branch}</option>
-            ))}
-          </select>
+                <div className="soft-panel p-4 rounded-lg flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mr-3">{t('filter_by_branch')}:</label>
+                        <select
+                            value={selectedBranch}
+                            onChange={(e) => setSelectedBranch(e.target.value)}
+                            className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="all">{t('all_branches')}</option>
+                            {branches.map(branch => (
+                                <option key={branch} value={branch}>{branch}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <DateRangePicker value={dateRange} onChange={setDateRange} lightMode />
+                    </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Master Sales Report (Summary) */}
             <div className="soft-panel p-6 md:col-span-2">
-                <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">Master Sales Report</h3>
+                <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-baseline md:justify-between">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t('master_sales_report')}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{t('showing_data_for')} {dateRange.start && dateRange.end ? `${dateRange.start} → ${dateRange.end}` : t('all_time')}</p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="soft-card soft-card-green p-4 rounded-xl">
-                        <p className="text-slate-500 dark:text-slate-400 text-sm">Total Revenue</p>
-                        <p className="text-2xl font-bold text-emerald-600 dark:text-green-400">{formatCurrency(filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0))}</p>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('total_revenue')}</p>
+                        <p className="text-2xl font-bold text-emerald-600 dark:text-green-400">{formatCurrency(monthlySummary.totalRevenue)}</p>
                     </div>
                     <div className="soft-card soft-card-blue p-4 rounded-xl">
-                        <p className="text-slate-500 dark:text-slate-400 text-sm">Total Transactions</p>
-                        <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{filteredTransactions.length}</p>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('total_transactions_label')}</p>
+                        <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{monthlySummary.totalTransactions}</p>
                     </div>
                     <div className="soft-card soft-card-rose p-4 rounded-xl">
-                        <p className="text-slate-500 dark:text-slate-400 text-sm">Avg. Order Value</p>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('avg_order_value')}</p>
                         <p className="text-2xl font-bold text-violet-600 dark:text-purple-400">
-                            {formatCurrency(filteredTransactions.length > 0 ? filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0) / filteredTransactions.length : 0)}
+                            {formatCurrency(monthlySummary.averageOrderValue)}
                         </p>
                     </div>
                     <div className="soft-card p-4 rounded-xl">
-                        <p className="text-slate-500 dark:text-slate-400 text-sm">Active Agents</p>
-                        <p className="text-2xl font-bold text-amber-600 dark:text-orange-400">{new Set(filteredTransactions.map(t => t.salesmanId).filter(Boolean)).size}</p>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('active_agents')}</p>
+                        <p className="text-2xl font-bold text-amber-600 dark:text-orange-400">{monthlySummary.activeAgents}</p>
                     </div>
                 </div>
             </div>
@@ -228,17 +274,17 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
             <div className="soft-panel p-6 border-orange-200 dark:border-orange-900/30 md:col-span-2">
                 <h3 className="text-lg font-bold mb-4 text-amber-600 dark:text-orange-500 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-amber-500 dark:bg-orange-500"/>
-                    Exchange & Return Tracking (Disposal)
+                    {t('exchange_return_tracking')}
                 </h3>
                 <div className="overflow-x-auto max-h-64">
                     <table className="w-full text-left text-sm">
                         <thead className="sticky top-0 soft-table-head">
                             <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
-                                <th className="pb-3 pl-2">Product</th>
-                                <th className="pb-3">Type</th>
-                                <th className="pb-3">Qty</th>
-                                <th className="pb-3">Reason</th>
-                                <th className="pb-3">Status</th>
+                                <th className="pb-3 pl-2">{t('product')}</th>
+                                <th className="pb-3">{t('type_label')}</th>
+                                <th className="pb-3">{t('qty')}</th>
+                                <th className="pb-3">{t('reason')}</th>
+                                <th className="pb-3">{t('status')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -268,7 +314,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                                 </tr>
                             ))}
                             {exchangeReport.length === 0 && (
-                                <tr><td colSpan={5} className="py-8 text-center text-slate-500 italic">No returns recorded</td></tr>
+                                <tr><td colSpan={5} className="py-8 text-center text-slate-500 italic">{t('no_returns')}</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -288,17 +334,20 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                                 <span className="text-slate-800 dark:text-slate-200 font-medium">{item.product?.name}</span>
                             </div>
                             <span className="bg-blue-900/30 text-blue-300 border border-blue-500/30 px-3 py-1 rounded-lg text-sm font-bold">
-                                {item.qty} sold
+                                {item.qty} {t('sold')}
                             </span>
                         </div>
                     ))}
-                    {topProducts.length === 0 && <p className="text-slate-500 italic">No sales data</p>}
+                    {topProducts.length === 0 && <p className="text-slate-500 italic">{t('no_sales_data')}</p>}
                 </div>
             </div>
 
             {/* Top Agents */}
             <div className="soft-panel p-6">
-                <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">{t('top_agents')}</h3>
+                <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-baseline md:justify-between">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t('top_agents')}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{t('ranking_for')} {dateRange.start && dateRange.end ? `${dateRange.start} → ${dateRange.end}` : t('all_time')}</p>
+                </div>
                 <div className="space-y-3">
                     {topAgents.map((item, idx) => (
                         <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -313,14 +362,14 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                             </span>
                         </div>
                     ))}
-                     {topAgents.length === 0 && <p className="text-slate-500 italic">No data</p>}
+                     {topAgents.length === 0 && <p className="text-slate-500 italic">{t('no_data')}</p>}
                 </div>
             </div>
         </div>
 
         {/* Sales Trend Graph */}
         <div className="bg-white/90 dark:bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800">
-            <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">{t('sales_trend')} (Last 7 Days)</h3>
+            <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">{t('sales_trend')} ({t('last_7_days')})</h3>
             <div className="flex items-end space-x-2 h-48 pt-4">
                 {salesTrend.map((day, idx) => (
                     <div key={idx} className="flex-1 flex flex-col items-center group relative h-full justify-end">
@@ -350,10 +399,10 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                 <table className="w-full text-left">
                     <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
-                            <th className="pb-3 pl-2">Product</th>
-                            <th className="pb-3">Current Stock</th>
-                            <th className="pb-3">Customer/Loc</th>
-                            <th className="pb-3 text-right pr-2">Date</th>
+                            <th className="pb-3 pl-2">{t('product')}</th>
+                            <th className="pb-3">{t('current_stock')}</th>
+                            <th className="pb-3">{t('customer_loc')}</th>
+                            <th className="pb-3 text-right pr-2">{t('date')}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -370,7 +419,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                             </tr>
                         ))}
                          {lowStockAlerts.length === 0 && (
-                            <tr><td colSpan={4} className="py-8 text-center text-slate-600 italic">No low stock alerts</td></tr>
+                            <tr><td colSpan={4} className="py-8 text-center text-slate-600 italic">{t('no_low_stock')}</td></tr>
                         )}
                     </tbody>
                 </table>

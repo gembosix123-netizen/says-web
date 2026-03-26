@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Upload } from 'lucide-react';
 import clsx from 'clsx';
 import { useLanguage } from '@/context/LanguageContext';
 import ClientSwitchers from '@/components/ClientSwitchers';
@@ -76,6 +76,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       { to: '/admin/customers', label: 'customers', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/users', label: 'user_management', icon: Users, roles: ['Main Admin'] },
       { to: '/admin/audits', label: 'audits', icon: Package, roles: ['Main Admin'] },
+      { to: '/admin/backdated-import', label: 'backdated_import', icon: Upload, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/database', label: 'database_nav', icon: Database, roles: ['Main Admin', 'Admin'] },
     ];
 

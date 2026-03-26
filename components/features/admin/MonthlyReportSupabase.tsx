@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useLanguage } from '@/context/LanguageContext';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
-import { Download, Calendar, DollarSign, TrendingUp, Package, Users, AlertCircle, FileText } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { Download, Calendar, TrendingUp, Package, Users, AlertCircle, FileText, Lock } from 'lucide-react';
 
 interface DailySale {
   date: string;
@@ -23,26 +23,42 @@ interface BranchSummary {
 
 interface MonthlyReportData {
   month: string;
+  branch?: string;
   totalRevenue: number;
   totalTransactions: number;
   dailyData: DailySale[];
   branchSummaries: BranchSummary[];
   topProducts: { name: string; quantity: number }[];
+  isClosed?: boolean;
+  submittedAt?: string;
+  submittedBy?: string;
+  notes?: string;
 }
 
-const COLORS = ['#3b82f6', '#10b981', '#f97316', '#8b5cf6', '#ec4899'];
+interface MonthlyReportHistoryItem {
+  id: string;
+  month: string;
+  branch: string;
+  status: 'draft' | 'closed';
+  submittedAt: string;
+  submittedBy: string;
+  notes?: string;
+}
 
 export default function MonthlyReportSupabase() {
   const { t } = useLanguage();
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [selectedYear] = useState(new Date().getFullYear().toString());
   const [selectedBranch, setSelectedBranch] = useState<'all' | 'Kota Kinabalu' | 'Kinabatangan'>('all');
   const [reportData, setReportData] = useState<MonthlyReportData | null>(null);
+  const [reportHistory, setReportHistory] = useState<MonthlyReportHistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentUserBranch, setCurrentUserBranch] = useState<string>('');
   const [currentUserRole, setCurrentUserRole] = useState<string>('');
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isClosingMonth, setIsClosingMonth] = useState(false);
+  const [closeNotes, setCloseNotes] = useState('');
+  const [viewMode, setViewMode] = useState<'live' | 'closed'>('live');
   const { addToast } = useToast();
 
   // Get current user info
@@ -67,10 +83,16 @@ export default function MonthlyReportSupabase() {
   const fetchMonthlyReport = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/reports/monthly?month=${selectedMonth}&branch=${selectedBranch}`);
+      const params = new URLSearchParams({
+        month: selectedMonth,
+        branch: selectedBranch,
+        useClosed: viewMode === 'closed' ? 'true' : 'false',
+      });
+      const res = await fetch(`/api/reports/monthly?${params.toString()}`);
       if (!res.ok) {
         const error = await res.json();
         addToast(error.error || 'Failed to fetch report', 'error');
+        setReportData(null);
         return;
       }
       const data: MonthlyReportData = await res.json();
@@ -83,9 +105,69 @@ export default function MonthlyReportSupabase() {
     }
   };
 
+  const fetchHistory = async () => {
+    try {
+      const params = new URLSearchParams({ branch: selectedBranch });
+      const res = await fetch(`/api/reports/monthly-close?${params.toString()}`);
+      if (!res.ok) {
+        return;
+      }
+      const data: MonthlyReportHistoryItem[] = await res.json();
+      setReportHistory(data);
+    } catch (error) {
+      console.error('Error fetching monthly close history:', error);
+    }
+  };
+
   useEffect(() => {
     fetchMonthlyReport();
-  }, [selectedMonth, selectedBranch]);
+  }, [selectedMonth, selectedBranch, viewMode]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [selectedBranch]);
+
+  const handleCloseMonth = async () => {
+    if (!reportData) return;
+
+    setIsClosingMonth(true);
+    try {
+      const response = await fetch('/api/reports/monthly-close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month: selectedMonth,
+          branch: selectedBranch,
+          notes: closeNotes,
+          snapshot: {
+            month: reportData.month,
+            totalRevenue: reportData.totalRevenue,
+            totalTransactions: reportData.totalTransactions,
+            dailyData: reportData.dailyData,
+            branchSummaries: reportData.branchSummaries,
+            topProducts: reportData.topProducts,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        addToast(error.error || 'Failed to close monthly report', 'error');
+        return;
+      }
+
+      addToast('Monthly report closed successfully', 'success');
+      setViewMode('closed');
+      setCloseNotes('');
+      await fetchHistory();
+      await fetchMonthlyReport();
+    } catch (error) {
+      console.error('Error closing monthly report:', error);
+      addToast('Failed to close monthly report', 'error');
+    } finally {
+      setIsClosingMonth(false);
+    }
+  };
 
   // Export to PDF
   const handleExportPDF = async () => {
@@ -188,6 +270,15 @@ export default function MonthlyReportSupabase() {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <select
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as 'live' | 'closed')}
+            className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+          >
+            <option value="live">Live Month</option>
+            <option value="closed">Closed History</option>
+          </select>
+
           <input
             type="month"
             value={selectedMonth}
@@ -227,6 +318,46 @@ export default function MonthlyReportSupabase() {
             <span>{isExportingExcel ? 'Exporting...' : 'Excel'}</span>
           </button>
         </div>
+      </div>
+
+      <div className="soft-panel p-4 rounded-lg flex flex-col gap-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-medium text-slate-900 dark:text-white">
+              {reportData?.isClosed ? 'Closed monthly snapshot' : 'Live monthly sales view'}
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {reportData?.isClosed
+                ? `Confirmed by ${reportData.submittedBy || 'Admin'} on ${new Date(reportData.submittedAt || '').toLocaleString()}`
+                : 'This view updates automatically from current month sales until admin closes the month.'}
+            </p>
+          </div>
+          {!reportData?.isClosed && (currentUserRole === 'Admin' || currentUserRole === 'Main Admin') && (
+            <button
+              onClick={handleCloseMonth}
+              disabled={loading || isClosingMonth || !reportData}
+              className="flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 text-sm whitespace-nowrap"
+            >
+              <Lock size={16} />
+              <span>{isClosingMonth ? 'Closing...' : 'Confirm Month End'}</span>
+            </button>
+          )}
+        </div>
+
+        {!reportData?.isClosed && (currentUserRole === 'Admin' || currentUserRole === 'Main Admin') && (
+          <textarea
+            value={closeNotes}
+            onChange={(e) => setCloseNotes(e.target.value)}
+            placeholder="Notes for monthly close and report confirmation"
+            className="min-h-24 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+          />
+        )}
+
+        {reportData?.isClosed && reportData.notes && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+            {reportData.notes}
+          </div>
+        )}
       </div>
 
       {currentUserRole === 'Admin' && (
@@ -347,6 +478,38 @@ export default function MonthlyReportSupabase() {
                     <Bar dataKey="quantity" fill="#f97316" />
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+
+          <div className="soft-panel p-6 rounded-lg">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Monthly History</h3>
+            {reportHistory.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">No confirmed monthly history yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {reportHistory.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedMonth(item.month);
+                      setSelectedBranch(item.branch as 'all' | 'Kota Kinabalu' | 'Kinabatangan');
+                      setViewMode('closed');
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/50 dark:hover:bg-slate-800"
+                  >
+                    <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-medium text-slate-900 dark:text-white">{item.month} • {item.branch}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Confirmed by {item.submittedBy} on {new Date(item.submittedAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">{item.status}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </div>

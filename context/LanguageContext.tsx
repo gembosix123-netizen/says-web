@@ -225,10 +225,97 @@ const dictionary: Translations = {
   van_loading: { ms: 'Muatan Van', en: 'Van Loading' },
   staff_mgmt: { ms: 'Pengurusan Kakitangan', en: 'Staff Management' },
   database_nav: { ms: 'Pangkalan Data', en: 'Database' },
+  backdated_import: { ms: 'Import Data Lama', en: 'Backdated Import' },
 
   // Additional Admin & User Info
   per_transaction: { ms: 'Setiap transaksi', en: 'Per transaction' },
-  active_branches_count: { ms: 'Cawangan aktif', en: 'Active branches' }
+  active_branches_count: { ms: 'Cawangan aktif', en: 'Active branches' },
+
+  // Admin Dashboard Headers (for server-component pages)
+  admin_welcome_subtitle: { ms: 'Selamat kembali, inilah perkembangan jualan lapangan anda hari ini.', en: "Welcome back, here's what's happening with your field sales today." },
+  kk_dashboard_title: { ms: 'Papan Pemuka Kota Kinabalu', en: 'Kota Kinabalu Dashboard' },
+  kk_dashboard_subtitle: { ms: 'Pemantauan jualan masa nyata untuk cawangan Kota Kinabalu.', en: 'Real-time sales monitoring for Kota Kinabalu branch.' },
+  kb_dashboard_title: { ms: 'Papan Pemuka Kinabatangan', en: 'Kinabatangan Dashboard' },
+  kb_dashboard_subtitle: { ms: 'Pemantauan jualan masa nyata untuk cawangan Kinabatangan.', en: 'Real-time sales monitoring for Kinabatangan branch.' },
+
+  // AnalyticsDashboard
+  filter_by_branch: { ms: 'Tapis Mengikut Cawangan', en: 'Filter by Branch' },
+  master_sales_report: { ms: 'Laporan Jualan Utama', en: 'Master Sales Report' },
+  showing_data_for: { ms: 'Menunjukkan data untuk', en: 'Showing data for' },
+  all_time: { ms: 'Semua Masa', en: 'All Time' },
+  total_transactions_label: { ms: 'Jumlah Transaksi', en: 'Total Transactions' },
+  avg_order_value: { ms: 'Nilai Pesanan Purata', en: 'Avg. Order Value' },
+  active_agents: { ms: 'Ejen Aktif', en: 'Active Agents' },
+  exchange_return_tracking: { ms: 'Pengesanan Pertukaran & Pulangan (Buangan)', en: 'Exchange & Return Tracking (Disposal)' },
+  no_returns: { ms: 'Tiada rekod pulangan', en: 'No returns recorded' },
+  sold: { ms: 'terjual', en: 'sold' },
+  ranking_for: { ms: 'Kedudukan untuk', en: 'Ranking for' },
+  no_sales_data: { ms: 'Tiada data jualan', en: 'No sales data' },
+  no_data: { ms: 'Tiada data', en: 'No data' },
+  last_7_days: { ms: '7 Hari Lepas', en: 'Last 7 Days' },
+  current_stock: { ms: 'Stok Semasa', en: 'Current Stock' },
+  customer_loc: { ms: 'Pelanggan/Lokasi', en: 'Customer/Loc' },
+  no_low_stock: { ms: 'Tiada amaran stok rendah', en: 'No low stock alerts' },
+  product: { ms: 'Produk', en: 'Product' },
+  type_label: { ms: 'Jenis', en: 'Type' },
+  qty: { ms: 'Kuantiti', en: 'Qty' },
+  reason: { ms: 'Sebab', en: 'Reason' },
+
+  // Backdated Import
+  backdated_import_desc: { ms: 'Import data jualan dari bulan-bulan sebelum sistem dikuatkuasakan. Guna template CSV yang disediakan.', en: 'Import historical sales data from months before the system was enforced. Use the provided CSV template.' },
+  official_csv_template: { ms: 'Template CSV Rasmi', en: 'Official CSV Template' },
+  official_template_desc: { ms: 'Isi template ini dalam Excel. Boleh upload terus sebagai .xlsx atau export ke CSV dahulu.', en: 'Fill this template in Excel. You can upload directly as .xlsx or export to CSV first.' },
+  customer_list_system: { ms: 'Senarai Nama Customer Dalam Sistem', en: 'Customer Name List In System' },
+  no_customer_data: { ms: 'Tiada data customer.', en: 'No customer data.' },
+  customer_name_warning: { ms: 'Nama dalam kolum customer_name CSV mesti sama persis dengan senarai di atas supaya ID dapat dipadankan.', en: 'Names in the customer_name column must exactly match the list above for ID matching.' },
+  drag_drop_file: { ms: 'Drag & drop fail CSV atau Excel di sini', en: 'Drag & drop your CSV or Excel file here' },
+  drop_hint: { ms: 'atau klik butang di bawah — Terima: .xlsx / .csv — maksimum 500 baris', en: 'or click below — Accepts: .xlsx / .csv — max 500 rows' },
+  release_here: { ms: 'Lepaskan fail di sini!', en: 'Release file here!' },
+  choose_file_btn: { ms: 'Pilih Fail', en: 'Choose File' },
+  rows_detected: { ms: 'baris dikesan', en: 'rows detected' },
+  discard_file: { ms: 'Buang fail', en: 'Discard file' },
+  all_rows_valid: { ms: 'Semua baris sah', en: 'All rows valid' },
+  errors_found_label: { ms: 'ralat ditemui', en: 'errors found' },
+  row_label: { ms: 'Baris', en: 'Row' },
+  records_label: { ms: 'rekod', en: 'records' },
+  import_success_title: { ms: 'Import Berjaya!', en: 'Import Successful!' },
+  load_new_file: { ms: 'Muat Fail Baru', en: 'Load New File' },
+  import_another: { ms: 'Import Fail Lain', en: 'Import Another File' },
+  validating: { ms: 'Menyemak...', en: 'Validating...' },
+  saving: { ms: 'Menyimpan...', en: 'Saving...' },
+  confirm_import: { ms: 'Sahkan Import', en: 'Confirm Import' },
+
+  // Global Monitor
+  global_monitor_subtitle: { ms: 'Analisis prestasi perbandingan: Kota Kinabalu vs Kinabatangan', en: 'Comparative performance analysis: Kota Kinabalu vs Kinabatangan' },
+  kk_only: { ms: 'Kota Kinabalu Sahaja', en: 'Kota Kinabalu Only' },
+  kb_only: { ms: 'Kinabatangan Sahaja', en: 'Kinabatangan Only' },
+  total_orders: { ms: 'Jumlah Pesanan', en: 'Total Orders' },
+  revenue_distribution: { ms: 'Agihan Hasil', en: 'Revenue Distribution' },
+
+  // Users Page
+  add_user: { ms: 'Tambah Pengguna', en: 'Add User' },
+  delete_reason_required: { ms: 'Sebab Padam (Wajib)', en: 'Delete Reason (Required)' },
+  ref_no_optional: { ms: 'No. Rujukan (Pilihan)', en: 'Reference No (Optional)' },
+  create_user_btn: { ms: 'Cipta Pengguna', en: 'Create User' },
+  staff_directory: { ms: 'Direktori Kakitangan', en: 'Staff Directory' },
+  loading_users: { ms: 'Memuatkan pengguna...', en: 'Loading users...' },
+  no_users_found: { ms: 'Tiada pengguna dijumpai dalam cawangan anda', en: 'No users found in your branch' },
+  name_col: { ms: 'Nama', en: 'Name' },
+  joined_col: { ms: 'Tarikh Sertai', en: 'Joined' },
+  actions_col: { ms: 'Tindakan', en: 'Actions' },
+  viewing_users_from: { ms: 'Melihat pengguna dari:', en: 'Viewing users from:' },
+  access_limited: { ms: 'Anda mempunyai akses terhad kepada pengurusan pengguna', en: 'You have limited access to user management' },
+  branch_admin_note: { ms: 'Akaun Admin hanya boleh mengurus pengguna dalam cawangan yang ditetapkan', en: 'Admin accounts can only manage users in their assigned branch' },
+
+  // CustomerManagement
+  edit_shop: { ms: 'Edit Kedai', en: 'Edit Shop' },
+  add_new_shop: { ms: 'Tambah Kedai Baru', en: 'Add New Shop' },
+  shop_list: { ms: 'Senarai Kedai', en: 'Shop List' },
+  search_shops: { ms: 'Cari kedai...', en: 'Search shops...' },
+  phone_number: { ms: 'Nombor Telefon', en: 'Phone Number' },
+  no_address: { ms: 'Tiada Alamat', en: 'No Address' },
+  delete_shop: { ms: 'Padam Kedai', en: 'Delete Shop' },
+  delete_shop_confirm: { ms: 'Adakah anda pasti untuk memadam', en: 'Are you sure you want to delete' }
 };
 
 interface LanguageContextType {

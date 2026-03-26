@@ -4,21 +4,33 @@ import { useState, useEffect } from 'react';
 import { Transaction, User, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { TrendingUp, Users, ShoppingBag, Globe, Filter } from 'lucide-react';
+import DateRangePicker, { DateRange } from '@/components/ui/DateRangePicker';
+import { useLanguage } from '@/context/LanguageContext';
 
 import UserManagement from '@/components/features/admin/UserManagement';
 
 export default function GlobalMonitorPage() {
+  const { t } = useLanguage();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [, setUsers] = useState<User[]>([]);
   const [, setCustomers] = useState<Customer[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<'all' | 'Kota Kinabalu' | 'Kinabatangan'>('all');
   const [loading, setLoading] = useState(true);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0],
+  });
 
   useEffect(() => {
     async function fetchData() {
+      setLoading(true);
       try {
+        const params = new URLSearchParams({ branch: 'all' });
+        if (dateRange.start) params.set('startDate', dateRange.start);
+        if (dateRange.end)   params.set('endDate',   dateRange.end);
+
         const [txRes, usersRes, customersRes] = await Promise.all([
-          fetch('/api/sales?branch=all'),
+          fetch(`/api/sales?${params.toString()}`),
           fetch('/api/users'),
           fetch('/api/customers')
         ]);
@@ -27,9 +39,9 @@ export default function GlobalMonitorPage() {
         const usersData = await usersRes.json();
         const customersData = await customersRes.json();
 
-        setTransactions(txData || []);
-        setUsers(usersData || []);
-        setCustomers(customersData || []);
+        setTransactions(Array.isArray(txData) ? txData : []);
+        setUsers(Array.isArray(usersData) ? usersData : []);
+        setCustomers(Array.isArray(customersData) ? customersData : []);
       } catch (error) {
         console.error('Failed to fetch data:', error);
       } finally {
@@ -38,7 +50,7 @@ export default function GlobalMonitorPage() {
     }
 
     fetchData();
-  }, []);
+  }, [dateRange]);
 
   // Calculate branch-specific metrics
   const kkTransactions = transactions.filter(t => t.branch === 'Kota Kinabalu');
@@ -50,8 +62,8 @@ export default function GlobalMonitorPage() {
   const kkOrders = kkTransactions.length;
   const kbOrders = kbTransactions.length;
 
-  const kkAgents = new Set(kkTransactions.map(t => t.salesmanId)).size;
-  const kbAgents = new Set(kbTransactions.map(t => t.salesmanId)).size;
+  const kkAgents = new Set(kkTransactions.map(t => t.salesmanId).filter(Boolean)).size;
+  const kbAgents = new Set(kbTransactions.map(t => t.salesmanId).filter(Boolean)).size;
 
   const totalRevenue = kkRevenue + kbRevenue;
   
@@ -74,27 +86,34 @@ export default function GlobalMonitorPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-8">
-      <div className="mb-8 flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-              <Globe className="text-blue-400" size={32} />
-              Global Monitor (Main Admin)
-          </h1>
-          <p className="text-slate-400">Comparative performance analysis: Kota Kinabalu vs Kinabatangan</p>
+      <div className="mb-8 flex flex-col gap-4">
+        <div className="flex justify-between items-start flex-wrap gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                <Globe className="text-blue-400" size={32} />
+                {t('global_monitor')} (Main Admin)
+            </h1>
+            <p className="text-slate-400">{t('global_monitor_subtitle')}</p>
+          </div>
+          
+          {/* Branch Filter Toggle */}
+          <div className="flex items-center gap-2 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
+            <Filter className="text-slate-400" size={16} />
+            <select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value as 'all' | 'Kota Kinabalu' | 'Kinabatangan')}
+              className="bg-transparent text-white text-sm border-none outline-none cursor-pointer"
+            >
+              <option value="all">{t('all_branches')}</option>
+              <option value="Kota Kinabalu">{t('kk_only')}</option>
+              <option value="Kinabatangan">{t('kb_only')}</option>
+            </select>
+          </div>
         </div>
-        
-        {/* Branch Filter Toggle */}
-        <div className="flex items-center gap-2 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
-          <Filter className="text-slate-400" size={16} />
-          <select
-            value={selectedBranch}
-            onChange={(e) => setSelectedBranch(e.target.value as 'all' | 'Kota Kinabalu' | 'Kinabatangan')}
-            className="bg-transparent text-white text-sm border-none outline-none cursor-pointer"
-          >
-            <option value="all">All Branches</option>
-            <option value="Kota Kinabalu">Kota Kinabalu Only</option>
-            <option value="Kinabatangan">Kinabatangan Only</option>
-          </select>
+
+        {/* Date Range Filter */}
+        <div className="bg-slate-900/50 px-4 py-3 rounded-xl border border-slate-800">
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
         </div>
       </div>
 
@@ -112,19 +131,19 @@ export default function GlobalMonitorPage() {
               
               <div className="space-y-6 relative z-10">
                   <div>
-                      <p className="text-slate-400 text-sm uppercase tracking-wider mb-1">Total Revenue</p>
+                      <p className="text-slate-400 text-sm uppercase tracking-wider mb-1">{t('total_revenue')}</p>
                       <p className="text-5xl font-bold text-white tracking-tight">{formatCurrency(kkRevenue)}</p>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800">
                       <div>
-                          <p className="text-slate-500 text-xs mb-1">Total Orders</p>
+                          <p className="text-slate-500 text-xs mb-1">{t('total_orders')}</p>
                           <p className="text-xl font-bold text-white flex items-center gap-2">
                               <ShoppingBag size={16} className="text-blue-500" /> {kkOrders}
                           </p>
                       </div>
                       <div>
-                          <p className="text-slate-500 text-xs mb-1">Active Agents</p>
+                          <p className="text-slate-500 text-xs mb-1">{t('active_agents')}</p>
                           <p className="text-xl font-bold text-white flex items-center gap-2">
                               <Users size={16} className="text-blue-500" /> {kkAgents}
                           </p>
@@ -145,19 +164,19 @@ export default function GlobalMonitorPage() {
               
               <div className="space-y-6 relative z-10">
                   <div>
-                      <p className="text-slate-400 text-sm uppercase tracking-wider mb-1">Total Revenue</p>
+                      <p className="text-slate-400 text-sm uppercase tracking-wider mb-1">{t('total_revenue')}</p>
                       <p className="text-5xl font-bold text-white tracking-tight">{formatCurrency(kbRevenue)}</p>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800">
                       <div>
-                          <p className="text-slate-500 text-xs mb-1">Total Orders</p>
+                          <p className="text-slate-500 text-xs mb-1">{t('total_orders')}</p>
                           <p className="text-xl font-bold text-white flex items-center gap-2">
                               <ShoppingBag size={16} className="text-emerald-500" /> {kbOrders}
                           </p>
                       </div>
                       <div>
-                          <p className="text-slate-500 text-xs mb-1">Active Agents</p>
+                          <p className="text-slate-500 text-xs mb-1">{t('active_agents')}</p>
                           <p className="text-xl font-bold text-white flex items-center gap-2">
                               <Users size={16} className="text-emerald-500" /> {kbAgents}
                           </p>
@@ -169,7 +188,7 @@ export default function GlobalMonitorPage() {
 
       {/* Comparison Bar */}
       <div className="bg-slate-900/50 p-8 rounded-3xl border border-slate-800">
-          <h3 className="text-lg font-bold text-white mb-6">Revenue Distribution</h3>
+          <h3 className="text-lg font-bold text-white mb-6">{t('revenue_distribution')}</h3>
           <div className="h-12 w-full bg-slate-800 rounded-full overflow-hidden flex relative">
               <div 
                   className="h-full bg-gradient-to-r from-blue-900 to-blue-500 flex items-center justify-center text-white font-bold text-sm transition-all duration-1000"

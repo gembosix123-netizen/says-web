@@ -62,10 +62,11 @@ export default function UserManagement({ enableCreation = true }: UserManagement
   const fetchCustomers = async () => {
       try {
           const res = await fetch('/api/customers');
-          const data = await res.json();
-          setCustomers(data);
+          const data = await res.json().catch(() => []);
+          setCustomers(Array.isArray(data) ? data : []);
       } catch (error) {
           console.error('Failed to fetch customers', error);
+          setCustomers([]);
       }
   };
 

@@ -1,5 +1,6 @@
 import AnalyticsDashboard from '@/components/features/admin/AnalyticsDashboard';
 import { getAdminAnalyticsData } from '@/lib/adminAnalyticsData';
+import AdminBranchHeader from '@/components/AdminBranchHeader';
 
 // Force dynamic rendering to ensure real-time data
 export const dynamic = 'force-dynamic';
@@ -10,13 +11,12 @@ export default async function KinabatanganPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-            <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
-            Kinabatangan Dashboard
-        </h1>
-        <p className="text-slate-400">Real-time sales monitoring for Kinabatangan branch.</p>
-      </div>
+      <AdminBranchHeader
+        titleKey="kb_dashboard_title"
+        subtitleKey="kb_dashboard_subtitle"
+        titleClassName="text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3"
+        icon={<span className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />}
+      />
       
       <AnalyticsDashboard 
         transactions={transactions} 

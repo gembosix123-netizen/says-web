@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useToast } from '@/components/ui/Toast';
+import { useLanguage } from '@/context/LanguageContext';
 import { Plus, Trash2, Key, AlertCircle } from 'lucide-react';
 
 type User = { id: string; username: string; role: string; name: string; branch?: string; created_at?: string };
@@ -22,6 +23,7 @@ export default function AdminUsersPage() {
     branch: 'Kota Kinabalu' 
   });
   const { addToast } = useToast();
+  const { t } = useLanguage();
 
   // Get current user from localStorage
   useEffect(() => {
@@ -139,19 +141,19 @@ export default function AdminUsersPage() {
 
   const canCreateUsers = currentUserRole === 'Main Admin' || currentUserRole === 'Admin';
   const accessInfo = currentUserRole === 'Admin' 
-    ? `Viewing users from: ${currentUserBranch}` 
-    : 'You have limited access to user management';
+    ? `${t('viewing_users_from')} ${currentUserBranch}` 
+    : t('access_limited');
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-white">User Management</h1>
+        <h1 className="text-3xl font-bold text-white">{t('user_management')}</h1>
         {canCreateUsers && (
           <button 
             onClick={() => setShowForm(!showForm)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors font-medium"
           >
-            <Plus size={20} /> Add User
+            <Plus size={20} /> {t('add_user')}
           </button>
         )}
       </div>
@@ -162,14 +164,14 @@ export default function AdminUsersPage() {
         <div className="text-sm">
           <p className="text-blue-400 font-medium">{accessInfo}</p>
           {currentUserRole === 'Admin' && (
-            <p className="text-slate-400 text-xs mt-1">Admin accounts can only manage users in their assigned branch</p>
+            <p className="text-slate-400 text-xs mt-1">{t('branch_admin_note')}</p>
           )}
         </div>
       </div>
 
       <div className="p-4 rounded-lg bg-slate-900 border border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Delete Reason (Required)</label>
+          <label className="block text-sm font-medium text-slate-300 mb-2">{t('delete_reason_required')}</label>
           <input
             value={deleteReason}
             onChange={(e) => setDeleteReason(e.target.value)}
@@ -178,7 +180,7 @@ export default function AdminUsersPage() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Reference No (Optional)</label>
+          <label className="block text-sm font-medium text-slate-300 mb-2">{t('ref_no_optional')}</label>
           <input
             value={deleteReferenceNo}
             onChange={(e) => setDeleteReferenceNo(e.target.value)}
@@ -191,10 +193,10 @@ export default function AdminUsersPage() {
       {/* Create User Form */}
       {showForm && canCreateUsers && (
         <div className="p-5 rounded-lg bg-slate-900 border border-slate-700">
-          <h3 className="text-lg font-semibold text-white mb-4">Register New User</h3>
+          <h3 className="text-lg font-semibold text-white mb-4">{t('register_user')}</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Full Name *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('full_name')} *</label>
               <input 
                 placeholder="e.g., Ali bin Muhammad" 
                 value={form.name} 
@@ -203,7 +205,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Username *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('username')} *</label>
               <input 
                 placeholder="e.g., ali_kk" 
                 value={form.username} 
@@ -212,7 +214,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Password *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('password')} *</label>
               <input 
                 type="password"
                 placeholder="Min. 6 characters" 
@@ -222,7 +224,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Role *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('user_role')} *</label>
               <select 
                 value={form.role} 
                 onChange={(e) => setForm({...form, role: e.target.value})} 
@@ -234,7 +236,7 @@ export default function AdminUsersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Branch/Area *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('user_branch')} *</label>
               <select 
                 value={form.branch} 
                 onChange={(e) => setForm({...form, branch: e.target.value})} 
@@ -251,13 +253,13 @@ export default function AdminUsersPage() {
                 onClick={createUser} 
                 className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-medium transition-colors"
               >
-                Create User
+                {t('create_user_btn')}
               </button>
               <button 
                 onClick={() => setShowForm(false)} 
                 className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg font-medium transition-colors"
               >
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </div>
@@ -266,22 +268,22 @@ export default function AdminUsersPage() {
 
       {/* Users Table */}
       <div className="p-5 rounded-lg bg-slate-900 border border-slate-700 overflow-hidden">
-        <h3 className="text-lg font-semibold text-white mb-4">Staff Directory</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('staff_directory')}</h3>
         {loading ? (
-          <div className="text-center py-8 text-slate-400">Loading users...</div>
+          <div className="text-center py-8 text-slate-400">{t('loading_users')}</div>
         ) : users.length === 0 ? (
-          <div className="text-center py-8 text-slate-400">No users found in your branch</div>
+          <div className="text-center py-8 text-slate-400">{t('no_users_found')}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-700">
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Name</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Username</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Role</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Branch</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Joined</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Actions</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">{t('name_col')}</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">{t('username')}</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">{t('user_role')}</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">{t('user_branch')}</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">{t('joined_col')}</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">{t('actions_col')}</th>
                 </tr>
               </thead>
               <tbody>

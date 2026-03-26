@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Store, Plus, Save, Trash2, Search, Edit, MapPin } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface Customer {
   id: string;
@@ -21,14 +22,24 @@ export default function CustomerManagement() {
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', address: '', branch: 'Kota Kinabalu' });
   const { addToast } = useToast();
+  const { t } = useLanguage();
 
   const fetchCustomers = async () => {
     try {
       const res = await fetch('/api/customers');
-      const data = await res.json();
-      setCustomers(data);
+      const data = await res.json().catch(() => []);
+
+      if (!res.ok) {
+        const message = typeof data?.error === 'string' ? data.error : 'Failed to load shop list';
+        setCustomers([]);
+        addToast(message, 'error');
+        return;
+      }
+
+      setCustomers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to fetch customers', error);
+      setCustomers([]);
       addToast('Failed to load shop list', 'error');
     }
   };
@@ -99,7 +110,8 @@ export default function CustomerManagement() {
       });
   };
 
-  const filteredCustomers = customers.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()));
+  const safeCustomers = Array.isArray(customers) ? customers : [];
+  const filteredCustomers = safeCustomers.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()));
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -109,26 +121,26 @@ export default function CustomerManagement() {
           <span className="bg-green-500/20 text-green-500 p-2 rounded-lg">
             {isEditing ? <Edit size={20} /> : <Plus size={20} />}
           </span>
-          {isEditing ? 'Edit Shop' : 'Add New Shop'}
+          {isEditing ? t('edit_shop') : t('add_new_shop')}
         </h2>
         
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <input
-            placeholder="Shop Name"
+            placeholder={t('shop_name')}
             value={form.name}
             onChange={e => setForm({ ...form, name: e.target.value })}
             className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
             required
           />
           <input
-            placeholder="Phone Number"
+            placeholder={t('phone_number')}
             value={form.phone}
             onChange={e => setForm({ ...form, phone: e.target.value })}
             className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
             required
           />
           <input
-            placeholder="Address"
+            placeholder={t('address')}
             value={form.address}
             onChange={e => setForm({ ...form, address: e.target.value })}
             className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
@@ -145,7 +157,7 @@ export default function CustomerManagement() {
           </select>
           <div className="flex gap-2">
             <button type="submit" className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2">
-                <Save size={18} /> {isEditing ? 'Update' : 'Save'}
+                <Save size={18} /> {isEditing ? t('update') : t('save')}
             </button>
             {isEditing && (
                 <button 
@@ -153,7 +165,7 @@ export default function CustomerManagement() {
                     onClick={() => { setIsEditing(null); setForm({ name: '', phone: '', address: '', branch: 'Kota Kinabalu' }); }}
                     className="px-4 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700"
                 >
-                    Cancel
+                    {t('cancel')}
                 </button>
             )}
           </div>
@@ -164,14 +176,14 @@ export default function CustomerManagement() {
       <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
         <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Store className="text-green-500" /> Shop List
+                <Store className="text-green-500" /> {t('shop_list')}
             </h2>
             <div className="relative w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                 <input 
                     value={filter}
                     onChange={e => setFilter(e.target.value)}
-                    placeholder="Search shops..."
+                    placeholder={t('search_shops')}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-white text-sm"
                 />
             </div>
@@ -183,9 +195,9 @@ export default function CustomerManagement() {
                     <div>
                         <h3 className="font-bold text-white">{customer.name}</h3>
                         <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
-                            <MapPin size={12} /> {customer.address || 'No Address'}
+                            <MapPin size={12} /> {customer.address || t('no_address')}
                         </p>
-                        <p className="text-xs text-slate-500 mt-1">Branch: {customer.branch || 'N/A'}</p>
+                        <p className="text-xs text-slate-500 mt-1">{t('user_branch')}: {customer.branch || 'N/A'}</p>
                         <p className="text-xs text-slate-500 mt-1">Tel: {customer.phone}</p>
                     </div>
                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -204,9 +216,9 @@ export default function CustomerManagement() {
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-5 shadow-2xl">
-            <h3 className="text-lg font-bold text-white">Delete Shop</h3>
+            <h3 className="text-lg font-bold text-white">{t('delete_shop')}</h3>
             <p className="text-sm text-slate-300 mt-2">
-              Are you sure you want to delete <span className="font-semibold text-white">{deleteTarget.name}</span>?
+              {t('delete_shop_confirm')} <span className="font-semibold text-white">{deleteTarget.name}</span>?
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -214,14 +226,14 @@ export default function CustomerManagement() {
                 onClick={() => setDeleteTarget(null)}
                 className="px-4 py-2 bg-slate-800 text-slate-200 rounded-lg hover:bg-slate-700"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleDelete}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
-                Delete
+                {t('clear')}
               </button>
             </div>
           </div>

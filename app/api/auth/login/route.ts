@@ -74,32 +74,6 @@ async function verifyPasswordWithMigration(
 
 export async function POST(request: Request) {
   try {
-    // Rate limiting check
-    const clientIp = getClientIp(request);
-    const rateLimitResult = await rateLimiters.login.check(clientIp, 'login');
-    
-    if (!rateLimitResult.success) {
-      const resetTime = rateLimitResult.resetAt.toLocaleTimeString('ms-MY', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-      
-      return NextResponse.json(
-        { 
-          error: rateLimitResult.blocked 
-            ? `Too many login attempts. Account temporarily locked. Try again at ${resetTime}` 
-            : `Too many attempts. Please try again in a few minutes.`,
-          resetAt: rateLimitResult.resetAt.toISOString(),
-        },
-        { 
-          status: 429,
-          headers: {
-            'Retry-After': String(Math.ceil((rateLimitResult.resetAt.getTime() - Date.now()) / 1000)),
-          },
-        }
-      );
-    }
-
     const body = await request.json();
 
     // Validate input with Zod
@@ -109,11 +83,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: errors[0] || 'Invalid input' }, { status: 400 });
     }
 
+    const clientIp = getClientIp(request);
     const username = validation.data.username.trim();
     const password = validation.data.password;
+    const rateLimitKey = `${clientIp}:${username.toLowerCase()}`;
+
+    // Rate limit per IP + username so one user's failed attempts do not lock everyone on the same network.
+    const rateLimitResult = await rateLimiters.login.check(rateLimitKey, 'login');
+
+    if (!rateLimitResult.success) {
+      const resetTime = rateLimitResult.resetAt.toLocaleTimeString('ms-MY', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      return NextResponse.json(
+        {
+          error: rateLimitResult.blocked
+            ? `Too many login attempts. Account temporarily locked. Try again at ${resetTime}`
+            : 'Too many attempts. Please try again in a few minutes.',
+          resetAt: rateLimitResult.resetAt.toISOString(),
+        },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.ceil((rateLimitResult.resetAt.getTime() - Date.now()) / 1000)),
+          },
+        }
+      );
+    }
+
 
     let users: Array<Record<string, unknown>> | null = null;
     let error: { message?: string } | null = null;
+    let localFallbackError: unknown = null;
 
     if (supabaseAdmin) {
       const primaryQuery = await supabaseAdmin
@@ -137,7 +140,7 @@ export async function POST(request: Request) {
         error = legacyQuery.error as { message?: string } | null;
       }
     } else {
-      error = { message: 'supabase admin unavailable' };
+      console.warn('[LOGIN] Supabase admin unavailable. Using local auth fallback.');
     }
 
     let user = users?.[0] as AuthUser | undefined;
@@ -148,16 +151,20 @@ export async function POST(request: Request) {
         const localUsers = await db.users.getAll();
         user = localUsers.find((u) => (u.username || '').toLowerCase() === username.toLowerCase()) as AuthUser | undefined;
       } catch (fallbackError) {
+        localFallbackError = fallbackError;
         console.error('Local auth fallback error:', fallbackError);
       }
     }
 
-    if (!user && error) {
+    if (!user && error && localFallbackError) {
       console.error('Supabase error:', error);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return NextResponse.json({ error: 'Authentication service unavailable' }, { status: 500 });
     }
 
     if (!user) {
+      if (error) {
+        console.warn('[LOGIN] Supabase lookup failed, but no matching fallback user was found:', error);
+      }
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
@@ -203,7 +210,7 @@ export async function POST(request: Request) {
     console.log('[LOGIN] Successful login for user:', username);
 
     // Reset rate limit on successful login
-    await rateLimiters.login.reset(clientIp, 'login');
+    await rateLimiters.login.reset(rateLimitKey, 'login');
 
     const normalizedRole = normalizeRole(user.role) || 'Sales';
     const displayName = user.name || user.full_name || user.username || 'User';

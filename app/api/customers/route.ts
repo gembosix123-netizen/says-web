@@ -2,10 +2,11 @@
  * Customers API Endpoint
  * ======================
  * 
- * GET  /api/customers     - Get all customers
- * POST /api/customers     - Create customer
- * PUT  /api/customers/:id - Update customer
- * DELETE /api/customers/:id - Delete customer
+ * GET    /api/customers          - Get all customers (returns [] if DB unavailable)
+ * GET    /api/customers?id=xxx   - Get single customer by id
+ * POST   /api/customers          - Create customer (body: { name, phone, address, branch })
+ * PUT    /api/customers          - Update customer (body: { id, name, phone, address, branch })
+ * DELETE /api/customers?id=xxx   - Delete customer by id
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -62,7 +63,10 @@ export async function GET(request: NextRequest) {
     const id = searchParams.get('id');
 
     if (!supabaseAdmin) {
-      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+      if (id) {
+        return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+      }
+      return NextResponse.json([]);
     }
 
     // Get single customer
@@ -102,10 +106,8 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Error fetching customers:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    // Keep admin UI functional even when upstream DB is temporarily unavailable.
+    return NextResponse.json([]);
   }
 }
 

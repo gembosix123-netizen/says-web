@@ -46,6 +46,10 @@ export default function NewSalePage() {
   const [searchCustomer, setSearchCustomer] = useState('');
   const [searchProduct, setSearchProduct] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [receiptNo, setReceiptNo] = useState('');
+  const [billingRefNo, setBillingRefNo] = useState('');
+  const [transferRefNo, setTransferRefNo] = useState('');
+  const [qrTxnRefNo, setQrTxnRefNo] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -111,6 +115,24 @@ export default function NewSalePage() {
   const handleSubmit = async () => {
     if (!selectedCustomer || cart.length === 0) return;
 
+    // Validate reference number per payment method
+    if (paymentMethod === 'cash' && !receiptNo.trim()) {
+      alert('Sila masukkan nombor resit untuk pembayaran tunai.');
+      return;
+    }
+    if (paymentMethod === 'bill_to_bill' && !billingRefNo.trim()) {
+      alert('Sila masukkan nombor invois/rujukan kredit untuk bill-to-bill.');
+      return;
+    }
+    if (paymentMethod === 'bank_transfer' && !transferRefNo.trim()) {
+      alert('Sila masukkan nombor rujukan pemindahan bank.');
+      return;
+    }
+    if (paymentMethod === 'qr_code' && !qrTxnRefNo.trim()) {
+      alert('Sila masukkan nombor transaksi QR.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const salePayload = {
@@ -118,6 +140,10 @@ export default function NewSalePage() {
         customer_name: selectedCustomer.name,
         total_amount: totalAmount,
         payment_method: paymentMethod,
+        receipt_no: paymentMethod === 'cash' ? receiptNo : null,
+        billing_ref_no: paymentMethod === 'bill_to_bill' ? billingRefNo : null,
+        transfer_ref_no: paymentMethod === 'bank_transfer' ? transferRefNo : null,
+        qr_txn_ref_no: paymentMethod === 'qr_code' ? qrTxnRefNo : null,
         return_amount: 0,
         exchange_amount: 0,
         foc_amount: 0,
@@ -159,6 +185,10 @@ export default function NewSalePage() {
       setSearchCustomer('');
       setSearchProduct('');
       setPaymentMethod('cash');
+      setReceiptNo('');
+      setBillingRefNo('');
+      setTransferRefNo('');
+      setQrTxnRefNo('');
 
       // Redirect to sales landing page
       router.replace('/sales');
@@ -349,24 +379,85 @@ export default function NewSalePage() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-white/60 text-sm mb-2">Kaedah Pembayaran</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {['cash', 'card', 'transfer'].map((method) => (
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { value: 'cash', label: 'Tunai' },
+                        { value: 'bill_to_bill', label: 'Kredit (Bill-to-Bill)' },
+                        { value: 'bank_transfer', label: 'Bank Transfer' },
+                        { value: 'qr_code', label: 'QR Code' },
+                      ].map((m) => (
                         <button
-                          key={method}
-                          className={`p-3 rounded-lg border-2 transition-all ${
-                            paymentMethod === method
+                          key={m.value}
+                          className={`p-3 rounded-lg border-2 transition-all text-sm ${
+                            paymentMethod === m.value
                               ? 'border-emerald-500 bg-emerald-500/20 text-white'
                               : 'border-slate-700 bg-slate-800 text-white/60 hover:border-slate-600'
                           }`}
-                          onClick={() => setPaymentMethod(method)}
+                          onClick={() => setPaymentMethod(m.value)}
                         >
-                          {method === 'cash' && 'Tunai'}
-                          {method === 'card' && 'Kad'}
-                          {method === 'transfer' && 'Transfer'}
+                          {m.label}
                         </button>
                       ))}
                     </div>
                   </div>
+
+                  {/* Conditional reference number fields */}
+                  {paymentMethod === 'cash' && (
+                    <div>
+                      <label className="block text-white/60 text-sm mb-1">
+                        No. Resit <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={receiptNo}
+                        onChange={(e) => setReceiptNo(e.target.value)}
+                        placeholder="cth: CB-KK-20260326-001"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
+                  {paymentMethod === 'bill_to_bill' && (
+                    <div>
+                      <label className="block text-white/60 text-sm mb-1">
+                        No. Invois / Rujukan Kredit <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={billingRefNo}
+                        onChange={(e) => setBillingRefNo(e.target.value)}
+                        placeholder="cth: B2B-KK-202603-001"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
+                  {paymentMethod === 'bank_transfer' && (
+                    <div>
+                      <label className="block text-white/60 text-sm mb-1">
+                        No. Rujukan Pemindahan <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={transferRefNo}
+                        onChange={(e) => setTransferRefNo(e.target.value)}
+                        placeholder="cth: TRF-20260326-001"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
+                  {paymentMethod === 'qr_code' && (
+                    <div>
+                      <label className="block text-white/60 text-sm mb-1">
+                        No. Transaksi QR <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={qrTxnRefNo}
+                        onChange={(e) => setQrTxnRefNo(e.target.value)}
+                        placeholder="cth: QR-20260326-001"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
 
                   <div className="bg-slate-800 rounded-lg p-4">
                     <h3 className="font-semibold text-white mb-3">Ringkasan Pesanan</h3>

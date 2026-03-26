@@ -43,9 +43,12 @@ export default function OrderManagement() {
                 fetch('/api/customers'),
                 fetch('/api/products')
             ]);
-            setOrders(await orderRes.json());
-            setCustomers(await custRes.json());
-            setProducts(await prodRes.json());
+            const ordersData = await orderRes.json().catch(() => []);
+            const customersData = await custRes.json().catch(() => []);
+            const productsData = await prodRes.json().catch(() => []);
+            setOrders(Array.isArray(ordersData) ? ordersData : []);
+            setCustomers(Array.isArray(customersData) ? customersData : []);
+            setProducts(Array.isArray(productsData) ? productsData : []);
             setLoading(false);
         } catch (error) {
             console.error('Failed to fetch data', error);

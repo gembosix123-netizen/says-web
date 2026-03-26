@@ -133,6 +133,47 @@ export interface Settlement {
   verifiedAt?: string;
 }
 
+export interface MonthlyReportDailyEntry {
+  date: string;
+  amount: number;
+  transactions: number;
+  branch: string;
+}
+
+export interface MonthlyReportBranchSummary {
+  branch: string;
+  totalRevenue: number;
+  transactionCount: number;
+  avgTransaction: number;
+  topProduct: string;
+}
+
+export interface MonthlyReportTopProduct {
+  name: string;
+  quantity: number;
+}
+
+export interface MonthlyReportSnapshot {
+  month: string;
+  totalRevenue: number;
+  totalTransactions: number;
+  dailyData: MonthlyReportDailyEntry[];
+  branchSummaries: MonthlyReportBranchSummary[];
+  topProducts: MonthlyReportTopProduct[];
+}
+
+export interface MonthlyReportHistory {
+  id: string;
+  month: string;
+  branch: string;
+  status: 'draft' | 'closed';
+  submittedAt: string;
+  submittedBy: string;
+  submittedById?: string;
+  notes?: string;
+  snapshot: MonthlyReportSnapshot;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
