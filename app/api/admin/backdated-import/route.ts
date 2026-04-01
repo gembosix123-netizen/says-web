@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { logAuditEvent } from '@/lib/audit';
-import { getCustomersTableByBranch } from '@/lib/branchPermissions';
+import { Branch, getCustomersTableByBranch } from '@/lib/branchPermissions';
 
 const VALID_PAYMENT_METHODS = ['cash', 'bill_to_bill', 'bank_transfer', 'qr_code', 'card', 'ewallet'];
 const REQUIRED_COLUMNS = ['month', 'branch', 'payment_method', 'amount'];
@@ -26,6 +26,79 @@ interface RowError {
   row: number;
   field: string;
   message: string;
+}
+
+function normalizeCustomerKey(name: string): string {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function extractCustomerFromNotes(notes?: string | null): string {
+  const m = String(notes || '').match(/\[Customer:\s*(.*?)\]/i);
+  return m?.[1]?.trim() || '';
+}
+
+async function reconcileBackdatedCustomers(branches: string[]): Promise<number> {
+  if (!supabaseAdmin || branches.length === 0) return 0;
+
+  let reconciled = 0;
+
+  for (const branch of branches) {
+    const validBranch = getValidBranch(branch);
+    if (!validBranch) continue;
+
+    const customersTable = getCustomersTableByBranch(validBranch);
+    const { data: customers } = await supabaseAdmin
+      .from(customersTable)
+      .select('id, name');
+
+    if (!customers || customers.length === 0) continue;
+
+    const customerMap: Record<string, string> = {};
+    customers.forEach((c) => {
+      const key = normalizeCustomerKey(c.name);
+      if (key) customerMap[key] = c.id;
+    });
+
+    const { data: unmatchedTx } = await supabaseAdmin
+      .from('sales_transactions')
+      .select('id, notes')
+      .eq('branch', validBranch)
+      .eq('is_backdated', true)
+      .is('customer_id', null)
+      .ilike('notes', '%[Customer:%');
+
+    if (!unmatchedTx || unmatchedTx.length === 0) continue;
+
+    for (const tx of unmatchedTx) {
+      const rawName = extractCustomerFromNotes(tx.notes);
+      const matchedCustomerId = rawName ? customerMap[normalizeCustomerKey(rawName)] : undefined;
+      if (!matchedCustomerId) continue;
+
+      const cleanedNotes = String(tx.notes || '')
+        .replace(/\s*\[Customer:\s*.*?\]\s*/i, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim() || 'Backdated import';
+
+      const { error: updateError } = await supabaseAdmin
+        .from('sales_transactions')
+        .update({ customer_id: matchedCustomerId, notes: cleanedNotes })
+        .eq('id', tx.id);
+
+      if (!updateError) reconciled += 1;
+    }
+  }
+
+  return reconciled;
+}
+
+function getValidBranch(branch?: string): Branch | undefined {
+  if (branch === 'Kota Kinabalu' || branch === 'Kinabatangan' || branch === 'HQ') {
+    return branch;
+  }
+
+  return undefined;
 }
 
 function validateRow(row: ImportRow, rowIndex: number): RowError[] {
@@ -98,8 +171,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Tiada data untuk diimport' }, { status: 400 });
     }
 
-    if (rows.length > 500) {
-      return NextResponse.json({ error: 'Maksimum 500 baris setiap import' }, { status: 400 });
+    if (rows.length > 2000) {
+      return NextResponse.json({ error: 'Maksimum 2000 baris setiap import' }, { status: 400 });
     }
 
     // Validate headers
@@ -117,6 +190,20 @@ export async function POST(request: NextRequest) {
       const errs = validateRow(row, idx + 1);
       allErrors.push(...errs);
     });
+
+    // Extra check: Admin cannot import data for a different branch
+    if (role === 'Admin' && currentUser.branch) {
+      rows.forEach((row, idx) => {
+        const rowBranch = String(row.branch || '').trim();
+        if (rowBranch && rowBranch !== currentUser.branch) {
+          allErrors.push({
+            row: idx + 1,
+            field: 'branch',
+            message: `Anda hanya boleh import data untuk cawangan ${currentUser.branch}. Baris ini mengandungi cawangan "${rowBranch}".`,
+          });
+        }
+      });
+    }
 
     if (allErrors.length > 0) {
       return NextResponse.json({
@@ -156,7 +243,7 @@ export async function POST(request: NextRequest) {
     );
     const customerNameToId: Record<string, string> = {};
     if (uniqueCustomerNames.length > 0) {
-      const customersTable = getCustomersTableByBranch(currentUser.branch);
+      const customersTable = getCustomersTableByBranch(getValidBranch(currentUser.branch));
       const { data: customerRows } = await supabaseAdmin
         .from(customersTable)
         .select('id, name')
@@ -166,6 +253,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // For non-Main Admin, force all records to the user's own branch regardless
+    // of what is in the CSV — prevents cross-branch data injection.
+    const enforcedBranch = role === 'Main Admin' ? null : (currentUser.branch ?? null);
+
     const records = rows.map((row) => {
       const method = String(row.payment_method).trim().toLowerCase();
       const monthStr = String(row.month).trim(); // YYYY-MM
@@ -173,12 +264,21 @@ export async function POST(request: NextRequest) {
       const resolvedCustomerId = customerName
         ? (customerNameToId[customerName.toLowerCase()] ?? null)
         : null;
+      // Use the ref_no that was set by the client (already prefixed with BACK-)
+      const refValue = String(row.receipt_no || row.billing_ref_no || row.transfer_ref_no || row.qr_txn_ref_no || '').trim()
+        || `BACK-${monthStr}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+      // Fix 7: use actual per-row date if provided, else fall back to 1st of month
+      const txDate = (row as ImportRow & { transaction_date?: string }).transaction_date
+        ? `${(row as ImportRow & { transaction_date?: string }).transaction_date}T00:00:00.000Z`
+        : `${monthStr}-01T00:00:00.000Z`;
+      // Use enforcedBranch for Admin; Main Admin can specify per-row branch from CSV
+      const rowBranch = enforcedBranch ?? String(row.branch).trim();
       return {
-        invoice: `BACK-${String(row.branch).trim().toUpperCase().replace(/\s+/g, '_')}-${monthStr}-${String(row.receipt_no || row.billing_ref_no || row.transfer_ref_no || row.qr_txn_ref_no || Math.random().toString(36).slice(2, 7).toUpperCase())}`,
-        branch: String(row.branch).trim(),
+        invoice: refValue,
+        branch: rowBranch,
         user_id: currentUser.id,
         customer_id: resolvedCustomerId,
-        transaction_date: `${monthStr}-01T00:00:00.000Z`,
+        transaction_date: txDate,
         subtotal_amount: Number(row.amount),
         grand_total: Number(row.amount),
         payment_method: method,
@@ -229,12 +329,18 @@ export async function POST(request: NextRequest) {
       metadata: { rows_imported: inserted?.length ?? rows.length },
     });
 
+    // Auto-reconcile previously unmatched backdated rows in relevant branch(es).
+    // This lets newly-added customers get linked to old imported transactions.
+    const targetBranches = Array.from(new Set(records.map((r) => r.branch).filter(Boolean)));
+    const reconciled = await reconcileBackdatedCustomers(targetBranches);
+
     return NextResponse.json({
       mode: 'confirm',
       valid: true,
       total: rows.length,
       imported: inserted?.length ?? rows.length,
-      message: `${inserted?.length ?? rows.length} rekod berjaya diimport ke database.`,
+      reconciled,
+      message: `${inserted?.length ?? rows.length} rekod berjaya diimport ke database.${reconciled > 0 ? ` ${reconciled} rekod lama berjaya dipadankan semula dengan customer.` : ''}`,
     });
   } catch (error) {
     console.error('Backdated import error:', error);
@@ -278,7 +384,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ customers: allCustomers });
   } else {
     // Admin sees only their branch customers
-    const customersTable = getCustomersTableByBranch(currentUser.branch);
+    const customersTable = getCustomersTableByBranch(getValidBranch(currentUser.branch));
     const { data } = await supabaseAdmin
       .from(customersTable)
       .select('id, name, branch')

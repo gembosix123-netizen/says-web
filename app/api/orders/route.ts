@@ -35,12 +35,22 @@ import { logAuditEvent } from '@/lib/audit';
 
 export async function GET(request: NextRequest) {
   try {
+    // Authentication required — all roles with Sales level or above
+    const { user: currentUser, error: authError } = await requireAuth(request, 'Sales');
+    if (authError) return authError;
+
     const searchParams = request.nextUrl.searchParams;
     const userId = searchParams.get('userId');
-    const branch = searchParams.get('branch');
+    let branch = searchParams.get('branch');
     const customerId = searchParams.get('customerId');
     const status = searchParams.get('status');
     const id = searchParams.get('id');
+
+    // Branch enforcement: non-Main Admin can only see their own branch
+    const normalizedRole = currentUser!.role;
+    if (normalizedRole !== 'Main Admin') {
+      branch = currentUser!.branch ?? branch;
+    }
 
     // Get single transaction
     if (id) {
@@ -51,13 +61,20 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         );
       }
+      // Ensure non-Main Admin can only see transactions for their branch
+      if (normalizedRole !== 'Main Admin' && transaction.branch && transaction.branch !== currentUser!.branch) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
       return NextResponse.json(toApiResponse(transaction));
     }
 
     // Get transactions by user
     if (userId) {
       const transactions = await getTransactionsByUser(userId);
-      return NextResponse.json(toApiResponse(transactions));
+      const filtered = normalizedRole !== 'Main Admin'
+        ? transactions.filter((t) => !t.branch || t.branch === currentUser!.branch)
+        : transactions;
+      return NextResponse.json(toApiResponse(filtered));
     }
 
     // Get transactions by branch
@@ -69,16 +86,30 @@ export async function GET(request: NextRequest) {
     // Get transactions by customer
     if (customerId) {
       const transactions = await getTransactionsByCustomer(customerId);
-      return NextResponse.json(toApiResponse(transactions));
+      const filtered = normalizedRole !== 'Main Admin'
+        ? transactions.filter((t) => !t.branch || t.branch === currentUser!.branch)
+        : transactions;
+      return NextResponse.json(toApiResponse(filtered));
     }
 
     // Get transactions by status
     if (status) {
       const transactions = await getTransactionsByStatus(status);
+      const filtered = normalizedRole !== 'Main Admin'
+        ? transactions.filter((t) => !t.branch || t.branch === currentUser!.branch)
+        : transactions;
+      return NextResponse.json(toApiResponse(filtered));
+    }
+
+    // Main Admin only — fetch all transactions
+    if (normalizedRole !== 'Main Admin') {
+      if (!currentUser!.branch) {
+        return NextResponse.json({ error: 'Branch not set for this user' }, { status: 400 });
+      }
+      const transactions = await getTransactionsByBranch(currentUser!.branch);
       return NextResponse.json(toApiResponse(transactions));
     }
 
-    // Get all transactions
     const transactions = await getTransactions();
     return NextResponse.json(toApiResponse(transactions));
 

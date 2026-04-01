@@ -1,0 +1,293 @@
+npm run migrate:firestorenpm run migrate:firestorePANDUAN RINGKAS GUNA WEBSITE SAYS
+Untuk dihantar dalam WhatsApp
+
+==============================
+1. TUJUAN SISTEM
+==============================
+SAYS ialah sistem untuk urus kerja jualan, lawatan kedai, audit, pelanggan, produk, laporan, dan semakan operasi harian.
+
+Sistem ini digunakan oleh:
+- Main Admin
+- Admin
+- Sales Staff
+- Merchandiser
+
+
+==============================
+2. CARA LOG MASUK
+==============================
+1. Buka link website SAYS.
+2. Masukkan username.
+3. Masukkan password.
+4. Klik Sign In.
+5. Sistem akan bawa anda ke paparan yang ikut peranan masing-masing.
+
+Nota:
+- Kalau username atau password salah, sistem akan keluar mesej ralat.
+- Kalau tidak boleh masuk, hubungi admin sistem untuk reset akaun.
+
+
+==============================
+3. PANDUAN UNTUK ADMIN
+==============================
+
+A. Apa tugas utama admin
+Admin biasanya guna sistem untuk:
+- Semak dashboard dan prestasi jualan
+- Tengok live sales atau sejarah jualan
+- Semak orders
+- Urus produk
+- Urus pelanggan
+- Semak laporan bulanan atau mingguan
+- Semak expenses staff
+- Buat import data lama jika perlu
+
+
+B. Langkah guna admin panel
+
+1. Masuk ke Admin Panel
+- Selepas login, admin akan masuk ke halaman admin.
+- Di sebelah kiri ada menu utama.
+
+2. Dashboard / Overview
+- Guna halaman ini untuk tengok ringkasan prestasi semasa.
+- Biasanya ada statistik jualan, produk, customer, dan trend operasi.
+- Sesuai untuk semakan cepat setiap pagi dan setiap petang.
+
+3. Orders
+- Buka menu Orders.
+- Semak pesanan yang telah dimasukkan oleh staff.
+- Pastikan maklumat customer, item, jumlah, dan bayaran betul.
+- Buat semakan susulan kalau ada order yang belum lengkap.
+
+4. Products
+- Buka menu Products.
+- Tambah produk baru jika perlu.
+- Kemaskini harga, nama produk, kategori, atau maklumat berkaitan.
+- Buang produk yang tidak lagi digunakan jika memang dibenarkan oleh operasi.
+- Pastikan harga sentiasa betul supaya staff tidak tersalah caj customer.
+
+5. Customers
+- Buka menu Customers.
+- Tambah customer baru.
+- Kemaskini nama kedai, nombor telefon, alamat, kawasan, atau maklumat lain.
+- Pastikan area customer diisi dengan betul kerana staff guna area ini semasa kerja harian.
+
+6. Loading / Van Loading
+- Guna menu ini untuk semak stok keluar masuk yang berkait dengan van atau operasi jualan.
+- Pastikan jumlah barang yang dimuatkan sama dengan rekod sistem.
+
+7. Live Sales
+- Guna untuk pantau jualan yang sedang direkodkan dalam sistem.
+- Sesuai untuk pemantauan semasa waktu operasi.
+
+8. Reports dan Weekly Reports
+- Guna Reports untuk lihat laporan bulanan.
+- Guna Weekly Reports untuk semak prestasi mingguan.
+- Boleh guna data ini untuk meeting, review branch, dan pemantauan target.
+
+9. Expenses
+- Buka menu Expenses untuk semak tuntutan atau perbelanjaan staff.
+- Pastikan amaun, kategori, tarikh, dan gambar resit lengkap.
+- Kalau ada yang meragukan, minta staff semak semula.
+
+10. Backdated Import
+- Guna menu ini hanya jika mahu masukkan data lama.
+- Muat turun template jika perlu.
+- Isi data ikut format yang ditetapkan.
+- Buat semakan terlebih dahulu.
+- Selepas yakin betul, baru confirm import.
+- Elakkan import dua kali untuk data yang sama.
+
+11. Database / Audit / User Management
+- Gunakan hanya oleh admin yang diberi kebenaran.
+- Bahagian ini sensitif kerana melibatkan data sistem, rekod audit, atau akaun pengguna.
+- Jangan ubah tanpa tujuan yang jelas.
+
+
+C. Amalan kerja admin yang disyorkan
+- Semak dashboard pada awal hari.
+- Semak orders dan live sales pada waktu operasi.
+- Semak expenses dan laporan pada hujung hari atau hujung minggu.
+- Pastikan data customer dan produk sentiasa dikemas kini.
+- Jangan kongsi password akaun admin dengan orang lain.
+
+
+==============================
+4. PANDUAN UNTUK SALES STAFF
+==============================
+
+A. Mula kerja setiap hari
+1. Login ke sistem.
+2. Masuk ke Sales & Merchandiser Portal.
+3. Pilih Kawasan Hari Ini.
+4. Pastikan kawasan yang dipilih betul sebelum mula buat jualan atau lawatan.
+
+Kenapa perlu pilih kawasan:
+- Supaya kerja harian ikut kawasan sebenar.
+- Memudahkan semakan customer, lawatan, dan laporan.
+
+
+B. Cara buat jualan baru
+1. Buka modul Sales.
+2. Klik Jualan Baru.
+3. Pilih customer.
+4. Tambah produk ke dalam senarai jualan.
+5. Ubah kuantiti jika perlu.
+6. Semak jumlah bayaran keseluruhan.
+7. Pilih kaedah bayaran.
+8. Isi nombor rujukan jika diminta.
+9. Muat naik atau ambil gambar bukti bayaran.
+10. Klik submit atau simpan jualan.
+
+Perkara penting semasa buat jualan:
+- Pastikan customer yang dipilih betul.
+- Pastikan item dan kuantiti betul.
+- Semak harga sebelum hantar.
+- Semua jualan perlukan bukti bayaran bergambar.
+- Jangan terus submit kalau masih ada maklumat yang belum lengkap.
+
+
+C. Kaedah bayaran yang biasa ada
+- Cash / Tunai
+- Bill to Bill / Kredit
+- Bank Transfer
+- QR Code
+- Kad
+
+Nasihat:
+- Pilih kaedah bayaran yang betul.
+- Isi nombor rujukan mengikut jenis bayaran.
+- Pastikan gambar bukti jelas dan tidak kabur.
+
+
+D. Sejarah Jualan
+- Guna menu Sejarah Jualan untuk lihat rekod lama.
+- Boleh cari ikut customer, tarikh, atau transaksi.
+- Boleh export CSV jika diperlukan oleh penyelia atau admin.
+
+
+E. Laporan Harian
+- Guna menu Laporan Harian selepas selesai kerja harian.
+- Semak semua jualan hari tersebut.
+- Pastikan jumlah cash, transfer, dan kredit adalah betul.
+- Lengkapkan dokumen atau bukti yang diminta.
+- Hantar laporan hanya selepas semuanya lengkap.
+
+
+F. Expenses Saya
+- Jika ada belanja kerja seperti minyak, tol, parking, makan, atau lain-lain, buka bahagian Expenses Saya.
+- Klik Tambah Expense.
+- Isi tarikh, kategori, jumlah, dan keterangan jika perlu.
+- Wajib masukkan gambar resit.
+- Hantar permohonan selepas semak semula.
+
+Penting:
+- Jangan hantar expense tanpa resit.
+- Pastikan jumlah yang dimasukkan sama seperti resit.
+
+
+==============================
+5. PANDUAN UNTUK MERCHANDISER
+==============================
+
+A. Fungsi modul merchandiser
+Modul ini digunakan untuk lawatan kedai, audit keadaan produk, ambil gambar, dan simpan rekod lawatan.
+
+
+B. Cara buat lawatan kedai
+1. Login ke sistem.
+2. Dari portal utama, pilih Merchandiser.
+3. Pilih menu untuk lawatan atau visit.
+4. Pilih kedai yang hendak dilawati.
+5. Buat check-in.
+6. Lengkapkan audit checklist.
+7. Ambil gambar yang diperlukan.
+8. Semak ringkasan lawatan.
+9. Submit lawatan.
+
+
+C. Apa yang perlu diberi perhatian semasa lawatan
+- Pastikan kedai yang dipilih betul.
+- Jangan skip checklist audit.
+- Ambil gambar yang jelas.
+- Pastikan bukti lawatan lengkap sebelum submit.
+- Semak semula ringkasan sebelum hantar.
+
+
+D. History Lawatan
+- Guna menu History untuk lihat lawatan yang sudah dibuat.
+- Sesuai untuk semakan semula jika supervisor minta bukti atau rekod.
+
+
+==============================
+6. MASALAH BIASA DAN CARA ATASI
+==============================
+
+1. Tidak boleh login
+Punca:
+- Username atau password salah
+- Akaun tidak aktif
+
+Cara atasi:
+- Cuba semak semula username dan password
+- Hubungi admin sistem
+
+
+2. Tidak boleh submit jualan
+Punca:
+- Customer belum pilih
+- Produk belum dimasukkan
+- Kaedah bayaran belum dipilih
+- Nombor rujukan belum lengkap
+- Gambar bukti bayaran belum dimuat naik
+
+Cara atasi:
+- Semak satu per satu semua bahagian sebelum submit
+
+
+3. Expense tidak boleh dihantar
+Punca:
+- Jumlah tidak diisi
+- Gambar resit tiada
+
+Cara atasi:
+- Isi jumlah yang betul
+- Masukkan gambar resit yang jelas
+
+
+4. Laporan harian tidak lengkap
+Punca:
+- Ada data jualan belum lengkap
+- Dokumen atau bukti belum dimasukkan
+
+Cara atasi:
+- Semak semula semua transaksi hari itu
+- Lengkapkan semua bukti yang diminta
+
+
+==============================
+7. PERATURAN PENGGUNAAN SISTEM
+==============================
+- Guna akaun sendiri sahaja.
+- Jangan kongsi password.
+- Pastikan semua data dimasukkan dengan betul.
+- Jangan buat duplicate entry.
+- Semak dahulu sebelum submit.
+- Kalau tersilap masuk data, maklumkan admin secepat mungkin.
+
+
+==============================
+8. PENUTUP
+==============================
+Ringkasnya:
+- Admin fokus kepada pemantauan, semakan, kemas kini data, dan laporan.
+- Sales staff fokus kepada jualan, laporan harian, dan expense.
+- Merchandiser fokus kepada lawatan kedai, audit, dan bukti bergambar.
+
+Kalau semua pengguna ikut langkah ini, data dalam sistem akan lebih kemas, mudah disemak, dan kurang kesilapan.
+
+Jika mahu, panduan ini juga boleh dipecahkan lagi kepada:
+1. Versi khas Admin sahaja
+2. Versi khas Sales Staff sahaja
+3. Versi khas Merchandiser sahaja

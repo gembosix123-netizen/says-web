@@ -231,6 +231,17 @@ export async function GET(request: NextRequest) {
         acc[customer.id] = customer.name;
         return acc;
       }, {});
+
+      // Fallback: query the other branch table for any unresolved customers
+      const unresolvedIds = customerIds.filter((id) => !customersById[id]);
+      if (unresolvedIds.length > 0) {
+        const otherTable = customersTable === 'customers_kb' ? 'customers_kk' : 'customers_kb';
+        const { data: otherRows } = await supabaseAdmin
+          .from(otherTable)
+          .select('id,name')
+          .in('id', unresolvedIds);
+        (otherRows || []).forEach((c) => { customersById[c.id] = c.name; });
+      }
     }
 
     let usersById: Record<string, string> = {};
@@ -398,6 +409,28 @@ export async function POST(request: NextRequest) {
 
     const validatedData = validation.data;
 
+    // ── Customer ownership check ──
+    // Sales role can only sell to their own customers or unassigned (company) customers
+    if (role === 'Sales' && validatedData.customer_id) {
+      const customersTable = getCustomersTableByBranch(currentUser.branch as Branch | undefined);
+      const { data: custRow } = await supabaseAdmin
+        .from(customersTable)
+        .select('assigned_to')
+        .eq('id', validatedData.customer_id)
+        .maybeSingle();
+
+      if (
+        custRow &&
+        custRow.assigned_to &&
+        custRow.assigned_to !== currentUser.id
+      ) {
+        return NextResponse.json(
+          { error: 'Pelanggan ini milik salesman lain. Anda tidak boleh buat jualan kepada pelanggan ini.' },
+          { status: 403 }
+        );
+      }
+    }
+
     const invoice = validatedData.invoice?.trim() || generateInvoice(branch);
     const isCredit = validatedData.payment_method === 'bill_to_bill';
     const requestedQuantities = validatedData.items.reduce<Record<string, number>>((acc, item) => {
@@ -463,6 +496,7 @@ export async function POST(request: NextRequest) {
     const saleData: Record<string, unknown> = {
       invoice,
       branch: validatedData.branch,
+      area: body.area?.trim() || null,
       user_id: currentUser.id,
       customer_id: validatedData.customer_id || null,
       transaction_date: new Date().toISOString(),

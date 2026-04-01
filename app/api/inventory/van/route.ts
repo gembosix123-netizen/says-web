@@ -81,17 +81,46 @@ export async function GET(request: NextRequest) {
     const products = await getActiveProducts();
     const productsById = new Map(products.map((product) => [product.id, product]));
 
+    // Load branch/salesman price overrides from Supabase
+    let priceOverrides: Record<string, number> = {};
+    if (supabaseAdmin) {
+      // Priority 1: salesman-specific price
+      const { data: salesmanPrices } = await supabaseAdmin
+        .from('product_prices')
+        .select('product_id, price')
+        .eq('salesman_id', userId);
+
+      // Priority 2: branch-level price
+      const { data: branchPrices } = user.branch
+        ? await supabaseAdmin
+            .from('product_prices')
+            .select('product_id, price')
+            .eq('branch', user.branch)
+            .is('salesman_id', null)
+        : { data: [] };
+
+      // Apply branch prices first, then salesman prices override on top
+      for (const row of branchPrices || []) {
+        priceOverrides[row.product_id] = toSafeNumber(row.price);
+      }
+      for (const row of salesmanPrices || []) {
+        priceOverrides[row.product_id] = toSafeNumber(row.price);
+      }
+    }
+
     const vanProducts = Object.entries(sanitizedItems)
       .filter(([, quantity]) => quantity > 0)
       .map(([productId, quantity]) => {
         const product = productsById.get(productId);
         if (!product) return null;
 
+        const effectivePrice = priceOverrides[productId] ?? toSafeNumber(product.price);
+
         return {
           id: product.id,
           name: product.name,
           unit: product.unit || 'unit',
-          price: toSafeNumber(product.price),
+          price: effectivePrice,
           stock: quantity,
         };
       })

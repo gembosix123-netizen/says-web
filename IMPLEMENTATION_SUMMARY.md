@@ -1,8 +1,82 @@
-# SAYS 2.0 - PREMIUM DARK MODE IMPLEMENTATION SUMMARY
+# SAYS 2.0 — Implementation Summary
+
+> **Last updated:** April 1, 2026  
+> This document covers all implementation phases from the initial design system through the full production feature set.
+
+---
+
+## Phase Summary
+
+| Phase | Scope | Status |
+|---|---|---|
+| Phase 1 | Premium Dark Mode Design System & Core Components | ✅ Complete |
+| Phase 2 | Security — Rate Limiting, bcrypt, RBAC | ✅ Complete |
+| Phase 3 | Firestore Architecture & Migration | ✅ Complete |
+| Phase 4 | Branch Permissions & Multi-Branch Support | ✅ Complete |
+| Phase 5 | Merchandiser Module (Store Visits, Product Audit) | ✅ Complete |
+| Phase 6 | Audit Center & Full Audit Trail | ✅ Complete |
+| Phase 7 | Customer Branch Isolation (customers_kb / customers_kk) | ✅ Complete |
+| Phase 8 | Expenses, District Filtering, Inventory Movements, Day-End Archive | ✅ Complete |
+| Phase 9 | Sales Model Consolidation (sales_transactions + branch VIEWs) | ✅ Complete |
+| Phase 10 | Customer Ownership & Handover System | ✅ Complete |
+| Phase 11 | RLS Branch Isolation (Defence-in-Depth) | ✅ Complete |
+
+---
+
+## Phase 8–11 Details (Latest — April 2026)
+
+### Phase 8: Full System Upgrade (`20260401_full_system_upgrade.sql`)
+
+**Expenses Module:**
+- New table: `expenses` — field expense claims by salesman
+- Categories: minyak, tol, parking, makan, penginapan, telefon, peralatan, lain-lain
+- Status flow: pending → approved/rejected → paid
+- UI: `/admin/expenses`
+
+**Inventory Movements:**
+- New table: `inventory_movements`
+- Tracks: sale_deduct, return_approved, carry_forward, freezer_in, freezer_to_van, van_to_freezer, adjustment
+- Full audit trail per movement
+
+**District / Area Filtering:**
+- Added `district`, `state`, `geo_group` to `stores`, `customers_kb`, `customers_kk`
+- Users get `assigned_districts[]` — salesman coverage area array
+- Supports Sabah Mainland, Labuan, Lawas Corridor geo groups
+
+**Weekly Report Archive:**
+- `weekly_report_history` — stored weekly summaries for trend analysis
+
+### Phase 9: Sales Model Consolidation (`20260401_split_sales_as_views.sql`)
+
+**Problem:** `sales_transactions` held real data but legacy `sales_kinabatangan`/`sales_kota_kinabalu` tables caused commissions & day-end to show wrong data.
+
+**Solution:**
+- Merged any leg legacy data into `sales_transactions`
+- Added `NOT NULL + CHECK` constraint on `branch` column
+- Renamed old base tables to `*_legacy` (data preserved)
+- Created branch-scoped VIEWs with original names
+
+### Phase 10: Customer Ownership (`20260401_customer_ownership.sql`)
+
+- Each customer can have an `assigned_to` salesman
+- Customers without owner = company customer (any salesman can sell)
+- Full audit log: `customer_ownership_log` (assign, handover, release, self_add)
+- Admin can assign/handover customers; salesman can add their own
+
+### Phase 11: RLS Branch Isolation (`20260401_rls_branch_isolation.sql`)
+
+- All tables: anon key DENIED (`USING (false)`)
+- Service role: full access (`USING (true)`)
+- Defence-in-depth: no direct DB access possible via client-side anon key
+- All data flows through server-side API routes using `supabaseAdmin`
+
+---
+
+## Phase 1: Premium Dark Mode Design System
 
 ## ✅ Implementation Complete
 
-This document summarizes all the components, features, and documentation created for the SAYS 2.0 application with the Premium Dark Mode design system, scalable Firestore architecture, and optimized code patterns.
+This section summarizes all the components, features, and documentation created for the SAYS 2.0 application with the Premium Dark Mode design system, scalable Firestore architecture, and optimized code patterns.
 
 ---
 

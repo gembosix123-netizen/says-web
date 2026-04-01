@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useLanguage } from '@/context/LanguageContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { Download, Calendar, TrendingUp, Package, Users, AlertCircle, FileText, Lock } from 'lucide-react';
+import { Download, Calendar, TrendingUp, Package, Users, AlertCircle, FileText, Lock, RotateCcw } from 'lucide-react';
 
 interface DailySale {
   date: string;
@@ -29,6 +29,10 @@ interface MonthlyReportData {
   dailyData: DailySale[];
   branchSummaries: BranchSummary[];
   topProducts: { name: string; quantity: number }[];
+  totalReturns?: number;
+  totalReturnQuantity?: number;
+  returnsByReason?: { reason: string; count: number }[];
+  returnItemsList?: { product_name: string; quantity: number; reason: string; created_at: string; salesman?: string }[];
   isClosed?: boolean;
   submittedAt?: string;
   submittedBy?: string;
@@ -51,7 +55,8 @@ export default function MonthlyReportSupabase() {
   const [selectedBranch, setSelectedBranch] = useState<'all' | 'Kota Kinabalu' | 'Kinabatangan'>('all');
   const [reportData, setReportData] = useState<MonthlyReportData | null>(null);
   const [reportHistory, setReportHistory] = useState<MonthlyReportHistoryItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [currentUserBranch, setCurrentUserBranch] = useState<string>('');
   const [currentUserRole, setCurrentUserRole] = useState<string>('');
   const [isExportingPDF, setIsExportingPDF] = useState(false);
@@ -82,6 +87,7 @@ export default function MonthlyReportSupabase() {
   // Fetch monthly report from Supabase
   const fetchMonthlyReport = async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const params = new URLSearchParams({
         month: selectedMonth,
@@ -90,8 +96,9 @@ export default function MonthlyReportSupabase() {
       });
       const res = await fetch(`/api/reports/monthly?${params.toString()}`);
       if (!res.ok) {
-        const error = await res.json();
-        addToast(error.error || 'Failed to fetch report', 'error');
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData.error || `Ralat server (${res.status})`;
+        setFetchError(msg);
         setReportData(null);
         return;
       }
@@ -99,7 +106,7 @@ export default function MonthlyReportSupabase() {
       setReportData(data);
     } catch (error) {
       console.error('Error fetching report:', error);
-      addToast(t('error'), 'error');
+      setFetchError('Gagal sambung ke server. Semak sambungan internet.');
     } finally {
       setLoading(false);
     }
@@ -146,6 +153,10 @@ export default function MonthlyReportSupabase() {
             dailyData: reportData.dailyData,
             branchSummaries: reportData.branchSummaries,
             topProducts: reportData.topProducts,
+            totalReturns: reportData.totalReturns ?? 0,
+            totalReturnQuantity: reportData.totalReturnQuantity ?? 0,
+            returnsByReason: reportData.returnsByReason ?? [],
+            returnItemsList: reportData.returnItemsList ?? [],
           },
         }),
       });
@@ -241,10 +252,27 @@ export default function MonthlyReportSupabase() {
     }
   };
 
-  if (!reportData && !loading) {
+  if (loading) {
     return (
-      <div className="soft-panel p-6 rounded-lg text-center">
-        <p className="text-slate-600 dark:text-slate-400">{t('loading_report')}</p>
+      <div className="soft-panel p-8 rounded-lg text-center">
+        <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent mb-3" />
+        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('loading_report')}</p>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="soft-panel p-8 rounded-lg text-center space-y-3">
+        <AlertCircle className="h-10 w-10 text-red-400 mx-auto" />
+        <p className="text-red-500 font-semibold">Gagal Muatkan Laporan</p>
+        <p className="text-slate-500 dark:text-slate-400 text-sm">{fetchError}</p>
+        <button
+          onClick={fetchMonthlyReport}
+          className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+        >
+          Cuba Semula
+        </button>
       </div>
     );
   }
@@ -369,10 +397,16 @@ export default function MonthlyReportSupabase() {
         </div>
       )}
 
-      {loading ? (
-        <div className="p-8 text-center text-slate-600 dark:text-slate-400">{t('loading_report')}</div>
-      ) : reportData ? (
+      {reportData ? (
         <div className="space-y-6">
+          {/* No sales data notice */}
+          {reportData.totalTransactions === 0 && (
+            <div className="soft-panel p-8 rounded-lg text-center text-slate-400 dark:text-slate-500">
+              <Package className="h-10 w-10 mx-auto mb-2 opacity-40" />
+              <p className="font-medium">Tiada rekod jualan untuk bulan ini</p>
+              <p className="text-sm mt-1">Pilih bulan lain atau tambah data jualan terlebih dahulu</p>
+            </div>
+          )}
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="soft-card soft-card-green p-6 rounded-lg">
@@ -401,6 +435,68 @@ export default function MonthlyReportSupabase() {
               <p className="text-xs text-slate-500 mt-2">{t('branch')}</p>
             </div>
           </div>
+
+          {/* Returns Summary Card */}
+          {((reportData.totalReturns ?? 0) > 0) && (
+            <div className="soft-panel p-6 rounded-lg border-l-4 border-amber-500">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                <RotateCcw size={20} className="text-amber-400" />
+                Rekod Return / Refund Bulan Ini
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+                <div className="bg-amber-500/10 rounded-lg p-4">
+                  <p className="text-xs text-amber-300 mb-1">Jumlah Return</p>
+                  <p className="text-2xl font-bold text-amber-400">{reportData.totalReturns}</p>
+                  <p className="text-xs text-white/40 mt-1">permohonan</p>
+                </div>
+                <div className="bg-amber-500/10 rounded-lg p-4">
+                  <p className="text-xs text-amber-300 mb-1">Jumlah Unit</p>
+                  <p className="text-2xl font-bold text-amber-400">{reportData.totalReturnQuantity}</p>
+                  <p className="text-xs text-white/40 mt-1">unit produk</p>
+                </div>
+                {reportData.returnsByReason && reportData.returnsByReason.length > 0 && (
+                  <div className="col-span-2 bg-slate-800/40 rounded-lg p-4">
+                    <p className="text-xs text-white/50 mb-2 uppercase tracking-wide">Sebab Return</p>
+                    <div className="flex flex-wrap gap-2">
+                      {reportData.returnsByReason.map((r) => (
+                        <span key={r.reason} className="text-xs bg-amber-600/20 text-amber-300 border border-amber-600/30 rounded-full px-3 py-1">
+                          {r.reason} ({r.count})
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {reportData.returnItemsList && reportData.returnItemsList.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-amber-700/30">
+                      <tr>
+                        <th className="text-left px-3 py-2 text-amber-300 font-semibold">Tarikh</th>
+                        <th className="text-left px-3 py-2 text-amber-300 font-semibold">Produk</th>
+                        <th className="text-center px-3 py-2 text-amber-300 font-semibold">Qty</th>
+                        <th className="text-left px-3 py-2 text-amber-300 font-semibold">Sebab</th>
+                        <th className="text-left px-3 py-2 text-amber-300 font-semibold">Salesman</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.returnItemsList.map((item, i) => (
+                        <tr key={i} className="border-b border-slate-700/40 hover:bg-amber-500/5">
+                          <td className="px-3 py-2 text-slate-400 text-xs">
+                            {item.created_at ? new Date(item.created_at).toLocaleDateString('ms-MY') : '-'}
+                          </td>
+                          <td className="px-3 py-2 text-white font-medium">{item.product_name}</td>
+                          <td className="px-3 py-2 text-center text-amber-400 font-bold">{item.quantity}</td>
+                          <td className="px-3 py-2 text-slate-300">{item.reason}</td>
+                          <td className="px-3 py-2 text-slate-400 text-xs">{item.salesman || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Branch Breakdown */}
           {reportData.branchSummaries.length > 0 && (

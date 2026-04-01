@@ -1,0 +1,37 @@
+
+Arahan:
+Saya sedang membina atau menambah baik sistem web untuk pengurusan sales, refund, audit, dan admin. Sila bantu saya dari segi analisis, cadangan, dan contoh kod (frontend, backend, database, UX) untuk feature berikut:
+
+1. Filter & Analisis Daerah
+Bagaimana cara paling efisien untuk filter kedai mengikut daerah (termasuk Lawas, Labuan, seluruh Sabah)?
+Bagaimana struktur database yang sesuai untuk simpan info daerah setiap kedai?
+Tunjukkan contoh kod query/filter (backend & frontend).
+2. Laporan Kedai & Analisis Sales
+Bagaimana nak paparkan laporan lengkap untuk setiap kedai (revenue, produk diambil, kekerapan order, status hutang)?
+Tunjukkan contoh struktur data, query, dan UI untuk laporan ini.
+3. Refund/Return Produk
+Bagaimana nak implement fungsi refund/return produk (expired, rosak) di sales page?
+Tunjukkan contoh kod untuk proses refund, simpan sebab return, dan upload gambar produk yang di-return.
+4. Bukti Pembayaran & Gambar
+Bagaimana nak pastikan setiap transaksi cash wajib upload gambar resit?
+Bagaimana nak simpan dan paparkan gambar bukti pembayaran/refund di admin page?
+Tunjukkan contoh kod upload gambar (API & frontend), serta cara simpan URL gambar dalam database.
+5. UX “Bodoh Pun Boleh Guna”
+Bagaimana nak pastikan sistem sangat mudah digunakan walaupun user tiada pengetahuan IT?
+Cadangkan flow, validation, dan UI/UX best practice supaya user tidak boleh buat silap.
+Tunjukkan contoh mesej error, tooltip, dan bantuan visual.
+6. Admin Tools & Audit
+Bagaimana nak sediakan filter, carian, dan approval untuk admin semak semua transaksi (termasuk gambar)?
+Bagaimana nak buat audit trail/log untuk setiap perubahan data?
+Tunjukkan contoh UI untuk admin review & approve transaksi.
+7. Lain-lain (Jika Perlu)
+Cadangkan ciri bonus seperti notifikasi, export laporan, integrasi WhatsApp/email, dsb.
+Nota:
+Sila jawab dengan contoh kod (jika sesuai), struktur database, dan tips best practice. Jawapan mesti jelas, mudah faham, dan boleh terus digunakan untuk development.
+
+Contoh penggunaan prompt:
+
+“Saya mahu tambah fungsi refund produk rosak di sales page, wajib upload gambar produk, dan admin boleh semak gambar itu. Sila tunjukkan flow, kod, dan validation yang sesuai.”
+
+Simpan prompt ini dan gunakan bila-bila masa untuk AI bantu anda secara terperinci!
+

@@ -112,9 +112,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    // Determine date range
+    // Determine date range — use last day of month correctly
+    const [yr, mo] = (month || '2026-01').split('-').map(Number);
+    const lastDay = new Date(yr, mo, 0).getDate(); // day 0 of next month = last day of this month
     let dateStart = `${month}-01T00:00:00Z`;
-    let dateEnd = `${month}-31T23:59:59Z`;
+    let dateEnd = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59Z`;
 
     if (startDate && endDate) {
       dateStart = `${startDate}T00:00:00Z`;
@@ -200,6 +202,47 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(0, 31);
 
+    // Fetch exchange_returns for same period
+    let totalReturns = 0;
+    let totalReturnQuantity = 0;
+    const returnReasonMap: Record<string, number> = {};
+    const returnItemsList: { product_name: string; quantity: number; reason: string; created_at: string; salesman?: string }[] = [];
+
+    try {
+      let retQuery = supabaseAdmin
+        .from('exchange_returns')
+        .select('*')
+        .gte('created_at', dateStart)
+        .lte('created_at', dateEnd);
+
+      if (branch && branch !== 'all') {
+        retQuery = retQuery.eq('branch', branch);
+      }
+
+      const { data: retData } = await retQuery;
+      if (retData && retData.length > 0) {
+        totalReturns = retData.length;
+        retData.forEach((r: any) => {
+          totalReturnQuantity += Number(r.quantity || 0);
+          const reason = r.reason || 'Tidak dinyatakan';
+          returnReasonMap[reason] = (returnReasonMap[reason] || 0) + 1;
+          returnItemsList.push({
+            product_name: r.product_name || '-',
+            quantity: Number(r.quantity || 0),
+            reason,
+            created_at: r.created_at || '',
+            salesman: r.submitted_by_name || r.submitted_by || '',
+          });
+        });
+      }
+    } catch (retErr) {
+      console.error('Error fetching returns for report:', retErr);
+    }
+
+    const returnsByReason = Object.entries(returnReasonMap)
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count);
+
     const report = {
       month: month || `${startDate} to ${endDate}`,
       branch,
@@ -208,6 +251,10 @@ export async function GET(request: NextRequest) {
       dailyData: dailyDataArray,
       branchSummaries,
       topProducts,
+      totalReturns,
+      totalReturnQuantity,
+      returnsByReason,
+      returnItemsList,
       isClosed: false,
     };
 

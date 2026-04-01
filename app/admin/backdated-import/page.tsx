@@ -15,12 +15,47 @@ interface ImportRow {
   branch: string;
   payment_method: string;
   amount: string | number;
+  transaction_date?: string;    // YYYY-MM-DD — actual date from Excel row
   receipt_no?: string;
   billing_ref_no?: string;
   transfer_ref_no?: string;
   qr_txn_ref_no?: string;
   customer_name?: string;
   payment_note?: string;
+}
+
+// ── Helper: parse D.M.YYYY / DD.MM.YYYY / DD/MM/YYYY / YYYY-MM-DD → { month: "YYYY-MM", fullDate: "YYYY-MM-DD" }
+function parseDateCell(raw: string): { month: string; fullDate: string } | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const parts = s.split(/[\/\.\-]/);
+  if (parts.length !== 3) return null;
+  let year: string, mon: string, day: string;
+  if (parts[0].length === 4) {
+    // YYYY-MM-DD
+    [year, mon, day] = parts;
+  } else {
+    // D.M.YYYY or DD/MM/YYYY
+    [day, mon, year] = parts;
+  }
+  if (!year || !mon || !day) return null;
+  const y = year.padStart(4, '0');
+  const m = mon.padStart(2, '0');
+  const d = day.padStart(2, '0');
+  if (!/^\d{4}$/.test(y) || !/^\d{2}$/.test(m) || !/^\d{2}$/.test(d)) return null;
+  return { month: `${y}-${m}`, fullDate: `${y}-${m}-${d}` };
+}
+
+// ── Helper: detect TRANSFER suffix in customer name (not a location like "MYSHOP (KM1)").
+// Returns { isTransfer: true, cleanName } if the LAST word/phrase in brackets is TRANSFER or TRANSFER!
+function detectTransfer(custName: string): { isTransfer: boolean; cleanName: string } {
+  // Match trailing (TRANSFER) or (TRANSFER!) — case-insensitive
+  const m = custName.match(/^(.+?)\s*\(TRANSFER!?\)\s*$/i);
+  if (m) return { isTransfer: true, cleanName: m[1].trimEnd() };
+  // Also match without brackets at end: "NAME TRANSFER"
+  const m2 = custName.match(/^(.+?)\s+TRANSFER!?\s*$/i);
+  if (m2) return { isTransfer: true, cleanName: m2[1].trimEnd() };
+  return { isTransfer: false, cleanName: custName };
 }
 
 interface RowError {
@@ -64,8 +99,17 @@ export default function BackdatedImportPage() {
   const [dragging, setDragging] = useState(false);
   const [customers, setCustomers] = useState<CustomerRef[]>([]);
   const [showCustomers, setShowCustomers] = useState(false);
+  // Weekly Excel detection
+  const [detectedFormat, setDetectedFormat] = useState<'standard' | 'weekly' | null>(null);
+  const [weeklyBranch, setWeeklyBranch] = useState('');
+  const [userRole, setUserRole] = useState('');
 
   useEffect(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      setUserRole(u.role || '');
+      if (u.role !== 'Main Admin') setWeeklyBranch(u.branch || '');
+    } catch {}
     fetch('/api/admin/backdated-import')
       .then((r) => r.json())
       .then((d) => setCustomers(d.customers || []))
@@ -89,28 +133,272 @@ export default function BackdatedImportPage() {
         (bytes[0] === 0xd0 && bytes[1] === 0xcf);
 
       if (isExcel) {
-        // Parse as Excel
-        import('xlsx').then((XLSX) => {
-          const wb = XLSX.read(buf, { type: 'array' });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json = XLSX.utils.sheet_to_json<ImportRow>(ws, { defval: '' });
-          if (json.length === 0) {
-            alert(t('backdated_import') + ': Excel empty / no data in first sheet.');
-            return;
+        // Read full file before parsing as Excel (sniff buffer only has first 4 bytes)
+        const excelReader = new FileReader();
+        excelReader.onload = async (excelEv) => {
+          try {
+            const fullBuf = excelEv.target?.result as ArrayBuffer;
+            const XLSX = await import('xlsx');
+            const wb = XLSX.read(fullBuf, { type: 'array' });
+
+            // ── Detect weekly Excel format (sheets named WEEK 1, WEEK 2, …) ──
+            const weekSheets = wb.SheetNames.filter((n) => /^WEEK \d+/i.test(n));
+            // Also support old-format: single TRANSACTIONS sheet
+            const hasOldTransactions = !weekSheets.length && wb.SheetNames.includes('TRANSACTIONS');
+
+            if (weekSheets.length > 0 || hasOldTransactions) {
+              const ub = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').branch || ''; } catch { return ''; } })();
+              const importRows: ImportRow[] = [];
+
+              // Proses WEEK sheets dahulu, kemudian Sheet1.
+              // Sheet1 akan dimasukkan TAPI baris yang inv no-nya sudah ada dalam WEEK sheets akan di-skip
+              // supaya tak jadi duplikat (MYSHOP boleh kredit minggu ni, cash minggu depan, dll).
+              const weekOnlySheets = weekSheets.length > 0 ? weekSheets : ['TRANSACTIONS'];
+              const sheetsToProcess = weekSheets.length > 0 && wb.SheetNames.includes('Sheet1')
+                ? [...weekOnlySheets, 'Sheet1']
+                : weekOnlySheets;
+
+              // Set untuk track inv no yang sudah diproses dari WEEK sheets
+              const processedInvNos = new Set<string>();
+
+              for (const sheetName of sheetsToProcess) {
+                const isSheet1 = sheetName === 'Sheet1';
+                // Derive base payment method from sheet name suffix
+                let basePayMethod: string | null = null;
+                if (/transfer/i.test(sheetName))        basePayMethod = 'bank_transfer';
+                else if (/credit/i.test(sheetName))     basePayMethod = 'bill_to_bill';
+                else if (isSheet1)                      basePayMethod = 'bill_to_bill'; // Sheet1 = kredit (PO required)
+                else if (sheetName === 'TRANSACTIONS')  basePayMethod = null; // baca dari kolum PAYMENT
+
+                const ws = wb.Sheets[sheetName];
+                if (!ws) continue;
+                const aoa: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
+
+                // Find header row — first row whose first cell is "DATE" (scan first 8 rows)
+                let headerIdx = -1;
+                for (let i = 0; i < Math.min(aoa.length, 8); i++) {
+                  if (/^DATE$/i.test(String(aoa[i]?.[0] || '').trim())) { headerIdx = i; break; }
+                }
+                if (headerIdx === -1) continue; // unreadable sheet — skip
+
+                const hdrs      = aoa[headerIdx].map((h) => String(h).toLowerCase());
+                const dataStart = headerIdx + 1;
+                const amtColIdx  = hdrs.findIndex((h) => /amount/i.test(h));
+                const payColIdx  = hdrs.findIndex((h) => /payment|bayar/i.test(h));
+                const invColIdx  = hdrs.findIndex((h) => /^inv/i.test(h));
+                const custColIdx = hdrs.findIndex((h) => /customer|kedai/i.test(h));
+                const invCol  = invColIdx  >= 0 ? invColIdx  : 1;
+                const custCol = custColIdx >= 0 ? custColIdx : 2;
+
+                for (let i = dataStart; i < aoa.length; i++) {
+                  const row = aoa[i];
+                  if (!row || row.length < 3) continue;
+
+                  const dateVal = String(row[0] || '').trim();
+                  const invNo   = String(row[invCol]  || '').trim();
+                  const rawCust = String(row[custCol] || '').trim();
+
+                  // Skip Sheet1 rows whose INV NO was already imported from a WEEK sheet (true duplicate)
+                  if (isSheet1 && invNo && processedInvNos.has(invNo)) continue;
+
+                  if (!dateVal || /^TOTAL/i.test(dateVal) || /^\s*$/.test(dateVal)) continue;
+
+                  // Fix 1: parse actual date → YYYY-MM-DD + YYYY-MM
+                  const parsed = parseDateCell(dateVal);
+                  if (!parsed) continue;
+                  const { month, fullDate } = parsed;
+
+                  // Amount
+                  let amount = NaN;
+                  if (amtColIdx >= 0) {
+                    amount = Number(String(row[amtColIdx] || '').replace(/[^0-9.]/g, ''));
+                  }
+                  if (isNaN(amount) || amount <= 0) {
+                    for (let c = row.length - 1; c >= 3; c--) {
+                      const cell = String(row[c] || '').trim();
+                      if (/^(CASH|CREDIT|TRANSFER)$/i.test(cell)) continue;
+                      const n = Number(cell.replace(/[^0-9.]/g, ''));
+                      if (!isNaN(n) && n > 0) { amount = n; break; }
+                    }
+                  }
+                  if (isNaN(amount) || amount <= 0) continue;
+
+                  // Fix 2: detect (TRANSFER) / (TRANSFER!) suffix in customer name
+                  const { isTransfer, cleanName } = detectTransfer(rawCust);
+                  const custName = cleanName || rawCust;
+
+                  // Payment method resolution
+                  let resolvedMethod: string;
+                  if (isTransfer) {
+                    resolvedMethod = 'bank_transfer';
+                  } else if (basePayMethod) {
+                    resolvedMethod = basePayMethod;
+                  } else {
+                    const payRaw = payColIdx >= 0 ? String(row[payColIdx] || '').toLowerCase() : '';
+                    if (/transfer|bank/i.test(payRaw))           resolvedMethod = 'bank_transfer';
+                    else if (/credit|kredit|bill/i.test(payRaw)) resolvedMethod = 'bill_to_bill';
+                    else if (/qr/i.test(payRaw))                 resolvedMethod = 'qr_code';
+                    else if (/card|kad/i.test(payRaw))           resolvedMethod = 'card';
+                    else if (/ewallet|wallet/i.test(payRaw))     resolvedMethod = 'ewallet';
+                    else                                          resolvedMethod = 'cash';
+                  }
+
+                  // Fix 4: invoice = BACK-{originalInvNo}
+                  const refNo = invNo
+                    ? `BACK-${invNo}`
+                    : `BACK-${month}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+                  importRows.push({
+                    month,
+                    transaction_date: fullDate,
+                    branch: ub,
+                    payment_method: resolvedMethod,
+                    amount,
+                    customer_name: custName || undefined,
+                    receipt_no:      resolvedMethod === 'cash'          ? refNo : undefined,
+                    billing_ref_no:  resolvedMethod === 'bill_to_bill'  ? refNo : undefined,
+                    transfer_ref_no: resolvedMethod === 'bank_transfer' ? refNo : undefined,
+                    qr_txn_ref_no:   resolvedMethod === 'qr_code'       ? refNo : undefined,
+                    payment_note: `Weekly – ${sheetName}`,
+                  });
+                  // Track inv nos from WEEK sheets so Sheet1 can skip duplicates
+                  if (!isSheet1 && invNo) processedInvNos.add(invNo);
+                }
+              }
+
+              if (importRows.length === 0) {
+                alert('Fail Weekly Excel tidak ada data transaksi yang boleh dibaca.');
+                return;
+              }
+              setRows(importRows);
+              setDetectedFormat('weekly');
+              return;
+            }
+
+            // ── Standard import template (first sheet) ──
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json<ImportRow>(ws, { defval: '' });
+            if (json.length === 0) {
+              alert(t('backdated_import') + ': Excel empty / no data in first sheet.');
+              return;
+            }
+            setRows(json);
+            setDetectedFormat('standard');
+          } catch (error) {
+            console.error('Excel parse error:', error);
+            alert('Fail Excel tidak sah atau rosak. Sila guna fail .xlsx/.xls yang sah.');
           }
-          setRows(json);
-        });
+        };
+        excelReader.readAsArrayBuffer(file);
       } else {
         // Parse as CSV text
         const textReader = new FileReader();
         textReader.onload = (ev) => {
           const text = ev.target?.result as string;
+
+          // ── Detect weekly report CSV (first row contains "WEEKLY SALES REPORT") ──
+          const lines = text.trim().split(/\r?\n/);
+          if (lines.length > 1 && /WEEKLY SALES REPORT/i.test(lines[0])) {
+            const ub = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').branch || ''; } catch { return ''; } })();
+
+            // Find the actual header row — first row whose first cell is "DATE"
+            let headerIdx = -1;
+            for (let i = 1; i < Math.min(lines.length, 8); i++) {
+              const firstCell = lines[i].split(',')[0].trim().replace(/^"|"$/g, '');
+              if (/^DATE$/i.test(firstCell)) { headerIdx = i; break; }
+            }
+            if (headerIdx === -1) {
+              alert('Tidak dapat baca format Weekly CSV — baris header (DATE) tidak dijumpai.');
+              return;
+            }
+
+            const headers = lines[headerIdx].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
+            const amtIdx  = headers.findIndex((h) => /amount/i.test(h));
+            const payIdx  = headers.findIndex((h) => /payment|bayar/i.test(h));
+            const invIdx  = headers.findIndex((h) => /inv/i.test(h));
+            const custIdx = headers.findIndex((h) => /customer|kedai/i.test(h));
+
+            const importRows: ImportRow[] = [];
+            for (let i = headerIdx + 1; i < lines.length; i++) {
+              const cells = lines[i].split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
+              const dateVal = cells[0];
+              if (!dateVal || /^TOTAL/i.test(dateVal)) continue;
+
+              // Fix 1: parse actual date → YYYY-MM-DD
+              const parsed = parseDateCell(dateVal);
+              if (!parsed) continue;
+              const { month, fullDate } = parsed;
+
+              // Amount
+              let amount = NaN;
+              if (amtIdx >= 0) {
+                amount = Number(String(cells[amtIdx] || '').replace(/[^0-9.]/g, ''));
+              } else {
+                for (let c = cells.length - 1; c >= 3; c--) {
+                  const n = Number(String(cells[c] || '').replace(/[^0-9.]/g, ''));
+                  if (!isNaN(n) && n > 0) { amount = n; break; }
+                }
+              }
+              if (isNaN(amount) || amount <= 0) continue;
+
+              const invNoRaw = invIdx >= 0 ? cells[invIdx] : '';
+              const rawCust  = custIdx >= 0 ? cells[custIdx] : '';
+
+              // Fix 2: detect TRANSFER suffix in customer name
+              const { isTransfer, cleanName } = detectTransfer(rawCust);
+              const custName = cleanName || rawCust;
+
+              // Payment method from PAYMENT column or TRANSFER detection
+              let payMethod: string;
+              if (isTransfer) {
+                payMethod = 'bank_transfer';
+              } else {
+                const payRaw = (payIdx >= 0 ? cells[payIdx] : '').toLowerCase();
+                if (/transfer|bank/i.test(payRaw))           payMethod = 'bank_transfer';
+                else if (/credit|kredit|bill/i.test(payRaw)) payMethod = 'bill_to_bill';
+                else if (/qr/i.test(payRaw))                 payMethod = 'qr_code';
+                else if (/card|kad/i.test(payRaw))           payMethod = 'card';
+                else if (/ewallet|wallet/i.test(payRaw))     payMethod = 'ewallet';
+                else                                          payMethod = 'cash';
+              }
+
+              // Fix 4: invoice = BACK-{originalInvNo}
+              const refNo = invNoRaw
+                ? `BACK-${invNoRaw}`
+                : `BACK-${month}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+              importRows.push({
+                month,
+                transaction_date: fullDate,
+                branch: ub,
+                payment_method: payMethod,
+                amount,
+                customer_name: custName || undefined,
+                receipt_no:      payMethod === 'cash'          ? refNo : undefined,
+                billing_ref_no:  payMethod === 'bill_to_bill'  ? refNo : undefined,
+                transfer_ref_no: payMethod === 'bank_transfer' ? refNo : undefined,
+                qr_txn_ref_no:   payMethod === 'qr_code'       ? refNo : undefined,
+                payment_note: 'Weekly CSV import',
+              });
+            }
+
+            if (importRows.length === 0) {
+              alert('Fail Weekly CSV tidak ada data transaksi yang boleh dibaca.');
+              return;
+            }
+            setRows(importRows);
+            setDetectedFormat('weekly');
+            return;
+          }
+
+          // ── Standard import template CSV ──
           const parsed = parseCsv(text);
           if (parsed.length === 0) {
             alert('CSV file empty or invalid format.');
             return;
           }
           setRows(parsed);
+          setDetectedFormat('standard');
         };
         textReader.readAsText(file, 'utf-8');
       }
@@ -152,11 +440,15 @@ export default function BackdatedImportPage() {
   const callApi = async (mode: 'dry_run' | 'confirm') => {
     setLoading(true);
     setResult(null);
+    // For weekly format, apply selected branch to all rows before sending
+    const rowsToSend = (detectedFormat === 'weekly' && weeklyBranch)
+      ? rows.map((r) => ({ ...r, branch: weeklyBranch }))
+      : rows;
     try {
       const res = await fetch(`/api/admin/backdated-import?mode=${mode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows }),
+        body: JSON.stringify({ rows: rowsToSend }),
       });
       const data: ImportResult = await res.json();
       setResult(data);
@@ -174,6 +466,7 @@ export default function BackdatedImportPage() {
     setFileName('');
     setResult(null);
     setStep('upload');
+    setDetectedFormat(null);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -246,8 +539,39 @@ export default function BackdatedImportPage() {
           </p>
         </div>
 
-        {/* Upload zone */}
-        {step === 'upload' && (
+        {/* Weekly Excel detected banner */}
+        {detectedFormat === 'weekly' && rows.length > 0 && (
+          <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 space-y-2">
+            <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+              <CheckCircle size={16} /> Fail Weekly Excel Dikesan
+            </p>
+            <p className="text-xs text-emerald-700 dark:text-emerald-400">
+              {rows.length} transaksi dijumpai dari semua sheet WEEK (Cash · Transfer · Credit). Data sudah diproses secara automatik.
+            </p>
+            {/* Branch selector — only needed for Main Admin */}
+            {userRole === 'Main Admin' && (
+              <div className="flex items-center gap-3 pt-1">
+                <label className="text-xs text-emerald-700 dark:text-emerald-300 font-medium whitespace-nowrap">Cawangan data ini:</label>
+                <select
+                  value={weeklyBranch}
+                  onChange={(e) => setWeeklyBranch(e.target.value)}
+                  className="text-sm border border-emerald-300 dark:border-emerald-700 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-800"
+                >
+                  <option value="">-- Pilih Cawangan --</option>
+                  <option value="Kota Kinabalu">Kota Kinabalu</option>
+                  <option value="Kinabatangan">Kinabatangan</option>
+                  <option value="HQ">HQ</option>
+                </select>
+                {!weeklyBranch && (
+                  <span className="text-xs text-amber-600 dark:text-amber-400">⚠ Pilih cawangan sebelum validate</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Upload zone — show when no file loaded yet */}
+        {step === 'upload' && rows.length === 0 && (
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -292,6 +616,15 @@ export default function BackdatedImportPage() {
           </div>
         )}
 
+        {/* Re-upload button if already loaded a weekly file */}
+        {detectedFormat === 'weekly' && step !== 'done' && (
+          <div className="flex justify-end">
+            <button onClick={handleReset} className="text-xs text-slate-500 hover:text-red-500 underline">
+              Buang fail & muat semula
+            </button>
+          </div>
+        )}
+
         {/* Preview table */}
         {rows.length > 0 && step !== 'done' && (
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -299,38 +632,68 @@ export default function BackdatedImportPage() {
               <span className="font-medium text-slate-800 dark:text-white text-sm">{rows.length} {t('rows_detected')} — {fileName}</span>
               <button onClick={handleReset} className="text-xs text-red-500 hover:underline">{t('discard_file')}</button>
             </div>
+            {/* Fix 5 UI: warn for large imports */}
+            {rows.length > 500 && (
+              <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                <AlertTriangle size={13} /> Import besar ({rows.length} baris). Proses mungkin mengambil masa lebih lama.
+              </div>
+            )}
             <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                  <tr>
-                    <th className="px-3 py-2">#</th>
-                    <th className="px-3 py-2">Month</th>
-                    <th className="px-3 py-2">Branch</th>
-                    <th className="px-3 py-2">Method</th>
-                    <th className="px-3 py-2">Amount</th>
-                    <th className="px-3 py-2">Reference No</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.slice(0, 10).map((row, i) => {
-                    const ref = row.receipt_no || row.billing_ref_no || row.transfer_ref_no || row.qr_txn_ref_no || '—';
-                    return (
-                      <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
-                        <td className="px-3 py-2 text-slate-400">{i + 1}</td>
-                        <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{row.month}</td>
-                        <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{row.branch}</td>
-                        <td className="px-3 py-2">
-                          <span className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded text-xs">
-                            {methodLabel[row.payment_method] || row.payment_method}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-emerald-600 dark:text-emerald-400 font-medium">RM {Number(row.amount).toFixed(2)}</td>
-                        <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{ref}</td>
+              {(() => {
+                // Fix 6: build customer name set for unmatched badge
+                const customerNameSet = new Set(customers.map((c) => c.name.toLowerCase()));
+                return (
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2">#</th>
+                        <th className="px-3 py-2">Tarikh</th>
+                        <th className="px-3 py-2">Branch</th>
+                        <th className="px-3 py-2">Method</th>
+                        <th className="px-3 py-2">Amount</th>
+                        <th className="px-3 py-2">Reference No</th>
+                        <th className="px-3 py-2">Customer</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 10).map((row, i) => {
+                        const ref = row.receipt_no || row.billing_ref_no || row.transfer_ref_no || row.qr_txn_ref_no || '—';
+                        const dateDisplay = (row as ImportRow & { transaction_date?: string }).transaction_date || row.month;
+                        const custName = row.customer_name || '';
+                        const isUnmatched = !!custName && !customerNameSet.has(custName.toLowerCase());
+                        return (
+                          <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
+                            <td className="px-3 py-2 text-slate-400">{i + 1}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{dateDisplay}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{row.branch}</td>
+                            <td className="px-3 py-2">
+                              <span className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded text-xs">
+                                {methodLabel[row.payment_method] || row.payment_method}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-emerald-600 dark:text-emerald-400 font-medium">RM {Number(row.amount).toFixed(2)}</td>
+                            <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{ref}</td>
+                            <td className="px-3 py-2">
+                              {custName ? (
+                                <span className="flex items-center gap-1">
+                                  <span className="text-slate-700 dark:text-slate-300">{custName}</span>
+                                  {isUnmatched && (
+                                    <span className="text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 border border-orange-200 dark:border-orange-700 px-1.5 py-0 rounded text-[10px] font-medium whitespace-nowrap">
+                                      ⚠ Unmatched
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
               {rows.length > 10 && (
                 <p className="px-4 py-2 text-xs text-slate-400">... {t('row_label')} {rows.length - 10} {t('rows_detected').toLowerCase()}</p>
               )}
@@ -391,7 +754,7 @@ export default function BackdatedImportPage() {
           <div className="flex gap-3">
             {step === 'upload' && (
               <button
-                disabled={loading}
+                disabled={loading || (detectedFormat === 'weekly' && userRole === 'Main Admin' && !weeklyBranch)}
                 onClick={() => callApi('dry_run')}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors"
               >
@@ -428,6 +791,10 @@ export default function BackdatedImportPage() {
           <p>• <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">bank_transfer</code> — wajib isi <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">transfer_ref_no</code></p>
           <p>• <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">qr_code</code> — wajib isi <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">qr_txn_ref_no</code></p>
           <p>• Maksimum 500 baris setiap import</p>
+          <p className="mt-2 font-semibold text-slate-700 dark:text-slate-300">Format Weekly Excel (Auto-detect)</p>
+          <p>• Upload fail <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">.xlsx</code> dari butang <strong>Muat Turun Excel Bulan</strong> — sistem akan baca semua sheet WEEK secara automatik</p>
+          <p>• Sheet <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">WEEK 1</code> → Cash &nbsp;|&nbsp; <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">(TRANSFER)</code> → Bank Transfer &nbsp;|&nbsp; <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">(CREDIT)</code> → Kredit</p>
+          <p>• Setiap baris transaksi dalam sheet akan diimport — no invois digunakan sebagai rujukan</p>
         </div>
       </div>
     </div>

@@ -105,6 +105,19 @@ export function middleware(request: NextRequest) {
       }
 
       if (pathname.startsWith('/admin')) {
+        // Redirect branch admins away from /admin root BEFORE permission check
+        // (Admin role is not allowed /admin itself — only their branch sub-paths)
+        if (pathname === '/admin' && role !== 'Main Admin') {
+          if (role === 'Admin' || role === 'Sales') {
+            const branchSlug =
+              branch === 'Kinabatangan' ? '/admin/kinabatangan' :
+              branch === 'Kota Kinabalu' ? '/admin/kota-kinabalu' :
+              '/admin/commissions';
+            return NextResponse.redirect(new URL(branchSlug, request.url));
+          }
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+
         if (!canAccessAdminPath(role, pathname)) {
           return NextResponse.redirect(new URL('/unauthorized', request.url));
         }

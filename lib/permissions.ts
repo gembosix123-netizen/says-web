@@ -8,7 +8,6 @@ export function canAccessAdminPath(role: NormalizedRole, pathname: string): bool
   if (role === 'Main Admin') return true;
 
   const adminAllowedPaths = [
-    '/admin',
     '/admin/kota-kinabalu',
     '/admin/kinabatangan',
     '/admin/live-sales',
@@ -19,10 +18,19 @@ export function canAccessAdminPath(role: NormalizedRole, pathname: string): bool
     '/admin/products',
     '/admin/customers',
     '/admin/database',
+    '/admin/backdated-import',
+    '/admin/weekly-reports',
+    '/admin/expenses',
+    '/admin/day-end',
+    '/admin/users',
+    '/admin/stores',
+    '/admin/audit-center',
+    '/admin/audits',
+    '/admin/outstanding',
+    '/admin/sales',
   ];
 
   const salesAllowedPaths = [
-    '/admin',
     '/admin/kota-kinabalu',
     '/admin/kinabatangan',
     '/admin/commissions',
@@ -68,5 +76,13 @@ export function canViewAudit(role: NormalizedRole): boolean {
 }
 
 export function canExportReports(role: NormalizedRole): boolean {
+  return role === 'Main Admin' || role === 'Admin';
+}
+
+export function canManageExpenses(role: NormalizedRole): boolean {
+  return role === 'Main Admin' || role === 'Admin';
+}
+
+export function canViewWeeklyReports(role: NormalizedRole): boolean {
   return role === 'Main Admin' || role === 'Admin';
 }

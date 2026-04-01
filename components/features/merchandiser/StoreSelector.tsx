@@ -18,6 +18,7 @@ export function StoreSelector() {
     name: '',
     phone: '',
     address: '',
+    area: '',
     mapLink: '',
     branch: userBranch || 'Kota Kinabalu',
   });
@@ -62,6 +63,7 @@ export function StoreSelector() {
           name: newStore.name.trim(),
           phone: newStore.phone.trim(),
           address: formattedAddress,
+          area: newStore.area.trim(),
           branch: newStore.branch,
         }),
       });
@@ -78,6 +80,7 @@ export function StoreSelector() {
         name: '',
         phone: '',
         address: '',
+        area: '',
         mapLink: '',
         branch: userBranch || 'Kota Kinabalu',
       });
@@ -137,6 +140,12 @@ export function StoreSelector() {
                 placeholder="Address"
                 value={newStore.address}
                 onChange={(event) => setNewStore((prev) => ({ ...prev, address: event.target.value }))}
+              />
+              <Input
+                placeholder="Area / Kawasan (cth: Inanam, Penampang)"
+                value={newStore.area}
+                onChange={(event) => setNewStore((prev) => ({ ...prev, area: event.target.value }))}
+                required
               />
               <Input
                 placeholder="Branch (e.g. Kota Kinabalu)"

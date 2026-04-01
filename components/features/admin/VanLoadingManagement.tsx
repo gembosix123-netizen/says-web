@@ -1,208 +1,482 @@
 'use client';
-import React, { useState, useEffect } from 'react';
-import { Truck, Save, Plus, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Truck, Save, Plus, Trash2, PackagePlus, RotateCcw, History, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 interface User {
   id: string;
   name: string;
   username: string;
+  branch: string;
 }
 
 interface Product {
   id: string;
   name: string;
-  code: string;
+  code?: string;
+  current_stock?: number;
 }
 
+interface Movement {
+  id: string;
+  movement_type: string;
+  product_name: string;
+  qty: number;
+  from_bucket: string | null;
+  to_bucket: string | null;
+  actor_name: string | null;
+  branch: string;
+  notes: string | null;
+  movement_date: string;
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  freezer_in: 'Stok Masuk Freezer',
+  freezer_to_van: 'Freezer → Van',
+  van_to_freezer: 'Van → Freezer',
+  sale_deduct: 'Jualan',
+  return_approved: 'Return Diluluskan',
+  carry_forward: 'Baki Bawa Maju',
+  damage_write_off: 'Hapus Kira Rosak',
+  adjustment: 'Pelarasan',
+};
+
+const TYPE_COLOR: Record<string, string> = {
+  freezer_in: 'text-emerald-400',
+  freezer_to_van: 'text-orange-400',
+  van_to_freezer: 'text-blue-400',
+  sale_deduct: 'text-red-400',
+  return_approved: 'text-purple-400',
+  carry_forward: 'text-slate-400',
+  damage_write_off: 'text-red-500',
+  adjustment: 'text-yellow-400',
+};
+
 export default function VanLoadingManagement() {
+  const [activeTab, setActiveTab] = useState<'freezer_in' | 'van_load' | 'van_return' | 'history'>('freezer_in');
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [selectedUser, setSelectedUser] = useState('');
-  const [loadItems, setLoadItems] = useState<{ productId: string; quantity: number }[]>([]);
-  
-  // Fetch staff data
-  const fetchStaff = async () => {
+  const [movements, setMovements] = useState<Movement[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+
+  // ── Forms ──
+  const [freezerInItems, setFreezerInItems] = useState<{ productId: string; qty: number; notes: string }[]>([]);
+  const [vanLoadUser, setVanLoadUser] = useState('');
+  const [vanLoadItems, setVanLoadItems] = useState<{ productId: string; quantity: number }[]>([]);
+  const [vanReturnUser, setVanReturnUser] = useState('');
+  const [vanReturnItems, setVanReturnItems] = useState<{ productId: string; qty: number; notes: string }[]>([]);
+
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const fetchStaff = useCallback(async () => {
     try {
       const res = await fetch('/api/users?role=Sales');
-      const userData = await res.json();
-      const users = Array.isArray(userData) ? userData : (userData?.data || []);
-      setUsers(users);
-    } catch (err) {
-      console.error('Error fetching staff:', err);
-      setUsers([]);
-    }
-  };
-
-  // Fetch products data
-  const fetchProducts = async () => {
-    try {
-      const res = await fetch('/api/products');
-      const productData = await res.json();
-      const products = Array.isArray(productData) ? productData : (productData?.data || []);
-      setProducts(products);
-    } catch (err) {
-      console.error('Error fetching products:', err);
-      setProducts([]);
-    }
-  };
-  
-  // Load initial data & setup Supabase Realtime subscription
-  useEffect(() => {
-    // Fetch initial data
-    fetchStaff();
-    fetchProducts();
-
-    // Setup Supabase Realtime subscription for staff (users with role Sales)
-    const channel = supabase
-      .channel('users-changes')
-      .on(
-        'postgres_changes',
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'users',
-          filter: 'role=eq.Sales'
-        },
-        (payload) => {
-          console.log('Staff data changed:', payload);
-          // Refetch staff data when there's any change (INSERT, UPDATE, DELETE)
-          fetchStaff();
-        }
-      )
-      .subscribe();
-
-    // Cleanup: unsubscribe when component unmounts
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      const data = await res.json();
+      setUsers(Array.isArray(data) ? data : (data?.data || []));
+    } catch { setUsers([]); }
   }, []);
 
-  const addItem = () => {
-    if (products.length > 0) {
-        setLoadItems([...loadItems, { productId: products[0].id, quantity: 0 }]);
-    }
-  };
-
-  const updateItem = (index: number, field: 'productId' | 'quantity', value: string) => {
-    const newItems = [...loadItems];
-    if (field === 'quantity') {
-        newItems[index].quantity = parseInt(value) || 0;
-    } else {
-        newItems[index].productId = value;
-    }
-    setLoadItems(newItems);
-  };
-
-  const removeItem = (index: number) => {
-    setLoadItems(loadItems.filter((_, i) => i !== index));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedUser || loadItems.length === 0) return alert('Select user and items');
-
+  const fetchProducts = useCallback(async () => {
     try {
-        const payload = {
-            userId: selectedUser,
-            items: loadItems
-        };
-        console.log('Sending payload:', payload);
+      const res = await fetch('/api/products');
+      const data = await res.json();
+      setProducts(Array.isArray(data) ? data : (data?.data || []));
+    } catch { setProducts([]); }
+  }, []);
 
-        const res = await fetch('/api/inventory/load', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+  const fetchMovements = useCallback(async () => {
+    setLoadingData(true);
+    try {
+      const res = await fetch('/api/inventory/movements?limit=200');
+      const data = await res.json();
+      setMovements(Array.isArray(data) ? data : []);
+    } catch { setMovements([]); }
+    setLoadingData(false);
+  }, []);
+
+  useEffect(() => {
+    fetchStaff();
+    fetchProducts();
+    const channel = supabase.channel('users-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: 'role=eq.Sales' }, fetchStaff)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchStaff, fetchProducts]);
+
+  useEffect(() => {
+    if (activeTab === 'history') fetchMovements();
+  }, [activeTab, fetchMovements]);
+
+  // ── Helper: blank item ──
+  const blankFI = () => ({ productId: products[0]?.id || '', qty: 0, notes: '' });
+  const blankVL = () => ({ productId: products[0]?.id || '', quantity: 0 });
+  const blankVR = () => ({ productId: products[0]?.id || '', qty: 0, notes: '' });
+
+  // ── Submit: Stok Masuk Freezer ──
+  const handleFreezerIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const valid = freezerInItems.filter(i => i.productId && i.qty > 0);
+    if (valid.length === 0) return showToast('Tambah sekurang-kurangnya 1 item dengan kuantiti > 0', 'error');
+    setSubmitting(true);
+    try {
+      for (const item of valid) {
+        const prod = products.find(p => p.id === item.productId);
+        // Update freezer stock in products table
+        await fetch('/api/products', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.productId, stock: (prod?.current_stock || 0) + item.qty, current_stock: (prod?.current_stock || 0) + item.qty }),
         });
-
-        const data = await res.json();
-        
-        if (res.ok) {
-            alert('Stock Loaded Successfully!');
-            setLoadItems([]);
-            setSelectedUser('');
-        } else {
-            console.error('Server Error:', data);
-            alert(`Failed to load stock: ${data.error || 'Unknown error'}`);
-        }
-    } catch (e) {
-        console.error('Network Error:', e);
-        alert('Error submitting load. Check console.');
-    }
+        // Log movement
+        await fetch('/api/inventory/movements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            movement_type: 'freezer_in',
+            product_id: item.productId,
+            product_name: prod?.name,
+            qty: item.qty,
+            from_bucket: 'supplier',
+            to_bucket: 'freezer',
+            notes: item.notes || null,
+          }),
+        });
+      }
+      showToast(`${valid.length} produk berjaya direkod masuk freezer`);
+      setFreezerInItems([]);
+      fetchProducts();
+    } catch { showToast('Gagal rekod stok masuk', 'error'); }
+    setSubmitting(false);
   };
+
+  // ── Submit: Muatan Van ──
+  const handleVanLoad = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vanLoadUser) return showToast('Sila pilih salesman', 'error');
+    const valid = vanLoadItems.filter(i => i.productId && i.quantity > 0);
+    if (valid.length === 0) return showToast('Tambah sekurang-kurangnya 1 item', 'error');
+    setSubmitting(true);
+    try {
+      const selectedUser = users.find(u => u.id === vanLoadUser);
+      const res = await fetch('/api/inventory/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: vanLoadUser,
+          items: valid,
+          actor_branch: selectedUser?.branch || 'HQ',
+          actor_name: selectedUser?.name,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      showToast(`Muatan van berjaya direkod untuk ${selectedUser?.name}`);
+      setVanLoadItems([]);
+      setVanLoadUser('');
+      fetchProducts();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal rekod muatan van', 'error');
+    }
+    setSubmitting(false);
+  };
+
+  // ── Submit: Van Pulang ke Freezer ──
+  const handleVanReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vanReturnUser) return showToast('Sila pilih salesman', 'error');
+    const valid = vanReturnItems.filter(i => i.productId && i.qty > 0);
+    if (valid.length === 0) return showToast('Tambah sekurang-kurangnya 1 item', 'error');
+    setSubmitting(true);
+    try {
+      const selectedUser = users.find(u => u.id === vanReturnUser);
+      for (const item of valid) {
+        const prod = products.find(p => p.id === item.productId);
+        // Add back to freezer stock
+        await fetch('/api/products', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.productId, stock: (prod?.current_stock || 0) + item.qty, current_stock: (prod?.current_stock || 0) + item.qty }),
+        });
+        // Deduct from van inventory
+        await fetch('/api/inventory/van', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: vanReturnUser, items: { [item.productId]: item.qty } }),
+        });
+        // Log movement
+        await fetch('/api/inventory/movements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            movement_type: 'van_to_freezer',
+            product_id: item.productId,
+            product_name: prod?.name,
+            qty: item.qty,
+            from_bucket: 'van',
+            to_bucket: 'freezer',
+            actor_id: vanReturnUser,
+            actor_name: selectedUser?.name,
+            branch: selectedUser?.branch || 'HQ',
+            notes: item.notes || null,
+          }),
+        });
+      }
+      showToast(`Stok pulang dari van ${selectedUser?.name} berjaya direkod`);
+      setVanReturnItems([]);
+      setVanReturnUser('');
+      fetchProducts();
+    } catch { showToast('Gagal rekod pulangan van', 'error'); }
+    setSubmitting(false);
+  };
+
+  // ── Reusable item row editor ──
+  const ItemRow = ({
+    item, idx,
+    onChange, onRemove,
+    showNotes = false,
+  }: {
+    item: { productId: string; qty?: number; quantity?: number; notes?: string };
+    idx: number;
+    onChange: (idx: number, field: string, value: string) => void;
+    onRemove: (idx: number) => void;
+    showNotes?: boolean;
+  }) => (
+    <div className="flex gap-2 items-start">
+      <select
+        value={item.productId}
+        onChange={(e) => onChange(idx, 'productId', e.target.value)}
+        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm"
+      >
+        {products.map(p => (
+          <option key={p.id} value={p.id}>{p.name}{p.current_stock != null ? ` (freezer: ${p.current_stock})` : ''}</option>
+        ))}
+      </select>
+      <input
+        type="number" min="1" placeholder="Qty"
+        value={(item.qty ?? item.quantity) || ''}
+        onChange={(e) => onChange(idx, 'qty', e.target.value)}
+        className="w-20 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-center text-sm"
+      />
+      {showNotes && (
+        <input
+          placeholder="Nota"
+          value={item.notes || ''}
+          onChange={(e) => onChange(idx, 'notes', e.target.value)}
+          className="w-36 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm"
+        />
+      )}
+      <button type="button" onClick={() => onRemove(idx)} className="p-2 text-red-400 hover:bg-slate-800 rounded">
+        <Trash2 size={16} />
+      </button>
+    </div>
+  );
+
+  const tabs = [
+    { id: 'freezer_in', label: 'Stok Masuk Freezer', icon: PackagePlus, color: 'text-emerald-400' },
+    { id: 'van_load', label: 'Muatan Van', icon: Truck, color: 'text-orange-400' },
+    { id: 'van_return', label: 'Van → Freezer', icon: RotateCcw, color: 'text-blue-400' },
+    { id: 'history', label: 'Log Pergerakan', icon: History, color: 'text-slate-300' },
+  ] as const;
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
-        <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
-            <Truck className="text-orange-500" /> Van Stock Loading
-        </h2>
+    <div className="space-y-4 max-w-4xl mx-auto">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+          {toast.msg}
+        </div>
+      )}
 
-        {users.length === 0 || products.length === 0 ? (
-          <div className="p-6 bg-slate-800/50 rounded-lg border border-slate-700 text-center text-slate-300">
-            <p>Loading staff and products...</p>
-            {users.length === 0 && <p className="text-sm text-slate-400">Available staff: {users.length}</p>}
-            {products.length === 0 && <p className="text-sm text-slate-400">Available products: {products.length}</p>}
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* User Selection */}
-            <div>
-                <label className="block text-sm text-slate-400 mb-2">Select Sales Staff</label>
-                <select 
-                    value={selectedUser}
-                    onChange={(e) => setSelectedUser(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white"
-                    required
-                >
-                    <option value="">-- Select Staff --</option>
-                    {users.map(u => (
-                        <option key={u.id} value={u.id}>{u.name} ({u.username})</option>
-                    ))}
-                </select>
-            </div>
-
-            {/* Items List */}
-            <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                    <label className="text-sm text-slate-400">Loading Items</label>
-                    <button type="button" onClick={addItem} className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                        <Plus size={16} /> Add Item
-                    </button>
-                </div>
-                
-                {loadItems.map((item, idx) => (
-                    <div key={idx} className="flex gap-2">
-                        <select 
-                            value={item.productId}
-                            onChange={(e) => updateItem(idx, 'productId', e.target.value)}
-                            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white"
-                        >
-                            {products.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                        <input 
-                            type="number"
-                            placeholder="Qty"
-                            value={item.quantity}
-                            onChange={(e) => updateItem(idx, 'quantity', e.target.value)}
-                            className="w-24 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-center"
-                        />
-                        <button type="button" onClick={() => removeItem(idx)} className="p-2 text-red-400 hover:bg-slate-800 rounded">
-                            <Trash2 size={18} />
-                        </button>
-                    </div>
-
-                ))}
-            </div>
-
-            <button type="submit" className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
-                <Save size={20} /> Confirm Load
-            </button>
-        </form>
-        )}
+      {/* Tab Bar */}
+      <div className="flex gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 flex-wrap">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`flex-1 min-w-[130px] flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg text-sm font-medium transition-colors ${activeTab === t.id ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <t.icon size={15} className={activeTab === t.id ? t.color : ''} />
+            {t.label}
+          </button>
+        ))}
       </div>
+
+      {/* ── TAB: Stok Masuk Freezer ── */}
+      {activeTab === 'freezer_in' && (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-5 space-y-4">
+          <div>
+            <h2 className="text-white font-semibold text-lg flex items-center gap-2"><PackagePlus className="text-emerald-400" size={18} /> Rekod Stok Masuk Freezer</h2>
+            <p className="text-slate-500 text-xs mt-1">Stok baharu dari supplier / penghantaran masuk ke dalam freezer.</p>
+          </div>
+          <form onSubmit={handleFreezerIn} className="space-y-3">
+            {freezerInItems.map((item, idx) => (
+              <ItemRow key={idx} item={item} idx={idx} showNotes
+                onChange={(i, f, v) => {
+                  const next = [...freezerInItems];
+                  if (f === 'qty') next[i].qty = parseInt(v) || 0;
+                  else if (f === 'notes') next[i].notes = v;
+                  else next[i].productId = v;
+                  setFreezerInItems(next);
+                }}
+                onRemove={(i) => setFreezerInItems(freezerInItems.filter((_, x) => x !== i))}
+              />
+            ))}
+            <button type="button" onClick={() => setFreezerInItems([...freezerInItems, blankFI()])}
+              className="text-sm text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+              <Plus size={14} /> Tambah Produk
+            </button>
+            {freezerInItems.length > 0 && (
+              <button type="submit" disabled={submitting}
+                className="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2 mt-2">
+                <Save size={16} /> {submitting ? 'Menyimpan...' : 'Simpan Stok Masuk'}
+              </button>
+            )}
+          </form>
+        </div>
+      )}
+
+      {/* ── TAB: Muatan Van ── */}
+      {activeTab === 'van_load' && (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-5 space-y-4">
+          <div>
+            <h2 className="text-white font-semibold text-lg flex items-center gap-2"><Truck className="text-orange-400" size={18} /> Muatan Van (Freezer → Van)</h2>
+            <p className="text-slate-500 text-xs mt-1">Rekod stok keluar dari freezer dan dimuatkan ke van salesman.</p>
+          </div>
+          {users.length === 0 || products.length === 0 ? (
+            <p className="text-slate-500 text-sm">Memuatkan data...</p>
+          ) : (
+            <form onSubmit={handleVanLoad} className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Salesman</label>
+                <select value={vanLoadUser} onChange={(e) => setVanLoadUser(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white" required>
+                  <option value="">-- Pilih Salesman --</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.username})</option>)}
+                </select>
+              </div>
+              {vanLoadItems.map((item, idx) => (
+                <ItemRow key={idx} item={item} idx={idx}
+                  onChange={(i, f, v) => {
+                    const next = [...vanLoadItems];
+                    if (f === 'qty') next[i].quantity = parseInt(v) || 0;
+                    else next[i].productId = v;
+                    setVanLoadItems(next);
+                  }}
+                  onRemove={(i) => setVanLoadItems(vanLoadItems.filter((_, x) => x !== i))}
+                />
+              ))}
+              <button type="button" onClick={() => setVanLoadItems([...vanLoadItems, blankVL()])}
+                className="text-sm text-orange-400 hover:text-orange-300 flex items-center gap-1">
+                <Plus size={14} /> Tambah Item
+              </button>
+              {vanLoadItems.length > 0 && (
+                <button type="submit" disabled={submitting}
+                  className="w-full bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2 mt-2">
+                  <Truck size={16} /> {submitting ? 'Menyimpan...' : 'Rekod Muatan Van'}
+                </button>
+              )}
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: Van Pulang ke Freezer ── */}
+      {activeTab === 'van_return' && (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-5 space-y-4">
+          <div>
+            <h2 className="text-white font-semibold text-lg flex items-center gap-2"><RotateCcw className="text-blue-400" size={18} /> Stok Pulang Van → Freezer</h2>
+            <p className="text-slate-500 text-xs mt-1">Stok baki van yang tidak habis dijual dikembalikan ke freezer.</p>
+          </div>
+          <form onSubmit={handleVanReturn} className="space-y-3">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Salesman</label>
+              <select value={vanReturnUser} onChange={(e) => setVanReturnUser(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white" required>
+                <option value="">-- Pilih Salesman --</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.username})</option>)}
+              </select>
+            </div>
+            {vanReturnItems.map((item, idx) => (
+              <ItemRow key={idx} item={item} idx={idx} showNotes
+                onChange={(i, f, v) => {
+                  const next = [...vanReturnItems];
+                  if (f === 'qty') next[i].qty = parseInt(v) || 0;
+                  else if (f === 'notes') next[i].notes = v;
+                  else next[i].productId = v;
+                  setVanReturnItems(next);
+                }}
+                onRemove={(i) => setVanReturnItems(vanReturnItems.filter((_, x) => x !== i))}
+              />
+            ))}
+            <button type="button" onClick={() => setVanReturnItems([...vanReturnItems, blankVR()])}
+              className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
+              <Plus size={14} /> Tambah Item
+            </button>
+            {vanReturnItems.length > 0 && (
+              <button type="submit" disabled={submitting}
+                className="w-full bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2 mt-2">
+                <Save size={16} /> {submitting ? 'Menyimpan...' : 'Rekod Pulangan ke Freezer'}
+              </button>
+            )}
+          </form>
+        </div>
+      )}
+
+      {/* ── TAB: Log Pergerakan ── */}
+      {activeTab === 'history' && (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-white font-semibold text-lg flex items-center gap-2"><History className="text-slate-300" size={18} /> Log Pergerakan Stok</h2>
+            <button onClick={fetchMovements} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded bg-slate-800">
+              <RefreshCw size={12} /> Refresh
+            </button>
+          </div>
+          {loadingData ? (
+            <p className="text-slate-500 text-sm">Memuatkan log...</p>
+          ) : movements.length === 0 ? (
+            <p className="text-slate-500 text-sm">Tiada log lagi.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-700 text-left">
+                    <th className="pb-2 px-2 text-slate-400">Tarikh</th>
+                    <th className="pb-2 px-2 text-slate-400">Jenis</th>
+                    <th className="pb-2 px-2 text-slate-400">Produk</th>
+                    <th className="pb-2 px-2 text-slate-400 text-right">Qty</th>
+                    <th className="pb-2 px-2 text-slate-400">Dari → Ke</th>
+                    <th className="pb-2 px-2 text-slate-400">Petugas</th>
+                    <th className="pb-2 px-2 text-slate-400">Nota</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {movements.map(m => (
+                    <tr key={m.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                      <td className="px-2 py-2 text-slate-400 whitespace-nowrap">
+                        {new Date(m.movement_date).toLocaleDateString('ms-MY', { day: '2-digit', month: 'short', year: 'numeric' })}{' '}
+                        {new Date(m.movement_date).toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td className={`px-2 py-2 font-medium whitespace-nowrap ${TYPE_COLOR[m.movement_type] || 'text-slate-300'}`}>
+                        {TYPE_LABEL[m.movement_type] || m.movement_type}
+                      </td>
+                      <td className="px-2 py-2 text-white">{m.product_name || '—'}</td>
+                      <td className="px-2 py-2 text-right font-bold text-white">{m.qty}</td>
+                      <td className="px-2 py-2 text-slate-400">{[m.from_bucket, m.to_bucket].filter(Boolean).join(' → ') || '—'}</td>
+                      <td className="px-2 py-2 text-slate-400">{m.actor_name || '—'}</td>
+                      <td className="px-2 py-2 text-slate-500">{m.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

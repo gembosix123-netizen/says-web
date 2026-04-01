@@ -55,17 +55,13 @@ export function canPerformAudit(role: UserRole): boolean {
 }
 
 /**
- * Get the appropriate sales table name based on branch
+ * Get the appropriate sales table name based on branch.
+ * @deprecated All sales data is now stored in the single 'sales_transactions'
+ * table with a branch column. Use sales_transactions with .eq('branch', ...).
+ * This function is kept only for backward-compat with any callers not yet updated.
  */
-export function getSalesTableByBranch(branch: Branch): 'sales_kota_kinabalu' | 'sales_kinabatangan' {
-  switch (branch) {
-    case 'Kota Kinabalu':
-      return 'sales_kota_kinabalu';
-    case 'Kinabatangan':
-      return 'sales_kinabatangan';
-    default:
-      throw new Error(`Invalid branch: ${branch}`);
-  }
+export function getSalesTableByBranch(_branch: Branch): 'sales_transactions' {
+  return 'sales_transactions';
 }
 
 /**
@@ -73,7 +69,7 @@ export function getSalesTableByBranch(branch: Branch): 'sales_kota_kinabalu' | '
  * - Kota Kinabalu -> customers_kb
  * - Kinabatangan -> customers_kk
  */
-export function getCustomersTableByBranch(branch?: Branch): 'customers_kb' | 'customers_kk' {
+export function getCustomersTableByBranch(branch?: string): 'customers_kb' | 'customers_kk' {
   if (!branch || branch === 'Kota Kinabalu' || branch === 'KB') {
     return 'customers_kb';
   }

@@ -1,8 +1,33 @@
-# Customer Branch Separation Implementation
+# Customer Branch Separation — Implementation Guide
+
+> **Status:** Production — deployed March 26, 2026  
+> **Latest update:** April 1, 2026 (added ownership, district columns, RLS)
+
+## Table Naming Convention
+
+> ⚠️ **Important:** The suffix letters are NOT abbreviations for the branch in the conventional sense. The canonical mapping is:
+
+| Table | Branch | Reason |
+|---|---|---|
+| `customers_kb` | **Kota Kinabalu** | KB = Kota Kinabalu (local shorthand) |
+| `customers_kk` | **Kinabatangan** | KK = Kinabatangan |
+
+Always use `getCustomersTableByBranch(branch)` from `lib/branchPermissions.ts` to resolve — never hardcode the table names.
+
+```typescript
+// lib/branchPermissions.ts
+export function getCustomersTableByBranch(branch?: string): 'customers_kb' | 'customers_kk' {
+  if (!branch || branch === 'Kota Kinabalu' || branch === 'KB') return 'customers_kb';
+  if (branch === 'Kinabatangan' || branch === 'KK') return 'customers_kk';
+  return 'customers_kb'; // default
+}
+```
+
+---
 
 ## Summary
 
-Successfully implemented complete branch isolation for customers by creating separate database tables for each branch (KB and KK). This ensures complete data segregation and prevents accidental cross-branch customer visibility.
+Complete branch isolation for customers via separate database tables. Ensures no accidental cross-branch customer visibility.
 
 ## Changes Made
 
@@ -10,8 +35,8 @@ Successfully implemented complete branch isolation for customers by creating sep
 **File:** `migrations/20260326_separate_customers_by_branch.sql`
 
 Creates three new tables:
-- `customers_kb` - Kota Kinabalu customers (renamed from old `customers` table filtered by branch)
-- `customers_kk` - Kinabatangan customers (renamed from old `customers` table filtered by branch)
+- `customers_kb` - **Kota Kinabalu** customers (migrated from old `customers` table filtered by branch)
+- `customers_kk` - **Kinabatangan** customers (migrated from old `customers` table filtered by branch)
 - Archives old `customers` table as `customers_archive` for backup
 
 **Key Actions:**
@@ -29,8 +54,9 @@ export function getCustomersTableByBranch(branch?: Branch): 'customers_kb' | 'cu
 
 This function:
 - Returns the correct table name based on user's branch
-- Defaults to `customers_kb` for Kota Kinabalu
-- Returns `customers_kk` for Kinabatangan
+- `'Kota Kinabalu'` or `'KB'` → `customers_kb`
+- `'Kinabatangan'` or `'KK'` → `customers_kk`
+- Defaults to `customers_kb` if branch is undefined/unknown
 
 ### 3. Updated API Endpoints
 
@@ -163,7 +189,49 @@ ALTER TABLE customers_archive RENAME TO customers;
 
 ## Notes
 
-- Default branch for ambiguous customers is Kota Kinabalu (KB)
-- The implementation uses table suffixes `_kb` and `_kk` for clarity
+- Default branch for ambiguous customers is Kota Kinabalu → `customers_kb`
 - Branch determination is from user's session data
 - All new customers are created in user's branch table automatically
+- RLS is enabled on both tables: anon key denied; service role only (via `supabaseAdmin`)
+
+---
+
+## April 2026 Updates
+
+### Customer Ownership (`20260401_customer_ownership.sql`)
+
+Both `customers_kb` and `customers_kk` now have ownership columns:
+
+```sql
+assigned_to        TEXT    -- salesman user ID
+assigned_to_name   TEXT    -- snapshot of salesman name
+assigned_at        TIMESTAMPTZ
+district           TEXT
+state              TEXT DEFAULT 'Sabah'
+geo_group          TEXT
+```
+
+**Ownership Rules:**
+- Customer with `assigned_to = NULL` → company customer, any salesman in branch can sell
+- Customer with `assigned_to = salesmanId` → owned; only that salesman (or Admin/Main Admin) can sell
+- Admin can assign/handover customers within their branch
+- Main Admin can reassign across branches
+
+**Audit Log:**
+```sql
+customer_ownership_log (
+  customer_id, customer_name, customer_table,
+  from_salesman_id, from_salesman_name,
+  to_salesman_id, to_salesman_name,
+  action,   -- 'assign' | 'handover' | 'release' | 'self_add'
+  reason,
+  done_by, done_by_name, branch,
+  created_at
+)
+```
+
+### District Filtering (`20260401_full_system_upgrade.sql`)
+
+Both tables also have `district`, `state`, `geo_group` for geographic filtering.
+
+Users table: `assigned_districts TEXT[]` — salesman coverage areas (e.g. `{Beaufort, Kota Belud}`).

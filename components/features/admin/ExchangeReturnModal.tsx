@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { X, Package, AlertCircle } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface ExchangeReturnModalProps {
   isOpen: boolean;
@@ -26,10 +27,54 @@ export default function ExchangeReturnModal({ isOpen, onClose, onSuccess, saleDa
   const [reason, setReason] = useState('');
   const [reasonDetails, setReasonDetails] = useState('');
   const [notes, setNotes] = useState('');
+  const [proofFiles, setProofFiles] = useState<File[]>([]);
+  const [proofPreviews, setProofPreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
+
+  const handleProofFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    setProofFiles((prev) => [...prev, ...files]);
+    const previews = files.map((file) => URL.createObjectURL(file));
+    setProofPreviews((prev) => [...prev, ...previews]);
+
+    event.currentTarget.value = '';
+  };
+
+  const removeProofAt = (index: number) => {
+    setProofFiles((prev) => prev.filter((_, i) => i !== index));
+    setProofPreviews((prev) => {
+      const target = prev[index];
+      if (target) URL.revokeObjectURL(target);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const uploadProofImages = async (files: File[]) => {
+    const uploadedUrls: string[] = [];
+
+    for (const file of files) {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const filename = `exchange-returns/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('sales-receipts')
+        .upload(filename, file, { contentType: file.type || 'image/jpeg', upsert: false });
+
+      if (uploadError) {
+        throw new Error(`Gagal upload gambar bukti: ${uploadError.message}`);
+      }
+
+      const { data } = supabase.storage.from('sales-receipts').getPublicUrl(filename);
+      uploadedUrls.push(data.publicUrl);
+    }
+
+    return uploadedUrls;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,6 +89,12 @@ export default function ExchangeReturnModal({ isOpen, onClose, onSuccess, saleDa
     }
 
     try {
+      if (proofFiles.length === 0) {
+        throw new Error('Gambar bukti wajib. Sila snap atau pilih sekurang-kurangnya satu gambar.');
+      }
+
+      const proofPhotoUrls = await uploadProofImages(proofFiles);
+
       const response = await fetch('/api/exchange-returns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,7 +107,8 @@ export default function ExchangeReturnModal({ isOpen, onClose, onSuccess, saleDa
           type,
           reason,
           reason_details: reasonDetails || undefined,
-          notes: notes || undefined
+          notes: notes || undefined,
+          proof_photo_urls: proofPhotoUrls,
         })
       });
 
@@ -74,6 +126,9 @@ export default function ExchangeReturnModal({ isOpen, onClose, onSuccess, saleDa
       setReason('');
       setReasonDetails('');
       setNotes('');
+      proofPreviews.forEach((url) => URL.revokeObjectURL(url));
+      setProofFiles([]);
+      setProofPreviews([]);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -216,6 +271,41 @@ export default function ExchangeReturnModal({ isOpen, onClose, onSuccess, saleDa
               placeholder="Any additional notes..."
               className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-orange-500 resize-none"
             />
+          </div>
+
+          {/* Proof Photos */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+              Gambar Bukti (Wajib)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              onChange={handleProofFiles}
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-orange-500"
+            />
+            {proofPreviews.length > 0 && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {proofPreviews.map((url, idx) => (
+                  <div key={`${url}-${idx}`} className="relative">
+                    <img src={url} alt={`proof-${idx}`} className="w-full h-20 object-cover rounded border border-slate-300 dark:border-slate-700" />
+                    <button
+                      type="button"
+                      onClick={() => removeProofAt(idx)}
+                      className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500 text-white text-xs leading-none"
+                      aria-label="Padam gambar"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Snap gambar terus dari kamera atau pilih dari galeri. Sekurang-kurangnya 1 gambar diperlukan.
+            </p>
           </div>
 
           {/* Actions */}

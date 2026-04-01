@@ -11,9 +11,11 @@ import {
   Download,
   Filter,
   ShoppingCart,
-  DollarSign
+  DollarSign,
+  Package
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import ExchangeReturnModal from '@/components/features/admin/ExchangeReturnModal';
 
 interface Sale {
   id: string;
@@ -27,6 +29,8 @@ interface Sale {
 }
 
 interface SaleItem {
+  id?: string;
+  product_id?: string;
   name?: string;
   product_name?: string;
   quantity?: number;
@@ -40,6 +44,8 @@ export default function SalesHistoryPage() {
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [exchangeModalOpen, setExchangeModalOpen] = useState(false);
+  const [exchangeSale, setExchangeSale] = useState<Sale | null>(null);
 
   const fetchSales = useCallback(async () => {
     try {
@@ -67,6 +73,8 @@ export default function SalesHistoryPage() {
             status,
             items: Array.isArray(sale.items)
               ? sale.items.map((item: { name?: string; product_name?: string; quantity?: number | string; subtotal?: number | string }) => ({
+                  id: item?.id || item?.product_id || item?.productId,
+                  product_id: item?.product_id || item?.productId || item?.id,
                   name: item?.name || item?.product_name,
                   product_name: item?.product_name || item?.name,
                   quantity: Number(item?.quantity || 0),
@@ -333,13 +341,31 @@ export default function SalesHistoryPage() {
                         <span className="text-white/60 text-sm">{formatDate(sale.created_at)}</span>
                       </td>
                       <td className="p-4 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedSale(sale)}
-                        >
-                          <Eye size={16} />
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedSale(sale)}
+                            title="Lihat Detail"
+                            className="inline-flex items-center gap-1"
+                          >
+                            <Eye size={14} />
+                            <span>Lihat</span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setExchangeSale(sale);
+                              setExchangeModalOpen(true);
+                            }}
+                            title="Return/Exchange"
+                            className="inline-flex items-center gap-1 text-orange-300 hover:text-orange-200"
+                          >
+                            <Package size={14} />
+                            <span>Return/Exchange</span>
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -417,6 +443,31 @@ export default function SalesHistoryPage() {
               </Button>
             </Card>
           </div>
+        )}
+
+        {/* Return / Exchange Modal for Sales */}
+        {exchangeSale && (
+          <ExchangeReturnModal
+            isOpen={exchangeModalOpen}
+            onClose={() => {
+              setExchangeModalOpen(false);
+              setExchangeSale(null);
+            }}
+            onSuccess={() => {
+              setExchangeModalOpen(false);
+              setExchangeSale(null);
+            }}
+            saleData={{
+              id: exchangeSale.id,
+              invoice: exchangeSale.id,
+              items: (exchangeSale.items || []).map((item) => ({
+                id: item.product_id || item.id || item.name || 'unknown_item',
+                name: item.name || item.product_name,
+                product_name: item.product_name || item.name,
+                quantity: Number(item.quantity || 0),
+              })),
+            }}
+          />
         )}
       </div>
     </div>

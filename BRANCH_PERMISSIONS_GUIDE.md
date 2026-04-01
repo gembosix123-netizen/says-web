@@ -28,22 +28,32 @@ created_at     | TIMESTAMP| Creation timestamp
 created_by     | UUID     | User who created this account
 ```
 
-**Sales Tables** (Branch-specific)
-- `sales_kota_kinabalu` - untuk Kota Kinabalu branch sahaja
-- `sales_kinabatangan` - untuk Kinabatangan branch sahaja
-- `sales_history` - view untuk reporting (merge dari both tables)
+**Sales Table** (Canonical)
+- `sales_transactions` — semua sales, branch diasingkan melalui kolum `branch`
+- `sales_items` — line items untuk setiap transaksi
+
+Branch-scoped VIEWs (read helpers, bukan base table):
+- `sales_kota_kinabalu` — VIEW: `SELECT * FROM sales_transactions WHERE branch = 'Kota Kinabalu'`
+- `sales_kinabatangan` — VIEW: `SELECT * FROM sales_transactions WHERE branch = 'Kinabatangan'`
+
+**Customers Tables** (Branch-isolated base tables)
+- `customers_kb` — Kota Kinabalu customers
+- `customers_kk` — Kinabatangan customers
+- `customers_archive` — archived (backup selepas migration)
 
 ### 2. Permissions Model
 
-| Role | Kota Kinabalu Data | Kinabatangan Data | HQ Data | Create Users | Delete Users |
-|------|:--:|:--:|:--:|:--:|:--:|
-| Main Admin (HQ) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Admin KK | ✅ | ❌ | ❌ | ✅* | ✅* |
-| Admin KB | ❌ | ✅ | ❌ | ✅* | ✅* |
-| Sales KK | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Sales KB | ❌ | ✅ | ❌ | ❌ | ❌ |
+| Role | Kota Kinabalu Data | Kinabatangan Data | HQ Data | Create Users | Delete Users | Sales | Store Visits/Audit |
+|------|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| Main Admin (HQ) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Admin KK | ✅ | ❌ | ❌ | ✅* | ✅* | ✅ | ✅ |
+| Admin KB | ❌ | ✅ | ❌ | ✅* | ✅* | ✅ | ✅ |
+| Sales KK | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Sales KB | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Merchandiser | ❌** | ❌** | ❌ | ❌ | ❌ | ❌ | ✅ |
 
-*Admin boleh create/delete users dalam branch mereka sahaja (Sales role only)
+*Admin boleh create/delete users dalam branch mereka sahaja (Sales role only)  
+**Merchandiser boleh akses store visits & audit sahaja. TIDAK boleh buat sales.
 
 ---
 
@@ -65,10 +75,12 @@ created_by     | UUID     | User who created this account
 interface User {
   id: string;
   username: string;
-  role: string;         // 'Main Admin' | 'Admin' | 'Sales'
+  role: string;              // 'Main Admin' | 'Admin' | 'Sales' | 'Merchandiser'
   name: string;
-  branch?: string;      // 'Kota Kinabalu' | 'Kinabatangan' | 'HQ'
+  branch?: string;           // 'Kota Kinabalu' | 'Kinabatangan' | 'HQ'
   created_at?: string;
+  assigned_districts?: string[]; // Salesman coverage areas e.g. ['Beaufort', 'Kota Belud']
+  allowed_stores?: string[];     // Merchandiser: array of customer IDs
 }
 ```
 
@@ -276,20 +288,36 @@ interface User {
 // Check if user can access a specific branch
 canAccessBranch(userRole, userBranch, targetBranch): boolean
 
-// Get appropriate table name for branch
-getSalesTableByBranch(branch): 'sales_kota_kinabalu' | 'sales_kinabatangan'
+// Check if user can create sales transactions
+// Returns false for Merchandiser
+canPerformSales(role): boolean
 
-// Build branch filter for queries
-buildBranchFilter(userRole, userBranch): { filterByBranch: boolean, branchValue? }
+// Check if user can do store audits
+// Returns true for Merchandiser, Sales, Admin, Main Admin
+canPerformAudit(role): boolean
 
-// Validate branch assignment permission
-validateBranchAssignment(creatorRole, creatorBranch, targetBranch): boolean
+// Get correct customers table for branch
+// 'Kota Kinabalu' | 'KB' → 'customers_kb'
+// 'Kinabatangan' | 'KK' → 'customers_kk'
+getCustomersTableByBranch(branch): 'customers_kb' | 'customers_kk'
 
-// Validate role escalation
-validateRoleCreation(creatorRole, targetRole): boolean
+// @deprecated — always returns 'sales_transactions'
+// All sales are in one table with branch column
+getSalesTableByBranch(_branch): 'sales_transactions'
+```
 
-// Get accessible branches for user
-getAccessibleBranches(userRole, userBranch): Branch[]
+**Route-level helpers** (`/lib/permissions.ts`):
+```typescript
+canAccessAdminPath(role, pathname): boolean
+canAccessSalesRoutes(role): boolean
+canAccessMerchandiserRoutes(role): boolean
+canAccessStoreVisits(role): boolean
+canViewDayEnd(role): boolean
+canManageUsers(role): boolean
+canManageProducts(role): boolean
+canViewAudit(role): boolean
+canExportReports(role): boolean
+canCloseDayEnd(role): boolean
 ```
 
 ---
@@ -348,9 +376,11 @@ CREATE INDEX idx_sales_kk_user_id ON sales_kota_kinabalu(user_id);
 3. **Validation**: All inputs validated before database query
 
 ### Database Level (RLS)
-1. **Row-Level Security policies** enforced at Supabase
+1. **Row-Level Security policies** enforced at Supabase (migration: `20260401_rls_branch_isolation.sql`)
 2. **Composite indexes** (branch, role) for fast filtering
-3. **Separate tables** for each branch (sales_kota_kinabalu vs sales_kinabatangan)
+3. **Canonical sales table**: `sales_transactions` with branch column — branch VIEWs for read convenience
+4. **Separate customer tables** per branch: `customers_kb` (Kota Kinabalu) and `customers_kk` (Kinabatangan)
+5. **Defence-in-depth**: All tables deny anon key access; only service role (server-side) can read/write
 
 ---
 
@@ -432,18 +462,19 @@ const response = await fetch('/api/users', {
 
 ### ✅ Implemented
 - [x] Branch-based access control at API level
-- [x] Row-Level Security (RLS) at database level
-- [x] Password hashing (SHA-256, upgrade to bcrypt in production)
-- [x] Session validation on every request
-- [x] Role validation before operations
+- [x] Row-Level Security (RLS) — anon key denied all table access
+- [x] bcrypt password hashing (10 salt rounds) with automatic lazy migration
+- [x] Session validation (`getSessionUserFromRequest`) on every request
+- [x] Role normalization (`normalizeRole`) before all permission checks
+- [x] Rate limiting: 5 login attempts / 15 min, scoped to IP + username
+- [x] Full audit logging for all critical actions (delete, close day-end, etc.)
+- [x] Reason + reference required for destructive operations
+- [x] Merchandiser role fully isolated from sales module
+- [x] Customer ownership tracking with full audit log
 
 ### 🔧 Recommended for Production
-- [ ] Upgrade to bcrypt/Argon2 for password hashing
-- [ ] Implement JWT tokens with expiration
-- [ ] Add audit logging for all sensitive operations
-- [ ] Enable HTTPS/TLS for all API calls
-- [ ] Implement rate limiting on authentication endpoints
-- [ ] Add 2FA for admin accounts
+- [ ] Implement JWT tokens with expiration (currently cookie-based)
+- [ ] Add 2FA for Main Admin accounts
 - [ ] Regular security audits & penetration testing
 
 ---

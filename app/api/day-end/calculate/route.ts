@@ -48,19 +48,23 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
-    const branch = searchParams.get('branch') || currentUser.branch;
+    // Admin can only calculate for their own branch; Main Admin may pass a specific branch
+    const branch = role === 'Admin'
+      ? (currentUser.branch ?? '')
+      : (searchParams.get('branch') || currentUser.branch);
 
-    // Determine sales table
-    const salesTable = branch === 'Kinabatangan' ? 'sales_kinabatangan' : 'sales_kota_kinabalu';
+    // All sales data lives in sales_transactions — filter by branch
+    const salesTable = 'sales_transactions';
 
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    // Fetch all transactions for the day
+    // Fetch all transactions for the day (branch-scoped)
     const { data: sales, error } = await supabaseAdmin
       .from(salesTable)
       .select('*')
+      .eq('branch', branch)
       .gte('created_at', `${date}T00:00:00Z`)
       .lte('created_at', `${date}T23:59:59Z`);
 

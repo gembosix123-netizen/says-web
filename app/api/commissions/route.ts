@@ -3,8 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest } from '@/lib/session';
 
-const TABLE_KOTA = 'sales_kota_kinabalu';
-const TABLE_KIN = 'sales_kinabatangan';
+const SALES_TABLE = 'sales_transactions';
 
 interface SalesRecord {
   salesman_id?: string;
@@ -87,34 +86,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });
     }
 
-    // Get all sales for the period
-    const fetchSales = async (table: string, branchFilter?: string) => {
-      let query = supabaseAdmin!
-        .from(table)
-        .select('*')
-        .gte('created_at', `${defaultStart}T00:00:00Z`)
-        .lte('created_at', `${defaultEnd}T23:59:59Z`);
+    // Get all sales for the period from the single authoritative table
+    let salesQuery = supabaseAdmin!
+      .from(SALES_TABLE)
+      .select('*')
+      .gte('created_at', `${defaultStart}T00:00:00Z`)
+      .lte('created_at', `${defaultEnd}T23:59:59Z`);
 
-      if (branchFilter && branchFilter !== 'all') {
-        query = query.eq('branch', branchFilter);
-      }
-
-      const { data } = await query;
-      return data || [];
-    };
-
-    let allSales: SalesRecord[] = [];
-    if (!branch || branch === 'all') {
-      const [kk, kin] = await Promise.all([
-        fetchSales(TABLE_KOTA),
-        fetchSales(TABLE_KIN)
-      ]);
-      allSales = [...kk, ...kin];
-    } else if (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) {
-      allSales = await fetchSales(TABLE_KIN, branch);
-    } else {
-      allSales = await fetchSales(TABLE_KOTA, branch);
+    if (branch && branch !== 'all') {
+      salesQuery = salesQuery.eq('branch', branch);
     }
+
+    const { data: allSalesData } = await salesQuery;
+    const allSales: SalesRecord[] = allSalesData || [];
 
     // Get commission payouts for the period
     const payoutsResult = await supabaseAdmin!

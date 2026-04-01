@@ -175,17 +175,12 @@ export const createSaleSchema = z.object({
   }
 ).refine(
   (data) => {
-    if (data.payment_method !== 'bank_transfer' && data.payment_method !== 'qr_code') {
-      return true;
-    }
-
     const hasSingleProof = Boolean(String(data.proof_photo_url || data.receipt_url || '').trim());
     const hasMultipleProofs = Array.isArray(data.proof_photo_urls) && data.proof_photo_urls.length > 0;
-
     return hasSingleProof || hasMultipleProofs;
   },
   {
-    message: 'Bukti pembayaran wajib untuk bank transfer atau QR code',
+    message: 'Bukti gambar wajib untuk semua jenis pembayaran',
     path: ['proof_photo_urls']
   }
 ).refine(

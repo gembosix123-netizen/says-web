@@ -9,6 +9,16 @@ export default function CommissionPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [payouts, setPayouts] = useState<CommissionPayout[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserRole, setCurrentUserRole] = useState('');
+  const [currentUserBranch, setCurrentUserBranch] = useState('');
+
+  useEffect(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      setCurrentUserRole(u.role || '');
+      setCurrentUserBranch(u.branch || '');
+    } catch {}
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -46,6 +56,8 @@ export default function CommissionPage() {
         transactions={transactions} 
         users={users}
         payouts={payouts}
+        currentUserRole={currentUserRole}
+        currentUserBranch={currentUserBranch}
       />
     </div>
   );

@@ -279,74 +279,56 @@ Component Local State
 
 ---
 
-## Firestore Collections Structure
+## Database Architecture
+
+### Primary: Supabase / PostgreSQL
+
+All transactional data lives in Supabase:
+
+```
+Supabase (PostgreSQL)
+│
+├── users                    # auth & profiles (all roles)
+├── stores                   # outlet/store register
+├── products                 # product catalog
+├── sales_transactions       # all sales (canonical, branch column)
+├── sales_items              # line items per sale
+├── sales_kinabatangan       # VIEW (WHERE branch = 'Kinabatangan')
+├── sales_kota_kinabalu      # VIEW (WHERE branch = 'Kota Kinabalu')
+├── customers_kb             # Kota Kinabalu customers
+├── customers_kk             # Kinabatangan customers
+├── customers_archive        # backup of old unified customers table
+├── orders                   # order management
+├── store_visits             # merchandiser visit records
+├── store_audit_items        # product audit per visit
+├── audit_events             # full system audit trail
+├── audit_event_changes      # field-level diff per audit event
+├── audit_import_batches     # batch import audit records
+├── exchange_returns         # product returns
+├── expenses                 # field expense claims
+├── inventory_movements      # stock movement log
+├── weekly_report_history    # archived weekly summaries
+└── customer_ownership_log   # assign/handover/release audit
+```
+
+### Supplement: Firebase / Firestore
+
+Used for real-time features and supplemental collections:
 
 ```
 Firestore Database
 │
-├── users/
-│   ├── u_founder
-│   │   ├── username: "founder"
-│   │   ├── role: "Main Admin"
-│   │   ├── branch: "HQ"
-│   │   └── ...
-│   ├── u_admin_kk
-│   ├── u_sales_kk
-│   └── ...
-│
-├── products/
-│   ├── p_001
-│   │   ├── sku: "SKU001"
-│   │   ├── name: "Product A"
-│   │   ├── price: 1250
-│   │   └── ...
-│   └── ...
-│
-├── inventory/
-│   ├── inv_001
-│   │   ├── productId: "p_001"
-│   │   ├── branch: "Kota Kinabalu"
-│   │   ├── quantity: 150
-│   │   └── ...
-│   └── ...
-│
-├── transactions/
-│   ├── txn_001
-│   │   ├── type: "sale"
-│   │   ├── userId: "u_sales_kk"
-│   │   ├── amount: 2500
-│   │   └── ...
-│   └── ...
-│
-├── customers/
-│   ├── cust_001
-│   │   ├── name: "Customer Name"
-│   │   ├── branch: "Kota Kinabalu"
-│   │   └── ...
-│   └── ...
-│
-├── commissions/
-│   ├── comm_001
-│   │   ├── userId: "u_sales_kk"
-│   │   ├── amount: 100
-│   │   └── ...
-│   └── ...
-│
-├── settlements/
-│   ├── settle_2024-02
-│   │   ├── period: "2024-02"
-│   │   ├── netProfit: 50000
-│   │   └── ...
-│   └── ...
-│
-└── audits/
-    ├── audit_001
-    │   ├── action: "delete"
-    │   ├── entityType: "staff"
-    │   ├── userId: "u_founder"
-    │   └── ...
-    └── ...
+├── users/           # profile sync / real-time presence
+├── products/        # product catalog mirror
+├── inventory/       # branch stock levels (real-time)
+├── transactions/    # sales (Firestore mirror, may be legacy)
+├── customers/       # CRM (legacy, superseded by Supabase branch tables)
+├── commissions/     # commission data
+├── settlements/     # settlement reports
+└── audits/          # compliance logs (superseded by Supabase audit_events)
 ```
+
+> **Note:** Supabase is the source of truth for all current data. Firestore is supplemental / real-time layer. When in doubt, check Supabase.
 
 ---
 
@@ -444,6 +426,49 @@ Data Fetching
     ├── Graceful fallbacks
     └── Retry logic
 ```
+
+---
+
+## Database Architecture
+
+### Primary: Supabase / PostgreSQL
+
+All transactional data lives in Supabase. Canonical tables + migrations mapping:
+
+| Table | Purpose | Key Columns |
+|---|---|---|
+| `users` | Authentication & profiles | `id`, `username`, `role`, `branch`, `assigned_districts[]` |
+| `stores` | Store/outlet register | `id`, `name`, `branch`, `district`, `geo_group` |
+| `products` | Product catalog | `id`, `sku`, `name`, `price`, `cost_price` |
+| `sales_transactions` | All sales (canonical) | `id`, `branch`, `user_id`, `customer_id`, `grand_total`, `status` |
+| `sales_items` | Line items per sale | `id`, `transaction_id`, `product_id`, `quantity`, `unit_price` |
+| `customers_kb` | Kota Kinabalu customers | `id`, `name`, `branch` = 'Kota Kinabalu', `assigned_to`, `district` |
+| `customers_kk` | Kinabatangan customers | `id`, `name`, `branch` = 'Kinabatangan', `assigned_to`, `district` |
+| `orders` | Order management | `id`, `customer_id`, `order_date`, `status` |
+| `store_visits` | Merchandiser visits | `id`, `merchandiser_id`, `store_id`, `check_in`, `check_out` |
+| `audit_events` | System audit trail | `id`, `actor_id`, `module`, `action`, `reason`, `reference_no`, `status` |
+| `expenses` | Field expense claims | `id`, `salesman_id`, `category`, `amount`, `status` |
+| `inventory_movements` | Stock movements | `id`, `actor_id`, `movement_type`, `quantity` |
+| `exchange_returns` | Product returns | `id`, `sale_id`, `reason`, `status` |
+
+**Branch-scoped VIEWs** (read helpers, NOT base tables):
+- `sales_kinabatangan` → `SELECT * FROM sales_transactions WHERE branch = 'Kinabatangan'`
+- `sales_kota_kinabalu` → `SELECT * FROM sales_transactions WHERE branch = 'Kota Kinabalu'`
+
+### Supplement: Firebase / Firestore
+
+Used for real-time features and supplemental data:
+- User profile sync / real-time presence
+- Real-time inventory updates
+- Notification delivery
+- Legacy data mirrors (may be deprecated)
+
+### Security Model
+
+- **API Layer:** All requests go through Next.js server-side API routes using `supabaseAdmin` (service role)
+- **RLS (Row-Level Security):** All tables deny anon key access; only service role can read/write
+- **Defence-in-depth:** Client-side anon key cannot directly query tables
+- **Audit Trail:** `audit_events` captures all critical actions (delete, close day-end, etc.)
 
 ---
 

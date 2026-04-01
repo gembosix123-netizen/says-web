@@ -9,12 +9,16 @@ interface CommissionDashboardProps {
   transactions: Transaction[];
   users: User[];
   payouts: CommissionPayout[];
+  currentUserRole?: string;
+  currentUserBranch?: string;
 }
 
-export default function CommissionDashboard({ transactions, users: initialUsers, payouts }: CommissionDashboardProps) {
+export default function CommissionDashboard({ transactions, users: initialUsers, payouts, currentUserRole = '', currentUserBranch = '' }: CommissionDashboardProps) {
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [searchTerm, setSearchTerm] = useState('');
-    const [selectedBranch, setSelectedBranch] = useState<'all' | 'Kota Kinabalu' | 'Kinabatangan'>('all');
+  const [selectedBranch, setSelectedBranch] = useState<string>(
+    currentUserRole === 'Admin' ? currentUserBranch : 'all'
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempRate, setTempRate] = useState<string>('');
 
@@ -205,12 +209,14 @@ export default function CommissionDashboard({ transactions, users: initialUsers,
             <div className="flex w-full md:w-auto gap-3">
                 <select
                     value={selectedBranch}
-                    onChange={(e) => setSelectedBranch(e.target.value as 'all' | 'Kota Kinabalu' | 'Kinabatangan')}
-                    className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                    onChange={(e) => setSelectedBranch(e.target.value)}
+                    disabled={currentUserRole === 'Admin'}
+                    className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                    <option value="all">All Branches</option>
+                    {currentUserRole !== 'Admin' && <option value="all">All Branches</option>}
                     <option value="Kota Kinabalu">Kota Kinabalu</option>
                     <option value="Kinabatangan">Kinabatangan</option>
+                    {currentUserRole === 'Main Admin' && <option value="HQ">HQ</option>}
                 </select>
                 <div className="relative w-full md:w-64">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />

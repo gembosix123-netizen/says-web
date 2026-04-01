@@ -19,18 +19,29 @@
  * - Transaction support untuk data consistency
  */
 
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as dotenv from 'dotenv';
+
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
 // Initialize Firebase Admin SDK
-const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || 
-  './firebase-service-account.json';
+const serviceAccountCandidates = [
+  process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
+  './firebase-service-account.json',
+  './firebase-key.json',
+].filter((value): value is string => Boolean(value));
 
-if (!fs.existsSync(serviceAccountPath)) {
-  console.error('❌ Service account file not found at:', serviceAccountPath);
-  console.error('Please set up Firebase service account and update FIREBASE_SERVICE_ACCOUNT_PATH');
+const serviceAccountPath = serviceAccountCandidates.find((candidate) => fs.existsSync(candidate));
+
+if (!serviceAccountPath) {
+  console.error('❌ Service account file not found. Checked these paths:');
+  for (const candidate of serviceAccountCandidates) {
+    console.error(`   - ${candidate}`);
+  }
+  console.error('Please set FIREBASE_SERVICE_ACCOUNT_PATH or place firebase-key.json in the project root');
   process.exit(1);
 }
 

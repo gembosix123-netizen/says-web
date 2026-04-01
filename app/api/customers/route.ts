@@ -92,20 +92,37 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         );
       }
+
+      // Sales can only view their own or unassigned customers
+      const role = normalizeRole(currentUser.role);
+      if (
+        role === 'Sales' &&
+        customer.assigned_to &&
+        customer.assigned_to !== currentUser.id
+      ) {
+        return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+      }
+
       return NextResponse.json(customer);
     }
 
     // Get all customers (support schemas with/without is_active)
-    const activeQuery = await supabaseAdmin
-      .from(customersTable)
-      .select('*')
-      .eq('is_active', true);
+    // Sales role sees only own customers + unassigned company customers
+    const role = normalizeRole(currentUser.role);
+    let baseQuery = supabaseAdmin.from(customersTable).select('*');
+
+    if (role === 'Sales') {
+      baseQuery = baseQuery.or(`assigned_to.is.null,assigned_to.eq.${currentUser.id}`);
+    }
+
+    const activeQuery = await baseQuery.eq('is_active', true);
 
     if (activeQuery.error && isMissingColumnError(activeQuery.error, 'is_active')) {
-      const fallbackQuery = await supabaseAdmin
-        .from(customersTable)
-        .select('*');
-
+      let fallbackBase = supabaseAdmin.from(customersTable).select('*');
+      if (role === 'Sales') {
+        fallbackBase = fallbackBase.or(`assigned_to.is.null,assigned_to.eq.${currentUser.id}`);
+      }
+      const fallbackQuery = await fallbackBase;
       if (fallbackQuery.error) throw fallbackQuery.error;
       return NextResponse.json(fallbackQuery.data || []);
     }
@@ -157,18 +174,76 @@ export async function POST(request: NextRequest) {
     // Get the correct customers table based on user's branch
     const customersTable = getCustomersTableByBranch(currentUser.branch);
 
+    // ── Duplicate detection ──
+    // Check if a customer with the same name OR phone already exists
+    const nameOrPhoneFilter = validatedData.phone
+      ? `name.ilike.${validatedData.name},phone.eq.${validatedData.phone}`
+      : `name.ilike.${validatedData.name}`;
+
+    const { data: existingRows } = await supabaseAdmin
+      .from(customersTable)
+      .select('id, name, phone, assigned_to, assigned_to_name')
+      .or(nameOrPhoneFilter);
+
+    if (existingRows && existingRows.length > 0) {
+      const owned = existingRows.find((c) => c.assigned_to);
+      if (owned) {
+        return NextResponse.json(
+          {
+            error: 'Pelanggan sudah wujud',
+            duplicate: true,
+            owner: owned.assigned_to_name || 'Salesman lain',
+            existingId: owned.id,
+            existingName: owned.name,
+          },
+          { status: 409 }
+        );
+      }
+      // Unassigned duplicate — warn but allow Admin; block Sales
+      const roleCheck = normalizeRole(currentUser.role);
+      if (roleCheck === 'Sales') {
+        const unowned = existingRows[0];
+        return NextResponse.json(
+          {
+            error: 'Pelanggan sudah wujud (tiada pemilik)',
+            duplicate: true,
+            owner: null,
+            existingId: unowned.id,
+            existingName: unowned.name,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // ── Ownership: salesman who creates a customer becomes the owner ──
+    const nowIso = new Date().toISOString();
+    const roleForOwner = normalizeRole(currentUser.role);
+    const ownership =
+      roleForOwner === 'Sales'
+        ? {
+            assigned_to: currentUser.id,
+            assigned_to_name: currentUser.name || null,
+            assigned_at: nowIso,
+          }
+        : {};
+
     const payloadWithTimestamps = {
       name: validatedData.name,
       phone: validatedData.phone || '',
       address: validatedData.address || '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      area: body.area?.trim() || null,
+      created_at: nowIso,
+      updated_at: nowIso,
+      ...ownership,
     };
 
     const payloadWithoutTimestamps = {
       name: validatedData.name,
       phone: validatedData.phone || '',
       address: validatedData.address || '',
+      area: body.area?.trim() || null,
+      ...ownership,
     };
 
     const insertPayloads: Record<string, unknown>[] = [
@@ -225,6 +300,21 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 }
       );
+    }
+
+    // Audit log — record self-add ownership
+    if (roleForOwner === 'Sales' && newCustomer?.id) {
+      await supabaseAdmin.from('customer_ownership_log').insert({
+        customer_id: String(newCustomer.id),
+        customer_name: validatedData.name,
+        customer_table: customersTable,
+        to_salesman_id: currentUser.id,
+        to_salesman_name: currentUser.name || null,
+        action: 'self_add',
+        done_by: currentUser.id,
+        done_by_name: currentUser.name || null,
+        branch: currentUser.branch || null,
+      });
     }
 
     return NextResponse.json(
@@ -296,6 +386,7 @@ export async function PUT(request: NextRequest) {
         name: body.name,
         phone: body.phone,
         address: body.address,
+        area: body.area?.trim() || null,
         branch: body.branch,
         updated_at: new Date().toISOString(),
       },
@@ -303,12 +394,14 @@ export async function PUT(request: NextRequest) {
         name: body.name,
         phone: body.phone,
         address: body.address,
+        area: body.area?.trim() || null,
         branch: body.branch,
       },
       {
         name: body.name,
         phone: body.phone,
         address: body.address,
+        area: body.area?.trim() || null,
         town: body.branch,
         updated_at: new Date().toISOString(),
       },
@@ -316,6 +409,7 @@ export async function PUT(request: NextRequest) {
         name: body.name,
         phone: body.phone,
         address: body.address,
+        area: body.area?.trim() || null,
         town: body.branch,
       },
     ];
@@ -358,6 +452,100 @@ export async function PUT(request: NextRequest) {
       { error: 'Internal server error' },
       { status: 500 }
     );
+  }
+}
+
+// ============================================================================
+// PATCH HANDLER (Assign / Handover / Release ownership)
+// Only Admin and Main Admin can call this.
+// Body: { id, action: 'assign'|'handover'|'release', to_salesman_id?, to_salesman_name?, reason? }
+// ============================================================================
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const currentUser = getSessionUserFromRequest(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (role !== 'Admin' && role !== 'Main Admin') {
+      return NextResponse.json({ error: 'Hanya Admin yang boleh urus pemilikan pelanggan' }, { status: 403 });
+    }
+
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
+    const body = await request.json();
+    const { id: customerId, action, to_salesman_id, to_salesman_name, reason } = body;
+
+    if (!customerId || !action) {
+      return NextResponse.json({ error: 'id dan action diperlukan' }, { status: 400 });
+    }
+
+    if (!['assign', 'handover', 'release'].includes(action)) {
+      return NextResponse.json({ error: 'action mesti assign, handover, atau release' }, { status: 400 });
+    }
+
+    if ((action === 'assign' || action === 'handover') && !to_salesman_id) {
+      return NextResponse.json({ error: 'to_salesman_id diperlukan untuk assign/handover' }, { status: 400 });
+    }
+
+    const customersTable = getCustomersTableByBranch(currentUser.branch);
+
+    // Fetch current customer
+    const { data: customer, error: fetchErr } = await supabaseAdmin
+      .from(customersTable)
+      .select('id, name, assigned_to, assigned_to_name')
+      .eq('id', customerId)
+      .single();
+
+    if (fetchErr || !customer) {
+      return NextResponse.json({ error: 'Pelanggan tidak dijumpai' }, { status: 404 });
+    }
+
+    const nowIso = new Date().toISOString();
+    const updateData =
+      action === 'release'
+        ? { assigned_to: null, assigned_to_name: null, assigned_at: null }
+        : {
+            assigned_to: to_salesman_id,
+            assigned_to_name: to_salesman_name || null,
+            assigned_at: nowIso,
+          };
+
+    const { error: updateErr } = await supabaseAdmin
+      .from(customersTable)
+      .update(updateData)
+      .eq('id', customerId);
+
+    if (updateErr) {
+      console.error('Error updating customer ownership:', updateErr);
+      return NextResponse.json({ error: 'Gagal kemaskini pemilikan' }, { status: 500 });
+    }
+
+    // Audit log
+    await supabaseAdmin.from('customer_ownership_log').insert({
+      customer_id: customerId,
+      customer_name: customer.name,
+      customer_table: customersTable,
+      from_salesman_id: customer.assigned_to || null,
+      from_salesman_name: customer.assigned_to_name || null,
+      to_salesman_id: action === 'release' ? null : to_salesman_id,
+      to_salesman_name: action === 'release' ? null : (to_salesman_name || null),
+      action,
+      reason: reason || null,
+      done_by: currentUser.id,
+      done_by_name: currentUser.name || null,
+      branch: currentUser.branch || null,
+    });
+
+    return NextResponse.json({ message: 'Pemilikan pelanggan dikemaskini' });
+
+  } catch (error) {
+    console.error('Error in PATCH /api/customers:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 

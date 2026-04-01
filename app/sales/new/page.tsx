@@ -14,7 +14,10 @@ import {
   User,
   Package,
   Printer,
-  CheckCircle
+  CheckCircle,
+  RotateCcw,
+  Camera,
+  X,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import jsPDF from 'jspdf';
@@ -50,6 +53,26 @@ interface CartItem {
   product: Product;
   quantity: number;
 }
+
+interface ReturnItem {
+  uid: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  reason: string;
+  photos: File[];
+  photoPreviews: string[];
+}
+
+const RETURN_REASONS = [
+  'Rosak / Pecah',
+  'Tamat Tempoh',
+  'Produk Salah Hantar',
+  'Lebihan Stok',
+  'Kualiti Tidak Memuaskan',
+  'Pelanggan Tidak Pesan',
+  'Lain-lain',
+];
 
 function normalizeBranchCode(branch = 'XX') {
   const compact = branch
@@ -120,8 +143,9 @@ function getDownloadLabel(paymentMethod: string) {
   return labels[paymentMethod] || 'Muat Turun Dokumen PDF';
 }
 
-function requiresPaymentProof(paymentMethod: string) {
-  return paymentMethod === 'bank_transfer' || paymentMethod === 'qr_code';
+function requiresPaymentProof(_paymentMethod: string) {
+  // Semua kaedah bayaran WAJIB bukti gambar
+  return true;
 }
 
 async function toDataUrlFromUrl(url: string) {
@@ -164,6 +188,27 @@ async function uploadPaymentProof(file: File) {
   return publicUrlData.publicUrl;
 }
 
+async function uploadReturnPhoto(file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const filename = `exchange-returns/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${extension}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('sales-receipts')
+    .upload(filename, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { data: publicUrlData } = supabase.storage
+    .from('sales-receipts')
+    .getPublicUrl(filename);
+
+  return publicUrlData.publicUrl;
+}
+
 export default function NewSalePage() {
   const router = useRouter();
   const [step, setStep] = useState(1); // 1: Select Customer, 2: Add Products, 3: Payment
@@ -182,6 +227,8 @@ export default function NewSalePage() {
   const [paymentProofs, setPaymentProofs] = useState<PaymentProofItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
+  const [serviceStepError, setServiceStepError] = useState('');
   const [successData, setSuccessData] = useState<{
     invoiceNo: string;
     receiptNo: string | null;
@@ -193,6 +240,7 @@ export default function NewSalePage() {
     paymentMethod: string;
     items: CartItem[];
     proofImageUrls: string[];
+    returnedItems: Array<{ productName: string; quantity: number; reason: string }>;
   } | null>(null);
 
   useEffect(() => {
@@ -347,6 +395,91 @@ export default function NewSalePage() {
     }
   };
 
+  const addReturnItem = () => {
+    setReturnItems((prev) => [
+      ...prev,
+      {
+        uid: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        productId: '',
+        productName: '',
+        quantity: 1,
+        reason: '',
+        photos: [],
+        photoPreviews: [],
+      },
+    ]);
+  };
+
+  const removeReturnItem = (uid: string) => {
+    setReturnItems((prev) => {
+      const target = prev.find((i) => i.uid === uid);
+      if (target) target.photoPreviews.forEach((url) => URL.revokeObjectURL(url));
+      return prev.filter((i) => i.uid !== uid);
+    });
+  };
+
+  const updateReturnItem = (uid: string, field: string, value: unknown) => {
+    setReturnItems((prev) =>
+      prev.map((item) =>
+        item.uid !== uid
+          ? item
+          : {
+              ...item,
+              [field]: value,
+              ...(field === 'productId'
+                ? { productName: products.find((p) => p.id === String(value))?.name || '' }
+                : {}),
+            }
+      )
+    );
+  };
+
+  const addReturnPhotos = (uid: string, files: File[]) => {
+    if (files.length === 0) return;
+    const previews = files.map((f) => URL.createObjectURL(f));
+    setReturnItems((prev) =>
+      prev.map((item) =>
+        item.uid !== uid
+          ? item
+          : { ...item, photos: [...item.photos, ...files], photoPreviews: [...item.photoPreviews, ...previews] }
+      )
+    );
+  };
+
+  const removeReturnPhoto = (uid: string, index: number) => {
+    setReturnItems((prev) =>
+      prev.map((item) => {
+        if (item.uid !== uid) return item;
+        const preview = item.photoPreviews[index];
+        if (preview) URL.revokeObjectURL(preview);
+        return {
+          ...item,
+          photos: item.photos.filter((_, i) => i !== index),
+          photoPreviews: item.photoPreviews.filter((_, i) => i !== index),
+        };
+      })
+    );
+  };
+
+  const handleProceedFromService = () => {
+    for (const item of returnItems) {
+      if (!item.productId) {
+        setServiceStepError('Sila pilih produk untuk semua item return.');
+        return;
+      }
+      if (!item.reason) {
+        setServiceStepError('Sila pilih sebab untuk semua item return.');
+        return;
+      }
+      if (item.photos.length === 0) {
+        setServiceStepError('Setiap item return mesti ada gambar produk.');
+        return;
+      }
+    }
+    setServiceStepError('');
+    setStep(3);
+  };
+
   const handlePrintReceipt = async (data: NonNullable<typeof successData>) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -395,20 +528,20 @@ export default function NewSalePage() {
 
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(18);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('HAJA YANONGS INDUSTRIES', 48, 24);
     doc.setFontSize(9);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     doc.setTextColor(203, 213, 225);
     doc.text('Dokumen jualan rasmi dijana secara automatik', 48, 30);
     doc.text('Sales receipt prepared for field operations', 48, 35);
 
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text(getDocumentTitle(data.paymentMethod), pageWidth - 14, 23, { align: 'right' });
     doc.setFontSize(9);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     doc.setTextColor(203, 213, 225);
     doc.text(`Tarikh: ${new Date().toLocaleDateString('ms-MY')}`, pageWidth - 14, 31, { align: 'right' });
     doc.text(`No. Invois: ${data.invoiceNo}`, pageWidth - 14, 36, { align: 'right' });
@@ -419,10 +552,10 @@ export default function NewSalePage() {
     doc.roundedRect(12, 60, pageWidth - 24, 26, 3, 3, 'FD');
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(9);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('BIL KEPADA', 15, 67);
     doc.text('BUTIRAN PEMBAYARAN', pageWidth / 2 + 8, 67);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.text(data.customerName, 15, 75);
     doc.setFontSize(9);
@@ -479,21 +612,63 @@ export default function NewSalePage() {
     const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 92;
     let currentY = finalY + 8;
 
+    // Returns / Refund table
+    if (data.returnedItems && data.returnedItems.length > 0) {
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(180, 83, 9); // amber-700
+      doc.text('REKOD RETURN / REFUND', 12, currentY + 4);
+      currentY += 8;
+
+      autoTable(doc, {
+        startY: currentY,
+        margin: { left: 12, right: 12 },
+        head: [['Produk', 'Kuantiti', 'Sebab Return']],
+        body: data.returnedItems.map((ri) => [
+          ri.productName,
+          ri.quantity.toString(),
+          ri.reason,
+        ]),
+        theme: 'grid',
+        styles: {
+          fontSize: 8,
+          cellPadding: 3,
+          lineColor: [251, 191, 36],
+          lineWidth: 0.3,
+          textColor: [15, 23, 42],
+        },
+        headStyles: {
+          fillColor: [180, 83, 9],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8.5,
+        },
+        bodyStyles: { fillColor: [255, 251, 235] },
+        columnStyles: {
+          0: { cellWidth: 90 },
+          1: { cellWidth: 24, halign: 'center' },
+          2: { halign: 'left' },
+        },
+      });
+
+      currentY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY + 8;
+    }
+
     doc.setFillColor(15, 23, 42);
     doc.roundedRect(pageWidth - 76, currentY, 64, 22, 3, 3, 'F');
     doc.setTextColor(203, 213, 225);
     doc.setFontSize(8);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('JUMLAH BAYARAN', pageWidth - 70, currentY + 6);
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text(`RM ${data.total.toFixed(2)}`, pageWidth - 14, currentY + 16, { align: 'right' });
     currentY += 28;
 
     doc.setFontSize(7);
     doc.setTextColor(107, 114, 128);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     doc.text('Dokumen ini sah tanpa tandatangan. Disediakan untuk kegunaan operasi jualan lapangan.', 12, pageHeight - 8);
     doc.save(`${getDocumentTitle(data.paymentMethod).replace(/\s+/g, '_')}_${data.receiptNo || data.invoiceNo || Date.now()}.pdf`);
   };
@@ -532,10 +707,19 @@ export default function NewSalePage() {
 
       const primaryProofUrl = uploadedProofUrls[0] || null;
 
+      const salesArea = (() => {
+        try {
+          const saved = localStorage.getItem('sales_area_today');
+          if (saved) { const p = JSON.parse(saved); return p.area || ''; }
+        } catch { /* ignore */ }
+        return '';
+      })();
+
       const salePayload = {
         invoice: resolvedInvoiceNo,
         customer_id: selectedCustomer.id,
         customer_name: selectedCustomer.name,
+        area: salesArea,
         total_amount: totalAmount,
         payment_method: paymentMethod,
         receipt_no: null,
@@ -612,8 +796,41 @@ export default function NewSalePage() {
         proofImageUrls: Array.isArray(result?.proofPhotoUrls) && result.proofPhotoUrls.length > 0
           ? result.proofPhotoUrls
           : uploadedProofUrls,
+        returnedItems: returnItems.map((i) => ({
+          productName: i.productName,
+          quantity: i.quantity,
+          reason: i.reason,
+        })),
       });
-      setStep(4);
+
+      // Submit return items from the Service step
+      if (returnItems.length > 0) {
+        for (const item of returnItems) {
+          try {
+            const uploadedReturnPhotos = await Promise.all(item.photos.map(uploadReturnPhoto));
+            await fetch('/api/exchange-returns', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sale_id: result?.id || null,
+                invoice: resolvedInvoiceNo,
+                product_id: item.productId,
+                product_name: item.productName,
+                quantity: item.quantity,
+                type: 'return',
+                reason: item.reason,
+                proof_photo_urls: uploadedReturnPhotos,
+                notes: `Return dari jualan ${resolvedInvoiceNo}. Pelanggan: ${selectedCustomer.name}`,
+              }),
+            });
+          } catch (returnErr) {
+            console.error('Error submitting return item:', returnErr);
+            // Non-blocking — sale still succeeds even if return submission fails
+          }
+        }
+      }
+
+      setStep(5);
     } catch (err: unknown) {
       console.error('Error creating sale:', err);
       const message = err instanceof Error ? err.message : 'Ralat semasa menyimpan jualan';
@@ -646,32 +863,44 @@ export default function NewSalePage() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold text-white">Jualan Baru</h1>
-            <p className="text-white/60">Langkah {Math.min(step, 3)} daripada 3</p>
+            <p className="text-white/60">Langkah {step} daripada 5</p>
           </div>
         </div>
 
         {/* Progress Steps */}
-        <div className="flex items-center justify-center gap-2">
-          {[1, 2, 3].map((s) => (
-            <React.Fragment key={s}>
-              <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all ${
-                  step >= s 
-                    ? 'bg-blue-500 text-white' 
-                    : 'bg-slate-700 text-white/40'
-                }`}
-              >
-                {step > s ? <Check size={20} /> : s}
-              </div>
-              {s < 3 && (
-                <div className={`w-16 h-1 rounded ${step > s ? 'bg-blue-500' : 'bg-slate-700'}`} />
-              )}
-            </React.Fragment>
-          ))}
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex items-center justify-center gap-1">
+            {[1, 2, 3, 4, 5].map((s) => (
+              <React.Fragment key={s}>
+                <div
+                  className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm transition-all ${
+                    step >= s
+                      ? s === 5 && step === 5 ? 'bg-emerald-500 text-white' : 'bg-blue-500 text-white'
+                      : 'bg-slate-700 text-white/40'
+                  }`}
+                >
+                  {step > s ? <Check size={16} /> : s === 5 && step === 5 ? <Check size={16} /> : s}
+                </div>
+                {s < 5 && (
+                  <div className={`w-8 h-1 rounded ${step > s ? 'bg-blue-500' : 'bg-slate-700'}`} />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="flex items-center justify-center gap-1">
+            {['Pelanggan', 'Service', 'Produk', 'Bayaran', 'Berjaya'].map((label, i) => (
+              <React.Fragment key={i}>
+                <span className={`text-xs w-9 text-center leading-tight ${
+                  step === i + 1 ? 'text-blue-300 font-semibold' : 'text-white/30'
+                }`}>{label}</span>
+                {i < 4 && <div className="w-8" />}
+              </React.Fragment>
+            ))}
+          </div>
         </div>
 
-        {/* Step 4: Success Screen */}
-        {step === 4 && successData && (
+        {/* Step 5: Jualan Berjaya */}
+        {step === 5 && successData && (
           <div className="flex flex-col items-center justify-center py-12 space-y-6">
             <div className="relative">
               <div className="absolute inset-0 bg-emerald-500/20 blur-3xl rounded-full animate-pulse" />
@@ -736,7 +965,7 @@ export default function NewSalePage() {
         )}
 
         {/* Step Content */}
-        {step !== 4 && (
+        {step !== 5 && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2">
@@ -791,8 +1020,173 @@ export default function NewSalePage() {
               </Card>
             )}
 
-            {/* Step 2: Add Products */}
+            {/* Step 2: Service - Baki Stok & Return */}
             {step === 2 && (
+              <Card className="p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <RotateCcw className="text-amber-400" size={24} />
+                  <h2 className="text-xl font-bold text-white">Semak Baki &amp; Return</h2>
+                </div>
+
+                {/* Baki Stok Van */}
+                <div className="mb-6">
+                  <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3">Baki Stok Van Semasa</h3>
+                  <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                    {products.map((product) => (
+                      <div key={product.id} className="bg-slate-800 rounded-lg px-3 py-2 flex justify-between items-center gap-2">
+                        <span className="text-white text-sm truncate">{product.name}</span>
+                        <span className={`text-sm font-bold flex-shrink-0 ${product.stock > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {product.stock} {product.unit || 'unit'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Return / Refund Section */}
+                <div className="border-t border-slate-700 pt-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider">Return / Refund Produk</h3>
+                    <button
+                      type="button"
+                      onClick={addReturnItem}
+                      className="flex items-center gap-1.5 text-sm bg-amber-600 hover:bg-amber-500 text-white rounded-lg px-3 py-1.5 transition-colors"
+                    >
+                      <Plus size={14} /> Tambah
+                    </button>
+                  </div>
+
+                  {returnItems.length === 0 ? (
+                    <p className="text-white/40 text-sm text-center py-6 border border-dashed border-slate-700 rounded-lg">
+                      Tiada return. Tekan &quot;Tambah&quot; jika ada produk yang perlu di-return.
+                    </p>
+                  ) : (
+                    <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
+                      {returnItems.map((item, index) => (
+                        <div key={item.uid} className="bg-slate-800 rounded-xl p-4 border border-slate-700">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-amber-400 font-semibold text-sm">Return #{index + 1}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeReturnItem(item.uid)}
+                              className="text-red-400 hover:text-red-300 transition-colors"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+
+                          {/* Product */}
+                          <div className="mb-3">
+                            <label className="text-white/50 text-xs mb-1 block">Produk</label>
+                            <select
+                              value={item.productId}
+                              onChange={(e) => updateReturnItem(item.uid, 'productId', e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+                            >
+                              <option value="">-- Pilih Produk --</option>
+                              {products.map((p) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Quantity */}
+                          <div className="mb-3">
+                            <label className="text-white/50 text-xs mb-1 block">Kuantiti</label>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => updateReturnItem(item.uid, 'quantity', Math.max(1, item.quantity - 1))}
+                                className="w-8 h-8 rounded bg-slate-700 flex items-center justify-center text-white hover:bg-slate-600"
+                              >
+                                <Minus size={14} />
+                              </button>
+                              <span className="text-white w-10 text-center font-bold">{item.quantity}</span>
+                              <button
+                                type="button"
+                                onClick={() => updateReturnItem(item.uid, 'quantity', item.quantity + 1)}
+                                className="w-8 h-8 rounded bg-slate-700 flex items-center justify-center text-white hover:bg-slate-600"
+                              >
+                                <Plus size={14} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Reason */}
+                          <div className="mb-3">
+                            <label className="text-white/50 text-xs mb-1 block">Sebab Return</label>
+                            <select
+                              value={item.reason}
+                              onChange={(e) => updateReturnItem(item.uid, 'reason', e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+                            >
+                              <option value="">-- Pilih Sebab --</option>
+                              {RETURN_REASONS.map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Photo */}
+                          <div>
+                            <label className="text-white/50 text-xs mb-1 block">
+                              Gambar Produk <span className="text-red-400">*</span>
+                            </label>
+                            {item.photoPreviews.length > 0 && (
+                              <div className="grid grid-cols-3 gap-2 mb-2">
+                                {item.photoPreviews.map((preview, pi) => (
+                                  <div key={pi} className="relative rounded-lg overflow-hidden border border-slate-600">
+                                    <img src={preview} alt={`Gambar ${pi + 1}`} className="w-full h-20 object-cover" />
+                                    <button
+                                      type="button"
+                                      onClick={() => removeReturnPhoto(item.uid, pi)}
+                                      className="absolute top-1 right-1 w-5 h-5 bg-red-600/80 rounded-full flex items-center justify-center text-white"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <label className="flex items-center gap-2 cursor-pointer bg-slate-900 border border-dashed border-slate-600 hover:border-amber-500 rounded-lg px-3 py-2 text-white/50 hover:text-white text-sm transition-all">
+                              <Camera size={16} />
+                              <span>Snap / Pilih Gambar</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => {
+                                  addReturnPhotos(item.uid, Array.from(e.target.files || []));
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {serviceStepError && (
+                    <p className="text-red-400 text-sm mt-3">{serviceStepError}</p>
+                  )}
+                </div>
+
+                <div className="flex gap-3 mt-6">
+                  <Button variant="secondary" size="lg" className="flex-1" onClick={() => setStep(1)}>
+                    Kembali
+                  </Button>
+                  <Button variant="primary" size="lg" className="flex-1" onClick={handleProceedFromService}>
+                    Seterusnya
+                  </Button>
+                </div>
+              </Card>
+            )}
+
+            {/* Step 3: Tambah Produk */}
+            {step === 3 && (
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <Package className="text-purple-400" size={24} />
@@ -857,7 +1251,7 @@ export default function NewSalePage() {
                     variant="secondary"
                     size="lg"
                     className="flex-1"
-                    onClick={() => setStep(1)}
+                    onClick={() => setStep(2)}
                   >
                     Kembali
                   </Button>
@@ -866,7 +1260,7 @@ export default function NewSalePage() {
                     size="lg"
                     className="flex-1"
                     disabled={cart.length === 0}
-                    onClick={() => setStep(3)}
+                    onClick={() => setStep(4)}
                   >
                     Seterusnya
                   </Button>
@@ -874,8 +1268,8 @@ export default function NewSalePage() {
               </Card>
             )}
 
-            {/* Step 3: Payment */}
-            {step === 3 && (
+            {/* Step 4: Bayaran */}
+            {step === 4 && (
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <ShoppingCart className="text-emerald-400" size={24} />
@@ -1113,7 +1507,7 @@ export default function NewSalePage() {
                     variant="secondary"
                     size="lg"
                     className="flex-1"
-                    onClick={() => setStep(2)}
+                    onClick={() => setStep(3)}
                   >
                     Kembali
                   </Button>

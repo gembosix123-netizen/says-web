@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Upload, ReceiptText } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Upload, ReceiptText, Receipt, BarChart2 } from 'lucide-react';
 import clsx from 'clsx';
 import { useLanguage } from '@/context/LanguageContext';
 import ClientSwitchers from '@/components/ClientSwitchers';
@@ -63,7 +63,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const activeRole = normalizeRole(userRole) || 'Sales';
 
     const allItems = [
-      { to: '/admin', label: 'overview', icon: LayoutDashboard, roles: ['Main Admin', 'Admin', 'Sales'] },
+      { to: '/admin', label: 'overview', icon: LayoutDashboard, roles: ['Main Admin'] },
       { to: '/admin/global-monitor', label: 'global_monitor', icon: Globe, roles: ['Main Admin'] },
       { to: '/admin/kota-kinabalu', label: 'kota_kinabalu', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'], branches: ['HQ', 'Kota Kinabalu'] },
       { to: '/admin/kinabatangan', label: 'kinabatangan', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'], branches: ['HQ', 'Kinabatangan'] },
@@ -71,6 +71,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       { to: '/admin/audit-center', label: 'audit_center', icon: FileText, roles: ['Main Admin'] },
       { to: '/admin/commissions', label: 'commissions', icon: Banknote, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/live-sales', label: 'Live Sales', icon: ReceiptText, roles: ['Main Admin', 'Admin'] },
+      { to: '/admin/weekly-reports', label: 'Laporan Mingguan', icon: BarChart2, roles: ['Main Admin', 'Admin'] },
+      { to: '/admin/expenses', label: 'Expenses', icon: Receipt, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/loading', label: 'van_loading', icon: Truck, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/orders', label: 'orders', icon: ShoppingCart, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/products', label: 'products', icon: Package, roles: ['Main Admin', 'Admin'] },

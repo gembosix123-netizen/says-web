@@ -81,4 +81,17 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 CREATE INDEX IF NOT EXISTS idx_transactions_branch ON public.transactions (branch);
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON public.transactions (date);
 
+-- Enable Row Level Security on all tables
+ALTER TABLE public.stores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all on stores" ON public.stores;
+DROP POLICY IF EXISTS "Allow all on orders" ON public.orders;
+DROP POLICY IF EXISTS "Allow all on transactions" ON public.transactions;
+
+CREATE POLICY "Allow all on stores" ON public.stores FOR ALL USING (true);
+CREATE POLICY "Allow all on orders" ON public.orders FOR ALL USING (true);
+CREATE POLICY "Allow all on transactions" ON public.transactions FOR ALL USING (true);
+
 COMMIT;

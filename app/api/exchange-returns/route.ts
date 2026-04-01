@@ -81,13 +81,22 @@ export async function POST(request: NextRequest) {
       type, 
       reason,
       reason_details,
-      notes 
+      notes,
+      proof_photo_urls,
     } = body;
 
     // Validation
     if (!product_id || !product_name || !quantity || !type || !reason) {
       return NextResponse.json({ 
         error: 'Missing required fields: product_id, product_name, quantity, type, reason' 
+      }, { status: 400 });
+    }
+
+    // Hardblock: bukti gambar wajib untuk semua refund/return
+    const proofUrls = Array.isArray(proof_photo_urls) ? proof_photo_urls.filter(Boolean) : [];
+    if (proofUrls.length === 0) {
+      return NextResponse.json({
+        error: 'Gambar bukti wajib! Sila ambil gambar produk yang hendak di-return/exchange sebelum hantar.'
       }, { status: 400 });
     }
 
@@ -112,7 +121,8 @@ export async function POST(request: NextRequest) {
       requested_by: user.id,
       requested_by_name: user.name || user.username,
       requested_at: new Date().toISOString(),
-      notes: notes || null
+      notes: notes || null,
+      proof_photo_urls: proofUrls,
     };
 
     const { data, error } = await supabaseAdmin
