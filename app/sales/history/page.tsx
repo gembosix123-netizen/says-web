@@ -72,7 +72,7 @@ export default function SalesHistoryPage() {
             payment_method: sale.payment_method || sale.payment?.method || 'cash',
             status,
             items: Array.isArray(sale.items)
-              ? sale.items.map((item: { name?: string; product_name?: string; quantity?: number | string; subtotal?: number | string }) => ({
+              ? sale.items.map((item: { id?: string; product_id?: string; productId?: string; name?: string; product_name?: string; quantity?: number | string; subtotal?: number | string }) => ({
                   id: item?.id || item?.product_id || item?.productId,
                   product_id: item?.product_id || item?.productId || item?.id,
                   name: item?.name || item?.product_name,
