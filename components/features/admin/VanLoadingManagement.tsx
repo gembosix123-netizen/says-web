@@ -15,6 +15,72 @@ interface Product {
   name: string;
   code?: string;
   current_stock?: number;
+  display_stock?: number;
+  display_stock_label?: string;
+}
+
+interface FreezerInItem {
+  productId: string;
+  qty: string;
+  notes: string;
+}
+
+interface VanLoadItem {
+  productId: string;
+  quantity: string;
+}
+
+interface VanReturnItem {
+  productId: string;
+  qty: string;
+  notes: string;
+}
+
+function ItemRow({
+  item, idx, products,
+  onChange, onRemove,
+  showNotes = false,
+}: {
+  item: { productId: string; qty?: string; quantity?: string; notes?: string };
+  idx: number;
+  products: Product[];
+  onChange: (idx: number, field: string, value: string) => void;
+  onRemove: (idx: number) => void;
+  showNotes?: boolean;
+}) {
+  return (
+    <div className="flex gap-2 items-start">
+      <select
+        value={item.productId}
+        onChange={(e) => onChange(idx, 'productId', e.target.value)}
+        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm"
+      >
+        {products.map(p => (
+          <option key={p.id} value={p.id}>{p.name}{(p.display_stock ?? p.current_stock) != null ? ` (${p.display_stock_label || 'freezer'}: ${p.display_stock ?? p.current_stock})` : ''}</option>
+        ))}
+      </select>
+      <input
+        type="number"
+        min="1"
+        step="1"
+        placeholder="Qty"
+        value={item.qty ?? item.quantity ?? ''}
+        onChange={(e) => onChange(idx, 'qty', e.target.value)}
+        className="w-20 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-center text-sm"
+      />
+      {showNotes && (
+        <input
+          placeholder="Nota"
+          value={item.notes || ''}
+          onChange={(e) => onChange(idx, 'notes', e.target.value)}
+          className="w-36 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm"
+        />
+      )}
+      <button type="button" onClick={() => onRemove(idx)} className="p-2 text-red-400 hover:bg-slate-800 rounded">
+        <Trash2 size={16} />
+      </button>
+    </div>
+  );
 }
 
 interface Movement {
@@ -56,17 +122,19 @@ export default function VanLoadingManagement() {
   const [activeTab, setActiveTab] = useState<'freezer_in' | 'van_load' | 'van_return' | 'history'>('freezer_in');
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [vanReturnProducts, setVanReturnProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [loadingData, setLoadingData] = useState(false);
+  const [loadingVanReturnProducts, setLoadingVanReturnProducts] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
   // ── Forms ──
-  const [freezerInItems, setFreezerInItems] = useState<{ productId: string; qty: number; notes: string }[]>([]);
+  const [freezerInItems, setFreezerInItems] = useState<FreezerInItem[]>([]);
   const [vanLoadUser, setVanLoadUser] = useState('');
-  const [vanLoadItems, setVanLoadItems] = useState<{ productId: string; quantity: number }[]>([]);
+  const [vanLoadItems, setVanLoadItems] = useState<VanLoadItem[]>([]);
   const [vanReturnUser, setVanReturnUser] = useState('');
-  const [vanReturnItems, setVanReturnItems] = useState<{ productId: string; qty: number; notes: string }[]>([]);
+  const [vanReturnItems, setVanReturnItems] = useState<VanReturnItem[]>([]);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
@@ -112,26 +180,88 @@ export default function VanLoadingManagement() {
     if (activeTab === 'history') fetchMovements();
   }, [activeTab, fetchMovements]);
 
+  useEffect(() => {
+    if (!vanReturnUser) {
+      setVanReturnProducts([]);
+      setVanReturnItems([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchVanReturnProducts = async () => {
+      setLoadingVanReturnProducts(true);
+      try {
+        const res = await fetch(`/api/inventory/van?userId=${vanReturnUser}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Gagal memuat inventori van');
+
+        const nextProducts = Array.isArray(data?.products)
+          ? data.products
+              .map((item: { id?: string; name?: string; stock?: number }) => ({
+                id: String(item?.id || ''),
+                name: String(item?.name || 'Produk'),
+                display_stock: Number(item?.stock || 0),
+                display_stock_label: 'van',
+              }))
+              .filter((item: Product) => item.id && (item.display_stock || 0) > 0)
+          : [];
+
+        if (!cancelled) {
+          setVanReturnProducts(nextProducts);
+          setVanReturnItems([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setVanReturnProducts([]);
+          setVanReturnItems([]);
+        }
+      }
+      if (!cancelled) setLoadingVanReturnProducts(false);
+    };
+
+    fetchVanReturnProducts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [vanReturnUser]);
+
   // ── Helper: blank item ──
-  const blankFI = () => ({ productId: products[0]?.id || '', qty: 0, notes: '' });
-  const blankVL = () => ({ productId: products[0]?.id || '', quantity: 0 });
-  const blankVR = () => ({ productId: products[0]?.id || '', qty: 0, notes: '' });
+  const blankFI = () => ({ productId: products[0]?.id || '', qty: '', notes: '' });
+  const blankVL = () => ({ productId: products[0]?.id || '', quantity: '' });
+  const blankVR = () => ({ productId: vanReturnProducts[0]?.id || '', qty: '', notes: '' });
+  const parsePositiveInt = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+  };
+  const sumQuantitiesByProduct = <T extends { productId: string }>(items: T[], getQty: (item: T) => number) => (
+    items.reduce<Record<string, number>>((acc, item) => {
+      acc[item.productId] = (acc[item.productId] || 0) + getQty(item);
+      return acc;
+    }, {})
+  );
 
   // ── Submit: Stok Masuk Freezer ──
   const handleFreezerIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    const valid = freezerInItems.filter(i => i.productId && i.qty > 0);
+    const valid = freezerInItems
+      .map((item) => ({ ...item, qty: parsePositiveInt(item.qty) }))
+      .filter(item => item.productId && item.qty > 0);
     if (valid.length === 0) return showToast('Tambah sekurang-kurangnya 1 item dengan kuantiti > 0', 'error');
     setSubmitting(true);
     try {
+      const freezerStockByProductId = new Map(products.map((product) => [product.id, product.current_stock || 0]));
       for (const item of valid) {
         const prod = products.find(p => p.id === item.productId);
+        const nextStock = (freezerStockByProductId.get(item.productId) || 0) + item.qty;
         // Update freezer stock in products table
         await fetch('/api/products', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: item.productId, stock: (prod?.current_stock || 0) + item.qty, current_stock: (prod?.current_stock || 0) + item.qty }),
+          body: JSON.stringify({ id: item.productId, stock: nextStock, current_stock: nextStock }),
         });
+        freezerStockByProductId.set(item.productId, nextStock);
         // Log movement
         await fetch('/api/inventory/movements', {
           method: 'POST',
@@ -158,8 +288,22 @@ export default function VanLoadingManagement() {
   const handleVanLoad = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vanLoadUser) return showToast('Sila pilih salesman', 'error');
-    const valid = vanLoadItems.filter(i => i.productId && i.quantity > 0);
+    const valid = vanLoadItems
+      .map((item) => ({ ...item, quantity: parsePositiveInt(item.quantity) }))
+      .filter(item => item.productId && item.quantity > 0);
     if (valid.length === 0) return showToast('Tambah sekurang-kurangnya 1 item', 'error');
+
+    const vanLoadTotals = sumQuantitiesByProduct(valid, (item) => item.quantity);
+    const exceededStockId = Object.entries(vanLoadTotals).find(([productId, quantity]) => {
+      const product = products.find((p) => p.id === productId);
+      return quantity > (product?.current_stock || 0);
+    })?.[0];
+
+    if (exceededStockId) {
+      const product = products.find((p) => p.id === exceededStockId);
+      return showToast(`Kuantiti ${product?.name || 'produk'} melebihi stok freezer`, 'error');
+    }
+
     setSubmitting(true);
     try {
       const selectedUser = users.find(u => u.id === vanLoadUser);
@@ -189,27 +333,49 @@ export default function VanLoadingManagement() {
   const handleVanReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vanReturnUser) return showToast('Sila pilih salesman', 'error');
-    const valid = vanReturnItems.filter(i => i.productId && i.qty > 0);
+    const valid = vanReturnItems
+      .map((item) => ({ ...item, qty: parsePositiveInt(item.qty) }))
+      .filter(item => item.productId && item.qty > 0);
     if (valid.length === 0) return showToast('Tambah sekurang-kurangnya 1 item', 'error');
+
+    const vanReturnTotals = sumQuantitiesByProduct(valid, (item) => item.qty);
+    const exceededVanStockId = Object.entries(vanReturnTotals).find(([productId, quantity]) => {
+      const product = vanReturnProducts.find((p) => p.id === productId);
+      return quantity > (product?.display_stock || 0);
+    })?.[0];
+
+    if (exceededVanStockId) {
+      const product = vanReturnProducts.find((p) => p.id === exceededVanStockId);
+      return showToast(`Kuantiti ${product?.name || 'produk'} melebihi baki van`, 'error');
+    }
+
     setSubmitting(true);
     try {
       const selectedUser = users.find(u => u.id === vanReturnUser);
+      const freezerStockByProductId = new Map(products.map((product) => [product.id, product.current_stock || 0]));
       for (const item of valid) {
         const prod = products.find(p => p.id === item.productId);
-        // Add back to freezer stock
-        await fetch('/api/products', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: item.productId, stock: (prod?.current_stock || 0) + item.qty, current_stock: (prod?.current_stock || 0) + item.qty }),
-        });
-        // Deduct from van inventory
-        await fetch('/api/inventory/van', {
+        // Deduct from van inventory first so freezer stock is only added after validation passes
+        const vanRes = await fetch('/api/inventory/van', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: vanReturnUser, items: { [item.productId]: item.qty } }),
         });
+        const vanData = await vanRes.json();
+        if (!vanRes.ok) throw new Error(vanData?.error || 'Gagal kemas kini inventori van');
+
+        // Add back to freezer stock
+        const nextStock = (freezerStockByProductId.get(item.productId) || 0) + item.qty;
+        const productRes = await fetch('/api/products', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.productId, stock: nextStock, current_stock: nextStock }),
+        });
+        if (!productRes.ok) throw new Error('Gagal kemas kini stok freezer');
+        freezerStockByProductId.set(item.productId, nextStock);
+
         // Log movement
-        await fetch('/api/inventory/movements', {
+        const movementRes = await fetch('/api/inventory/movements', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -225,56 +391,16 @@ export default function VanLoadingManagement() {
             notes: item.notes || null,
           }),
         });
+        if (!movementRes.ok) throw new Error('Gagal merekod log pergerakan');
       }
       showToast(`Stok pulang dari van ${selectedUser?.name} berjaya direkod`);
       setVanReturnItems([]);
       setVanReturnUser('');
+      setVanReturnProducts([]);
       fetchProducts();
     } catch { showToast('Gagal rekod pulangan van', 'error'); }
     setSubmitting(false);
   };
-
-  // ── Reusable item row editor ──
-  const ItemRow = ({
-    item, idx,
-    onChange, onRemove,
-    showNotes = false,
-  }: {
-    item: { productId: string; qty?: number; quantity?: number; notes?: string };
-    idx: number;
-    onChange: (idx: number, field: string, value: string) => void;
-    onRemove: (idx: number) => void;
-    showNotes?: boolean;
-  }) => (
-    <div className="flex gap-2 items-start">
-      <select
-        value={item.productId}
-        onChange={(e) => onChange(idx, 'productId', e.target.value)}
-        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm"
-      >
-        {products.map(p => (
-          <option key={p.id} value={p.id}>{p.name}{p.current_stock != null ? ` (freezer: ${p.current_stock})` : ''}</option>
-        ))}
-      </select>
-      <input
-        type="number" min="1" placeholder="Qty"
-        value={(item.qty ?? item.quantity) || ''}
-        onChange={(e) => onChange(idx, 'qty', e.target.value)}
-        className="w-20 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-center text-sm"
-      />
-      {showNotes && (
-        <input
-          placeholder="Nota"
-          value={item.notes || ''}
-          onChange={(e) => onChange(idx, 'notes', e.target.value)}
-          className="w-36 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm"
-        />
-      )}
-      <button type="button" onClick={() => onRemove(idx)} className="p-2 text-red-400 hover:bg-slate-800 rounded">
-        <Trash2 size={16} />
-      </button>
-    </div>
-  );
 
   const tabs = [
     { id: 'freezer_in', label: 'Stok Masuk Freezer', icon: PackagePlus, color: 'text-emerald-400' },
@@ -315,10 +441,10 @@ export default function VanLoadingManagement() {
           </div>
           <form onSubmit={handleFreezerIn} className="space-y-3">
             {freezerInItems.map((item, idx) => (
-              <ItemRow key={idx} item={item} idx={idx} showNotes
+              <ItemRow key={idx} item={item} idx={idx} products={products} showNotes
                 onChange={(i, f, v) => {
                   const next = [...freezerInItems];
-                  if (f === 'qty') next[i].qty = parseInt(v) || 0;
+                  if (f === 'qty') next[i].qty = v;
                   else if (f === 'notes') next[i].notes = v;
                   else next[i].productId = v;
                   setFreezerInItems(next);
@@ -360,10 +486,10 @@ export default function VanLoadingManagement() {
                 </select>
               </div>
               {vanLoadItems.map((item, idx) => (
-                <ItemRow key={idx} item={item} idx={idx}
+                <ItemRow key={idx} item={item} idx={idx} products={products}
                   onChange={(i, f, v) => {
                     const next = [...vanLoadItems];
-                    if (f === 'qty') next[i].quantity = parseInt(v) || 0;
+                    if (f === 'qty') next[i].quantity = v;
                     else next[i].productId = v;
                     setVanLoadItems(next);
                   }}
@@ -401,11 +527,17 @@ export default function VanLoadingManagement() {
                 {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.username})</option>)}
               </select>
             </div>
+            {vanReturnUser && loadingVanReturnProducts && (
+              <p className="text-slate-500 text-sm">Memuatkan baki van...</p>
+            )}
+            {vanReturnUser && !loadingVanReturnProducts && vanReturnProducts.length === 0 && (
+              <p className="text-slate-500 text-sm">Tiada baki stok dalam van untuk salesman ini.</p>
+            )}
             {vanReturnItems.map((item, idx) => (
-              <ItemRow key={idx} item={item} idx={idx} showNotes
+              <ItemRow key={idx} item={item} idx={idx} products={vanReturnProducts} showNotes
                 onChange={(i, f, v) => {
                   const next = [...vanReturnItems];
-                  if (f === 'qty') next[i].qty = parseInt(v) || 0;
+                  if (f === 'qty') next[i].qty = v;
                   else if (f === 'notes') next[i].notes = v;
                   else next[i].productId = v;
                   setVanReturnItems(next);
@@ -414,6 +546,7 @@ export default function VanLoadingManagement() {
               />
             ))}
             <button type="button" onClick={() => setVanReturnItems([...vanReturnItems, blankVR()])}
+              disabled={!vanReturnUser || loadingVanReturnProducts || vanReturnProducts.length === 0}
               className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
               <Plus size={14} /> Tambah Item
             </button>

@@ -21,6 +21,18 @@
   input[type="text"], input[type="number"], input[type="email"], input[type="password"] {
     @apply text-slate-900 bg-white/90 backdrop-blur-sm dark:text-white dark:bg-slate-900/80;
   }
+
+  /* Make numeric fields easier to type by hiding browser spinner controls */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
   
   /* Button styling consistency */
   button {

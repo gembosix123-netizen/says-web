@@ -55,7 +55,10 @@ export default function AdminProductsPage() {
     if (form.price <= 0) return addToast('Harga mesti lebih dari 0', 'error');
     const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     const data = await res.json();
-    if (!res.ok) return addToast(data?.error || 'Failed', 'error');
+    if (!res.ok) {
+      const details = Array.isArray(data?.details) ? `: ${data.details.join(', ')}` : (data?.details ? `: ${String(data.details)}` : '');
+      return addToast(`${data?.error || 'Failed'}${details}`, 'error');
+    }
     addToast('Produk berjaya dicipta', 'success');
     setForm({ name: '', price: 0, stock: 0, sku: '' });
     load();

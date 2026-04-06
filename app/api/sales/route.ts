@@ -100,6 +100,52 @@ function normalizeProofPhotoUrls(value: unknown, fallback?: string | null) {
   return Array.from(new Set(urls.filter(Boolean))).slice(0, 4);
 }
 
+function extractCustomerNameFromNotes(notes: unknown) {
+  const text = String(notes || '');
+  const match = text.match(/\[Customer:\s*(.*?)\]/i);
+  const resolved = match?.[1]?.trim();
+  return resolved || null;
+}
+
+function parseRawItems(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value as Array<Record<string, unknown>>;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
+function normalizeItemsFromSaleRow(sale: Record<string, unknown>) {
+  const rawItems = [
+    ...parseRawItems(sale.items),
+    ...parseRawItems(sale.line_items),
+    ...parseRawItems(sale.products),
+  ];
+
+  return rawItems.map((item) => {
+    const quantity = Number(item.quantity ?? item.qty ?? 0);
+    const price = Number(item.price ?? item.unit_price ?? item.unitPrice ?? 0);
+    const subtotal = Number(item.subtotal ?? item.total ?? quantity * price);
+
+    return {
+      productId: item.productId ?? item.product_id ?? item.id ?? null,
+      name: String(item.name ?? item.product_name ?? item.productName ?? ''),
+      quantity: Number.isFinite(quantity) ? quantity : 0,
+      price: Number.isFinite(price) ? price : 0,
+      subtotal: Number.isFinite(subtotal) ? subtotal : 0,
+    };
+  }).filter((item) => item.name || item.quantity > 0 || item.price > 0 || item.subtotal > 0);
+}
+
 function generateInvoice(branchCode = 'XX') {
   return generateDocumentNumber('INV', branchCode);
 }
@@ -292,8 +338,16 @@ export async function GET(request: NextRequest) {
     }
 
     const transactions = salesAll.map((sale) => {
-      const items = itemsBySaleId[sale.id] || [];
+      const items = (itemsBySaleId[sale.id] && itemsBySaleId[sale.id].length > 0)
+        ? itemsBySaleId[sale.id]
+        : normalizeItemsFromSaleRow(sale as Record<string, unknown>);
       const total = Number(sale.grand_total ?? sale.subtotal_amount ?? 0);
+      const fallbackCustomerName =
+        customersById[sale.customer_id] ||
+        sale.customer_name ||
+        sale.customer ||
+        extractCustomerNameFromNotes(sale.notes) ||
+        null;
       const paymentStatus = sale.status === 'pending' ? 'pending' : 'paid';
       const paymentReferenceNo =
         sale.billing_ref_no ||
@@ -316,9 +370,12 @@ export async function GET(request: NextRequest) {
         paymentStatus,
         createdAt: sale.created_at,
         created_at: sale.created_at,
-        customer: { id: sale.customer_id || null, name: customersById[sale.customer_id] || null },
+        customer: {
+          id: sale.customer_id || null,
+          name: fallbackCustomerName,
+        },
         customer_id: sale.customer_id || null,
-        customer_name: customersById[sale.customer_id] || null,
+        customer_name: fallbackCustomerName,
         salesmanId: sale.user_id || null,
         salesmanName:
           usersById[sale.user_id] ||

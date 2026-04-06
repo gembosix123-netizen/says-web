@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
     const productsById = new Map(products.map((product) => [product.id, product]));
 
     // Load branch/salesman price overrides from Supabase
-    let priceOverrides: Record<string, number> = {};
+    const priceOverrides: Record<string, number> = {};
     if (supabaseAdmin) {
       // Priority 1: salesman-specific price
       const { data: salesmanPrices } = await supabaseAdmin
@@ -175,6 +175,22 @@ export async function PUT(request: NextRequest) {
         currentInv.items = sanitizeVanItems(currentInv.items as Record<string, unknown>);
 
         // Deduct items
+        const exceededItem = Object.entries(items).find(([pid, qty]) => {
+            const currentQty = toSafeNumber(currentInv.items[pid]);
+            const deductQty = toSafeNumber(qty);
+            return deductQty > currentQty;
+        });
+
+        if (exceededItem) {
+          const [productId] = exceededItem;
+          return NextResponse.json(
+            {
+              error: `Kuantiti pulangan melebihi baki van untuk produk ${productId}. Baki semasa: ${toSafeNumber(currentInv.items[productId])}`,
+            },
+            { status: 400 }
+          );
+        }
+
         Object.entries(items).forEach(([pid, qty]) => {
             const currentQty = toSafeNumber(currentInv.items[pid]);
             const deductQty = toSafeNumber(qty);
@@ -183,7 +199,7 @@ export async function PUT(request: NextRequest) {
               return;
             }
 
-            currentInv.items[pid] = Math.max(0, currentQty - deductQty);
+            currentInv.items[pid] = currentQty - deductQty;
         });
 
         currentInv.lastUpdated = new Date().toISOString();

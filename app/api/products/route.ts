@@ -15,14 +15,82 @@ import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { canManageProducts } from '@/lib/permissions';
 
+const generateProductId = () => {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `prod_${Date.now()}_${randomPart}`;
+};
+
 const normalizeProductResponse = (product: Record<string, any>) => {
+  const resolvedSku = product.sku ?? product.code ?? null;
   const resolvedStock = Number(product.current_stock ?? product.stock ?? 0);
 
   return {
     ...product,
+    sku: resolvedSku,
+    code: resolvedSku,
     stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
     current_stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
   };
+};
+
+const buildProductUpdatePayload = (body: Record<string, any>, product: Record<string, any>) => {
+  const payload: Record<string, any> = {};
+
+  if (body.name !== undefined) payload.name = body.name;
+  if (body.price !== undefined) payload.price = body.price;
+  if (body.cost !== undefined && 'cost' in product) payload.cost = body.cost;
+  if (body.unit !== undefined) payload.unit = body.unit;
+  if (body.category !== undefined && 'category' in product) payload.category = body.category;
+  if (body.description !== undefined && 'description' in product) payload.description = body.description;
+
+  const skuValue = body.sku ?? body.code;
+  if (skuValue !== undefined) {
+    if ('code' in product) payload.code = skuValue;
+    else if ('sku' in product) payload.sku = skuValue;
+  }
+
+  const stockValue = body.current_stock ?? body.stock;
+  if (stockValue !== undefined) {
+    if ('current_stock' in product) payload.current_stock = stockValue;
+    else if ('stock' in product) payload.stock = stockValue;
+  }
+
+  const isActiveValue = body.is_active ?? body.isActive;
+  if (isActiveValue !== undefined) {
+    if ('is_active' in product) payload.is_active = isActiveValue;
+    else if ('isActive' in product) payload.isActive = isActiveValue;
+  }
+
+  if ('updated_at' in product) payload.updated_at = new Date().toISOString();
+
+  return payload;
+};
+
+const buildProductCreatePayload = (
+  body: Record<string, any>,
+  validatedData: Record<string, any>,
+  options: {
+    skuKey: 'code' | 'sku';
+    stockKey?: 'current_stock' | 'stock';
+    activeKey?: 'is_active' | 'isActive';
+  }
+) => {
+  const payload: Record<string, any> = {
+    id: body.id || generateProductId(),
+    name: validatedData.name,
+    price: validatedData.price,
+    unit: validatedData.unit,
+  };
+
+  payload[options.skuKey] = validatedData.code || validatedData.sku;
+  if (options.stockKey) {
+    payload[options.stockKey] = Number(body.current_stock ?? body.stock ?? 0);
+  }
+  if (options.activeKey) {
+    payload[options.activeKey] = validatedData.isActive;
+  }
+
+  return payload;
 };
 
 // ============================================================================
@@ -60,11 +128,33 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(normalizeProductResponse(product));
     }
 
-    // Get all products
-    const { data: products, error } = await supabaseAdmin
+    // Get all products with active-column schema fallback.
+    let products: any[] | null = null;
+    let error: any = null;
+
+    const activeQuery = await supabaseAdmin
       .from('products')
       .select('*')
       .eq('is_active', true);
+    products = activeQuery.data;
+    error = activeQuery.error;
+
+    if (error) {
+      const activeCamelQuery = await supabaseAdmin
+        .from('products')
+        .select('*')
+        .eq('isActive', true);
+      products = activeCamelQuery.data;
+      error = activeCamelQuery.error;
+    }
+
+    if (error) {
+      const noActiveFilterQuery = await supabaseAdmin
+        .from('products')
+        .select('*');
+      products = noActiveFilterQuery.data;
+      error = noActiveFilterQuery.error;
+    }
 
     if (error) {
       console.error('Supabase error:', error);
@@ -119,25 +209,78 @@ export async function POST(request: NextRequest) {
 
     const validatedData = validation.data;
 
-    // Create product
-    const { data, error } = await supabaseAdmin
-      .from('products')
-      .insert([
-        {
-          id: body.id || `prod_${Date.now()}`,
-          name: validatedData.name,
-          code: validatedData.code || validatedData.sku,
-          price: validatedData.price,
-          unit: validatedData.unit,
-          is_active: validatedData.isActive,
-        },
-      ])
-      .select();
+    // Create product with schema fallback (supports `current_stock`/`stock` and `code`/`sku`).
+    const createPayloadVariants = [
+      { skuKey: 'code' as const, stockKey: 'current_stock' as const, activeKey: 'is_active' as const },
+      { skuKey: 'code' as const, stockKey: 'stock' as const, activeKey: 'is_active' as const },
+      { skuKey: 'sku' as const, stockKey: 'stock' as const, activeKey: 'is_active' as const },
+      { skuKey: 'sku' as const, stockKey: 'current_stock' as const, activeKey: 'is_active' as const },
+      { skuKey: 'code' as const, activeKey: 'is_active' as const },
+      { skuKey: 'sku' as const, activeKey: 'is_active' as const },
+      { skuKey: 'code' as const, stockKey: 'stock' as const, activeKey: 'isActive' as const },
+      { skuKey: 'sku' as const, stockKey: 'stock' as const, activeKey: 'isActive' as const },
+      { skuKey: 'code' as const, activeKey: 'isActive' as const },
+      { skuKey: 'sku' as const, activeKey: 'isActive' as const },
+      { skuKey: 'code' as const, stockKey: 'current_stock' as const },
+      { skuKey: 'code' as const, stockKey: 'stock' as const },
+      { skuKey: 'sku' as const, stockKey: 'stock' as const },
+      { skuKey: 'sku' as const, stockKey: 'current_stock' as const },
+      { skuKey: 'code' as const },
+      { skuKey: 'sku' as const },
+    ];
 
-    if (error) {
-      console.error('Supabase error:', error);
+    let createdRows: any[] | null = null;
+    let createError: any = null;
+
+    for (const variant of createPayloadVariants) {
+      let createPayload = buildProductCreatePayload(body, validatedData, variant);
+
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const { data, error } = await supabaseAdmin
+          .from('products')
+          .insert([createPayload])
+          .select();
+
+        if (!error) {
+          createdRows = data || [];
+          createError = null;
+          break;
+        }
+
+        createError = error;
+
+        const message = String(error?.message || '');
+        const lowerMsg = message.toLowerCase();
+        const looksLikeMissingColumn =
+          (lowerMsg.includes('column') && lowerMsg.includes('does not exist')) ||
+          (lowerMsg.includes('could not find') && lowerMsg.includes('column')) ||
+          lowerMsg.includes('schema cache');
+
+        if (!looksLikeMissingColumn) {
+          break;
+        }
+
+        const missingColumnMatch = message.match(/'([^']+)'\s+column/i);
+        const missingColumn = missingColumnMatch?.[1];
+
+        if (!missingColumn || !(missingColumn in createPayload)) {
+          break;
+        }
+
+        const nextPayload = { ...createPayload };
+        delete nextPayload[missingColumn];
+        createPayload = nextPayload;
+      }
+
+      if (!createError) {
+        break;
+      }
+    }
+
+    if (createError) {
+      console.error('Supabase error:', createError);
       return NextResponse.json(
-        { error: 'Failed to create product' },
+        { error: 'Failed to create product', details: createError.message },
         { status: 500 }
       );
     }
@@ -145,7 +288,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         message: 'Product created successfully',
-        productId: data?.[0]?.id,
+        productId: createdRows?.[0]?.id,
       },
       { status: 201 }
     );
@@ -203,21 +346,19 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    const updatePayload = buildProductUpdatePayload(body, product);
+
+    if (Object.keys(updatePayload).length === 0) {
+      return NextResponse.json(
+        { error: 'Tiada data untuk dikemaskini' },
+        { status: 400 }
+      );
+    }
+
     // Update product
     const { error: updateError } = await supabaseAdmin
       .from('products')
-      .update({
-        name: body.name,
-        sku: body.sku,
-        price: body.price,
-        cost: body.cost,
-        stock: body.stock,
-        unit: body.unit,
-        category: body.category,
-        description: body.description,
-        is_active: body.is_active ?? true,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('id', productId);
 
     if (updateError) {

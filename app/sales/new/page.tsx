@@ -47,6 +47,10 @@ interface Customer {
   name: string;
   phone: string;
   address: string;
+  area?: string;
+  district?: string;
+  town?: string;
+  branch?: string;
 }
 
 interface CartItem {
@@ -213,6 +217,7 @@ export default function NewSalePage() {
   const router = useRouter();
   const [step, setStep] = useState(1); // 1: Select Customer, 2: Add Products, 3: Payment
   const [userBranch, setUserBranch] = useState('');
+  const [selectedArea, setSelectedArea] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -246,6 +251,31 @@ export default function NewSalePage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+
+    try {
+      const saved = localStorage.getItem('sales_area_today');
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved);
+      if (parsed?.date === today && parsed?.area) {
+        setSelectedArea(String(parsed.area));
+      }
+    } catch {
+      // Ignore malformed local storage payload.
+    }
+  }, []);
+
+  const normalizeAreaValue = (value?: string | null) =>
+    String(value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+
+  const customerArea = (customer: Customer) =>
+    customer.area || customer.district || customer.town || customer.branch || '';
 
   const fetchData = async () => {
     try {
@@ -302,10 +332,26 @@ export default function NewSalePage() {
     }
   }, [paymentMethod, userBranch, billingRefNo, transferRefNo, qrTxnRefNo]);
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchCustomer.toLowerCase()) ||
-    c.phone?.includes(searchCustomer)
-  );
+  const filteredCustomers = customers.filter((customer) => {
+    const matchesArea = !selectedArea || normalizeAreaValue(customerArea(customer)) === normalizeAreaValue(selectedArea);
+    if (!matchesArea) return false;
+
+    return (
+      customer.name.toLowerCase().includes(searchCustomer.toLowerCase()) ||
+      customer.phone?.includes(searchCustomer) ||
+      customer.address?.toLowerCase().includes(searchCustomer.toLowerCase()) ||
+      customerArea(customer).toLowerCase().includes(searchCustomer.toLowerCase())
+    );
+  });
+
+  useEffect(() => {
+    if (!selectedCustomer) return;
+
+    const stillVisible = filteredCustomers.some((customer) => customer.id === selectedCustomer.id);
+    if (!stillVisible) {
+      setSelectedCustomer(null);
+    }
+  }, [filteredCustomers, selectedCustomer]);
 
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchProduct.toLowerCase()) ||
@@ -988,6 +1034,12 @@ export default function NewSalePage() {
                   />
                 </div>
 
+                {selectedArea && (
+                  <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
+                    Menapis pelanggan untuk kawasan <span className="font-semibold text-white">{selectedArea}</span>
+                  </div>
+                )}
+
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {filteredCustomers.map((customer) => (
                     <div
@@ -1001,11 +1053,19 @@ export default function NewSalePage() {
                     >
                       <p className="font-semibold text-white">{customer.name}</p>
                       <p className="text-white/60 text-sm">{customer.phone}</p>
+                      {customerArea(customer) && (
+                        <p className="text-blue-300 text-xs mt-1 uppercase tracking-wide">{customerArea(customer)}</p>
+                      )}
                       {customer.address && (
                         <p className="text-white/40 text-sm mt-1">{customer.address}</p>
                       )}
                     </div>
                   ))}
+                  {filteredCustomers.length === 0 && (
+                    <div className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-6 text-center text-sm text-white/50">
+                      Tiada pelanggan dijumpai untuk kawasan ini.
+                    </div>
+                  )}
                 </div>
 
                 <Button

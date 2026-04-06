@@ -3,9 +3,34 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { canAccessStoreVisits } from '@/lib/permissions';
+import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal server error';
+}
+
+type StoreVisitRow = Record<string, any>;
+
+async function attachCustomerToVisit(visit: StoreVisitRow | null) {
+  if (!visit?.customer_id || !supabaseAdmin) return visit;
+
+  const customersTable = getCustomersTableByBranch(visit.branch);
+  const { data: customer } = await supabaseAdmin
+    .from(customersTable)
+    .select('id, name, address, branch, area')
+    .eq('id', visit.customer_id)
+    .maybeSingle();
+
+  return {
+    ...visit,
+    customer: customer || null,
+  };
+}
+
+async function attachCustomersToVisits(visits: StoreVisitRow[] | null) {
+  if (!Array.isArray(visits) || visits.length === 0) return [];
+
+  return Promise.all(visits.map((visit) => attachCustomerToVisit(visit)));
 }
 
 // GET - List store visits with filtering
@@ -32,10 +57,7 @@ export async function GET(request: NextRequest) {
 
     let query = supabaseAdmin
       .from('store_visits')
-      .select(`
-        *,
-        customer:customers(id, name, address)
-      `);
+      .select('*');
 
     // Role-based filtering
     if (role === 'Merchandiser' || role === 'Sales') {
@@ -68,7 +90,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data || []);
+    return NextResponse.json(await attachCustomersToVisits(data || []));
   } catch (error: unknown) {
     console.error('[API store-visits GET] Unexpected error:', error);
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
@@ -132,10 +154,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from('store_visits')
       .insert(visitData)
-      .select(`
-        *,
-        customer:customers(id, name, address)
-      `)
+      .select('*')
       .single();
 
     if (error) {
@@ -143,7 +162,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data, { status: 201 });
+    return NextResponse.json(await attachCustomerToVisit(data), { status: 201 });
   } catch (error: unknown) {
     console.error('[API store-visits POST] Unexpected error:', error);
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
@@ -213,10 +232,7 @@ export async function PUT(request: NextRequest) {
       .from('store_visits')
       .update(updateData)
       .eq('id', visit_id)
-      .select(`
-        *,
-        customer:customers(id, name, address)
-      `)
+      .select('*')
       .single();
 
     if (error) {
@@ -224,7 +240,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(await attachCustomerToVisit(data));
   } catch (error: unknown) {
     console.error('[API store-visits PUT] Unexpected error:', error);
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
