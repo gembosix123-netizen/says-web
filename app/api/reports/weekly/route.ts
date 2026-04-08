@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
@@ -306,6 +306,72 @@ interface ProductColDef {
   variant: string;
 }
 
+const DEFAULT_TEMPLATE_COLS: ProductColDef[] = [
+  { productName: '__MB_1KG__', brand: 'CB', variant: '1KG' },
+  { productName: '__MB_800G__', brand: 'CB', variant: '800G' },
+  { productName: '__MB_500G__', brand: 'CB', variant: '500G' },
+  { productName: '__PB_DAGING__', brand: 'PARTY BURGER', variant: 'DAGING' },
+  { productName: '__PB_AYAM__', brand: 'PARTY BURGER', variant: 'AYAM' },
+  { productName: '__BBA_BB__', brand: 'BBA', variant: 'BB' },
+  { productName: '__BBA_PEDAS__', brand: 'BBA', variant: 'PEDAS' },
+];
+
+function applyStyleForWeeklySheet(
+  ws: XLSX.WorkSheet,
+  totalRows: number,
+  totalCols: number,
+  amountColIdx: number,
+  totalRowIdx: number,
+) {
+  const border = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+  };
+
+  for (let r = 0; r < totalRows; r++) {
+    for (let c = 0; c < totalCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) continue;
+
+      const isNumeric = typeof ws[addr].v === 'number';
+      const isHeader = r === 2 || r === 3;
+      const isTitle = r === 0;
+      const isTotal = r === totalRowIdx;
+      const isAmountCol = c === amountColIdx;
+
+      ws[addr].s = {
+        font: {
+          name: 'Calibri',
+          sz: isTitle ? 12 : 10,
+          bold: isTitle || isHeader || isTotal,
+          color: { rgb: '000000' },
+        },
+        alignment: {
+          vertical: 'center',
+          horizontal: isTitle ? 'center' : (isNumeric ? 'right' : (isHeader ? 'center' : 'left')),
+          wrapText: false,
+        },
+        border,
+        numFmt: isNumeric ? '#,##0.00' : 'General',
+      };
+
+      if (isHeader) {
+        ws[addr].s.fill = { fgColor: { rgb: r === 2 ? 'D9E1F2' : 'E6ECF8' } };
+      }
+
+      if (isAmountCol && r >= 2) {
+        ws[addr].s.fill = { fgColor: { rgb: 'DBE5F1' } };
+      }
+
+      if (isTotal) {
+        ws[addr].s.fill = { fgColor: { rgb: 'FFF200' } };
+      }
+    }
+  }
+}
+
 function buildWeekSheet(
   title: string,
   transactions: Array<Record<string, unknown>>,
@@ -569,7 +635,8 @@ export async function POST(request: NextRequest) {
     const weekSaleIds = new Set(weekTx.map((t) => String(t.id)));
     const weekItems = allItems.filter((i) => weekSaleIds.has(i.transaction_id));
     const weekProductNames = new Set(weekItems.map((i) => i.product_name));
-    const productCols = productColsAll.filter((pc) => weekProductNames.has(pc.productName));
+    const productColsResolved = productColsAll.filter((pc) => weekProductNames.has(pc.productName));
+    const productCols = productColsResolved.length > 0 ? productColsResolved : DEFAULT_TEMPLATE_COLS;
 
     // Items map for this week
     const weekItemsMap: Record<string, SaleItem[]> = {};
@@ -590,13 +657,6 @@ export async function POST(request: NextRequest) {
       const filtered = weekTx.filter((t) => pg.filter(String(t.payment_method || '')));
       const sheetTitle = `WEEKLY SALES REPORT (${weekStartLabel} - WEEK ${week.weekNum})`;
 
-      if (productCols.length === 0) {
-        // No transactions / products this week – blank sheet
-        const ws = XLSX.utils.aoa_to_sheet([[sheetTitle], [], ['No data for this period.']]);
-        XLSX.utils.book_append_sheet(wb, ws, pg.name);
-        continue;
-      }
-
       const { data, merges } = buildWeekSheet(sheetTitle, filtered, weekItemsMap, customersById, productCols);
       const ws = XLSX.utils.aoa_to_sheet(data);
       ws['!merges'] = merges;
@@ -607,6 +667,12 @@ export async function POST(request: NextRequest) {
       ];
       // Row heights: title row taller
       ws['!rows'] = [{ hpx: 20 }, { hpx: 6 }, { hpx: 16 }, { hpx: 16 }];
+
+      const totalCols = 3 + productCols.length + 1;
+      const amountColIdx = totalCols - 1;
+      const totalRowIdx = data.length - 1;
+      applyStyleForWeeklySheet(ws, data.length, totalCols, amountColIdx, totalRowIdx);
+
       XLSX.utils.book_append_sheet(wb, ws, pg.name);
     }
   }
