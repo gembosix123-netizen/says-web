@@ -9,6 +9,7 @@ type SalesTransactionRow = {
   customer_id?: string | null;
   branch?: string | null;
   created_at?: string | null;
+  transaction_date?: string | null;
   grand_total?: number | string | null;
   status?: string | null;
 };
@@ -29,6 +30,7 @@ type ProductRow = {
   current_stock?: number | string | null;
   stock?: number | string | null;
   code?: string | null;
+  branch?: string | null;
 };
 
 type CustomerRow = {
@@ -90,9 +92,14 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   // Get the correct customers table based on branch
   const customersTable = getCustomersTableByBranch(branch);
 
+  let productQuery = supabaseAdmin.from('products').select('*');
+  if (useBranchFilter) {
+    productQuery = productQuery.eq('branch', branch);
+  }
+
   const [{ data: txRowsRaw, error: txError }, { data: productRows, error: productError }, { data: userRows, error: userError }, { data: customerRows, error: customerError }] = await Promise.all([
     txQuery,
-    supabaseAdmin.from('products').select('*'),
+    productQuery,
     supabaseAdmin.from('users').select('*'),
     supabaseAdmin.from(customersTable).select('*')
   ]);
@@ -145,6 +152,7 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
     unit: String(row.unit || 'unit'),
     stock: Number(row.current_stock || row.stock || 0),
     code: row.code || undefined,
+    branch: (row.branch as Product['branch']) || undefined,
   })) as Product[];
 
   const customers = ((customerRows || []) as CustomerRow[]).map((row) => ({
@@ -195,7 +203,10 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
       photoUrl: null,
       status: row.status === 'pending' ? 'Pending' : 'Completed',
       salesmanId: row.user_id || undefined,
-      createdAt: row.created_at || undefined,
+      // For backdated imports, transaction_date holds the real business date.
+      // created_at holds the insert timestamp (which may be a much later date).
+      // We expose transactionDate so filters use the correct business date.
+      createdAt: (row.transaction_date || row.created_at) || undefined,
       branch: row.branch || undefined,
     } as Transaction;
   });

@@ -32,6 +32,7 @@ export interface Product {
   stock: number;
   sku?: string;
   code?: string;
+  branch?: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
 }
 
 export interface Customer {

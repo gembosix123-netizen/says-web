@@ -9,6 +9,27 @@ import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
 
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  return message.includes(columnName.toLowerCase()) && (
+    message.includes('column') ||
+    message.includes('schema cache') ||
+    message.includes('does not exist')
+  );
+}
+
+function normalizePaymentMethod(value: unknown): string {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'cash';
+  if (raw === 'transfer') return 'bank_transfer';
+  return raw;
+}
+
+function extractCustomerFromNotes(notes?: string | null): string {
+  const m = String(notes || '').match(/\[Customer:\s*(.*?)\]/i);
+  return m?.[1]?.trim() || '';
+}
+
 /**
  * POST /api/sales/collect-payment
  * Mark a credit sale as paid and update customer outstanding balance
@@ -29,7 +50,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    const body = await request.json();
+    const rawBody = await request.json();
+
+    const body = {
+      ...rawBody,
+      amount: Number(rawBody?.amount ?? rawBody?.amountPaid ?? 0),
+      payment_method: normalizePaymentMethod(rawBody?.payment_method ?? rawBody?.paymentMethod),
+      customerId: String(rawBody?.customerId ?? rawBody?.customer_id ?? rawBody?.saleCustomerId ?? 'unknown'),
+      reference_number: rawBody?.reference_number ?? rawBody?.referenceNo ?? rawBody?.referenceNumber,
+    };
 
     // Validate payment data with Zod
     const validation = collectPaymentSchema.safeParse(body);
@@ -67,20 +96,59 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Sale already paid' }, { status: 400 });
     }
 
-    // Update sale as paid
-    const { error: updateError } = await supabaseAdmin
+    // Update sale as paid. Support both legacy (payment_status) and canonical (status) schemas.
+    const legacyUpdatePayload: Record<string, unknown> = {
+      payment_status: 'paid',
+      payment_method: payment_method || sale.payment_method,
+      paid_at: new Date().toISOString(),
+      paid_by: currentUser.id,
+      amount_paid: amount,
+      reference_number,
+      payment_notes: notes,
+      receipt_url,
+    };
+
+    const canonicalUpdatePayload: Record<string, unknown> = {
+      status: 'completed',
+      payment_method: payment_method || sale.payment_method,
+    };
+
+    if (notes) {
+      canonicalUpdatePayload.notes = [String(sale.notes || '').trim(), String(notes).trim()].filter(Boolean).join(' | ');
+    }
+
+    if (receipt_url) {
+      canonicalUpdatePayload.receipt_url = receipt_url;
+    }
+
+    if (reference_number) {
+      if (payment_method === 'bill_to_bill') canonicalUpdatePayload.billing_ref_no = reference_number;
+      if (payment_method === 'bank_transfer') canonicalUpdatePayload.transfer_ref_no = reference_number;
+      if (payment_method === 'qr_code') canonicalUpdatePayload.qr_txn_ref_no = reference_number;
+    }
+
+    let updateError: unknown = null;
+
+    const legacyUpdate = await supabaseAdmin
       .from(target)
-      .update({
-        payment_status: 'paid',
-        payment_method: payment_method || sale.payment_method,
-        paid_at: new Date().toISOString(),
-        paid_by: currentUser.id,
-        amount_paid: amount,
-        reference_number,
-        payment_notes: notes,
-        receipt_url
-      })
+      .update(legacyUpdatePayload)
       .eq('id', saleId);
+
+    updateError = legacyUpdate.error;
+
+    if (updateError && (
+      isMissingColumnError(updateError, 'payment_status') ||
+      isMissingColumnError(updateError, 'amount_paid') ||
+      isMissingColumnError(updateError, 'payment_notes') ||
+      isMissingColumnError(updateError, 'reference_number')
+    )) {
+      const canonicalUpdate = await supabaseAdmin
+        .from(target)
+        .update(canonicalUpdatePayload)
+        .eq('id', saleId);
+
+      updateError = canonicalUpdate.error;
+    }
 
     if (updateError) {
       console.error('Update error:', updateError);
@@ -90,21 +158,60 @@ export async function POST(request: NextRequest) {
     // Update customer outstanding balance
     if (sale.customer_id) {
       try {
-        const customersTable = getCustomersTableByBranch(currentUser.branch);
-        const { data: customer } = await supabaseAdmin
-          .from(customersTable)
-          .select('outstandingBalance')
-          .eq('id', sale.customer_id)
-          .single();
+        const effectiveBranch = String(sale.branch || branch || currentUser.branch || '');
+        const customersTable = getCustomersTableByBranch(effectiveBranch);
 
-        const currentBalance = customer?.outstandingBalance || 0;
+        let customer: { outstandingBalance?: number | string | null; current_balance?: number | string | null } | null = null;
+
+        const firstRead = await supabaseAdmin
+          .from(customersTable)
+          .select('outstandingBalance, current_balance')
+          .eq('id', sale.customer_id)
+          .maybeSingle();
+
+        if (!firstRead.error) {
+          customer = firstRead.data;
+        } else if (isMissingColumnError(firstRead.error, 'current_balance')) {
+          const fallbackRead = await supabaseAdmin
+            .from(customersTable)
+            .select('outstandingBalance')
+            .eq('id', sale.customer_id)
+            .maybeSingle();
+
+          customer = (fallbackRead.data || null) as { outstandingBalance?: number | string | null } | null;
+        } else if (isMissingColumnError(firstRead.error, 'outstandingBalance')) {
+          const fallbackRead = await supabaseAdmin
+            .from(customersTable)
+            .select('current_balance')
+            .eq('id', sale.customer_id)
+            .maybeSingle();
+
+          customer = (fallbackRead.data || null) as { current_balance?: number | string | null } | null;
+        }
+
+        const currentBalance = Number(customer?.current_balance ?? customer?.outstandingBalance ?? 0);
         const saleAmount = parseFloat(sale.total_amount || sale.amount || 0);
         const newBalance = Math.max(0, currentBalance - saleAmount);
 
-        await supabaseAdmin
+        const fullUpdate = await supabaseAdmin
           .from(customersTable)
-          .update({ outstandingBalance: newBalance })
+          .update({
+            outstandingBalance: newBalance,
+            current_balance: newBalance,
+          })
           .eq('id', sale.customer_id);
+
+        if (fullUpdate.error && isMissingColumnError(fullUpdate.error, 'current_balance')) {
+          await supabaseAdmin
+            .from(customersTable)
+            .update({ outstandingBalance: newBalance })
+            .eq('id', sale.customer_id);
+        } else if (fullUpdate.error && isMissingColumnError(fullUpdate.error, 'outstandingBalance')) {
+          await supabaseAdmin
+            .from(customersTable)
+            .update({ current_balance: newBalance })
+            .eq('id', sale.customer_id);
+        }
 
         console.log(`Payment collected: Customer ${sale.customer_id} outstanding: ${currentBalance} -> ${newBalance}`);
       } catch (e) {
@@ -167,8 +274,29 @@ export async function GET(request: NextRequest) {
         query = query.eq('branch', branch);
       }
 
-      const { data } = await query;
-      return data || [];
+      const { data, error } = await query;
+
+      if (!error) {
+        return data || [];
+      }
+
+      // Fallback for canonical schema that uses `status` instead of `payment_status`.
+      if (isMissingColumnError(error, 'payment_status')) {
+        let fallbackQuery = supabaseAdmin!
+          .from(table)
+          .select('*')
+          .eq('status', status === 'pending' ? 'pending' : 'completed')
+          .order('created_at', { ascending: false });
+
+        if (branch && branch !== 'all') {
+          fallbackQuery = fallbackQuery.eq('branch', branch);
+        }
+
+        const { data: fallbackData } = await fallbackQuery;
+        return fallbackData || [];
+      }
+
+      return [];
     };
 
     if (!branch || branch === 'all') {
@@ -187,14 +315,14 @@ export async function GET(request: NextRequest) {
     const formatted = pendingSales.map(sale => ({
       id: sale.id,
       invoice: sale.invoice,
-      customerName: sale.customer_name,
+      customerName: sale.customer_name || extractCustomerFromNotes(sale.notes) || 'N/A',
       customerId: sale.customer_id,
-      amount: parseFloat(sale.total_amount || sale.amount || 0),
+      amount: parseFloat(sale.grand_total || sale.total_amount || sale.amount || sale.subtotal_amount || 0),
       branch: sale.branch,
       createdAt: sale.created_at,
-      paymentStatus: sale.payment_status,
-      salesmanId: sale.salesman_id,
-      salesmanName: sale.salesman_name
+      paymentStatus: sale.payment_status || sale.status || 'pending',
+      salesmanId: sale.salesman_id || sale.user_id,
+      salesmanName: sale.salesman_name || sale.user_name || null
     }));
 
     return NextResponse.json(formatted);

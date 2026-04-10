@@ -28,6 +28,7 @@ CREATE TABLE products (
     price DECIMAL(10, 2) NOT NULL, -- Current Selling Price
     unit VARCHAR(20) DEFAULT 'pkt', -- e.g., pkt, kg, pcs
     current_stock INTEGER DEFAULT 0,
+    branch VARCHAR(50) NOT NULL DEFAULT 'HQ',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

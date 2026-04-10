@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { 
@@ -34,6 +34,7 @@ export default function SalesHubPage() {
     lastVisit: string | null;
   }>>([]);
   const [myCustomerLoading, setMyCustomerLoading] = useState(true);
+  const [selectedArea, setSelectedArea] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<{ name: string; role: string; branch: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -169,6 +170,24 @@ export default function SalesHubPage() {
     fetchUserInfo();
     fetchMyCustomers();
   }, [fetchTodayStats, fetchUserInfo, fetchMyCustomers]);
+
+  const areaOptions = useMemo(() => {
+    return Array.from(new Set(myCustomerRows.map((row) => row.area))).sort((a, b) => a.localeCompare(b, 'ms'));
+  }, [myCustomerRows]);
+
+  const filteredCustomerRows = useMemo(() => {
+    if (selectedArea === 'ALL') {
+      return myCustomerRows;
+    }
+
+    return myCustomerRows.filter((row) => row.area === selectedArea);
+  }, [myCustomerRows, selectedArea]);
+
+  useEffect(() => {
+    if (selectedArea !== 'ALL' && !areaOptions.includes(selectedArea)) {
+      setSelectedArea('ALL');
+    }
+  }, [selectedArea, areaOptions]);
 
   const menuItems = [
     {
@@ -382,9 +401,38 @@ export default function SalesHubPage() {
             </Button>
           </div>
 
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-white/60">Filter daerah:</span>
+            <button
+              type="button"
+              onClick={() => setSelectedArea('ALL')}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                selectedArea === 'ALL'
+                  ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
+                  : 'border-slate-600 text-white/70 hover:border-slate-500 hover:text-white'
+              }`}
+            >
+              All
+            </button>
+            {areaOptions.map((area) => (
+              <button
+                key={area}
+                type="button"
+                onClick={() => setSelectedArea(area)}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                  selectedArea === area
+                    ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
+                    : 'border-slate-600 text-white/70 hover:border-slate-500 hover:text-white'
+                }`}
+              >
+                {area}
+              </button>
+            ))}
+          </div>
+
           {myCustomerLoading ? (
             <p className="text-white/60">Memuatkan senarai pelanggan...</p>
-          ) : myCustomerRows.length === 0 ? (
+          ) : filteredCustomerRows.length === 0 ? (
             <p className="text-white/60">Tiada pelanggan untuk dipaparkan.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -399,7 +447,7 @@ export default function SalesHubPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {myCustomerRows.map((row) => (
+                  {filteredCustomerRows.map((row) => (
                     <tr key={row.id} className="border-b border-slate-800">
                       <td className="py-2 pr-4 text-white">{row.name}</td>
                       <td className="py-2 pr-4 text-white/80">{row.area}</td>

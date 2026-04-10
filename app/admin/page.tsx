@@ -18,6 +18,7 @@ export default async function AdminPage() {
         salesUsers={salesUsers}
         stockAudits={stockAudits}
         customers={customers}
+        branchScope="all"
       />
     </div>
   );

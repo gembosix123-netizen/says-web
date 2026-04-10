@@ -492,14 +492,32 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'to_salesman_id diperlukan untuk assign/handover' }, { status: 400 });
     }
 
-    const customersTable = getCustomersTableByBranch(currentUser.branch);
+    const primaryCustomersTable = getCustomersTableByBranch(currentUser.branch);
+    const fallbackCustomersTable = primaryCustomersTable === 'customers_kb' ? 'customers_kk' : 'customers_kb';
 
-    // Fetch current customer
-    const { data: customer, error: fetchErr } = await supabaseAdmin
+    let customersTable = primaryCustomersTable;
+
+    // Fetch current customer from expected table first.
+    let { data: customer, error: fetchErr } = await supabaseAdmin
       .from(customersTable)
       .select('id, name, assigned_to, assigned_to_name')
       .eq('id', customerId)
-      .single();
+      .maybeSingle();
+
+    // Migration-safety fallback: if not found in expected table, try the other table.
+    if ((!customer || fetchErr) && !fetchErr) {
+      const fallbackFetch = await supabaseAdmin
+        .from(fallbackCustomersTable)
+        .select('id, name, assigned_to, assigned_to_name')
+        .eq('id', customerId)
+        .maybeSingle();
+
+      if (fallbackFetch.data) {
+        customer = fallbackFetch.data;
+        customersTable = fallbackCustomersTable;
+        fetchErr = null;
+      }
+    }
 
     if (fetchErr || !customer) {
       return NextResponse.json({ error: 'Pelanggan tidak dijumpai' }, { status: 404 });

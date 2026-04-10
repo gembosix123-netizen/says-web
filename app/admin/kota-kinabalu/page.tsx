@@ -24,6 +24,7 @@ export default async function KotaKinabaluPage() {
         salesUsers={salesUsers}
         stockAudits={stockAudits}
         customers={customers}
+        branchScope={BRANCH_NAME}
       />
     </div>
   );

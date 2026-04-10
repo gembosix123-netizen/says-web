@@ -31,6 +31,15 @@ function normalizeBranchCode(branch = 'XX') {
   return initials || compact.slice(0, 4);
 }
 
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  return message.includes(columnName.toLowerCase()) && (
+    message.includes('column') ||
+    message.includes('schema cache') ||
+    message.includes('does not exist')
+  );
+}
+
 function generateDocumentNumber(prefix: string, branch: string) {
   const branchCode = normalizeBranchCode(branch);
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -516,6 +525,29 @@ export async function POST(request: NextRequest) {
     );
     const primaryProofPhotoUrl = normalizedProofPhotoUrls[0] || null;
     const resolvedReceiptUrl = validatedData.receipt_url?.trim() || primaryProofPhotoUrl;
+    const fallbackCustomerName = String(validatedData.customer_name || '').trim();
+
+    let resolvedCustomerId = validatedData.customer_id || null;
+    let customerFallbackNote = '';
+
+    // sales_transactions.customer_id references public.customers in some deployments.
+    // Branch customer tables may contain IDs that are not present in public.customers,
+    // so we pre-validate to avoid runtime FK failures.
+    if (resolvedCustomerId) {
+      const { data: canonicalCustomer, error: canonicalCustomerError } = await supabaseAdmin
+        .from('customers')
+        .select('id')
+        .eq('id', resolvedCustomerId)
+        .maybeSingle();
+
+      if (canonicalCustomerError || !canonicalCustomer) {
+        resolvedCustomerId = null;
+        if (fallbackCustomerName) {
+          customerFallbackNote = `[Customer: ${fallbackCustomerName}]`;
+        }
+        console.warn('[sales] customer_id not found in canonical customers table. Falling back to customer_id=null.');
+      }
+    }
 
     const vanStockErrors: string[] = [];
     for (const item of validatedData.items) {
@@ -550,12 +582,15 @@ export async function POST(request: NextRequest) {
 
 
     const subtotalAmount = validatedData.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+    const baseNotes = String(validatedData.notes || '').trim();
+    const normalizedNotes = [baseNotes, customerFallbackNote].filter(Boolean).join(' ').trim() || null;
+
     const saleData: Record<string, unknown> = {
       invoice,
       branch: validatedData.branch,
       area: body.area?.trim() || null,
       user_id: currentUser.id,
-      customer_id: validatedData.customer_id || null,
+      customer_id: resolvedCustomerId,
       transaction_date: new Date().toISOString(),
       subtotal_amount: subtotalAmount,
       grand_total: validatedData.total_amount,
@@ -568,7 +603,7 @@ export async function POST(request: NextRequest) {
       proof_photo_url: primaryProofPhotoUrl,
       proof_photo_urls: normalizedProofPhotoUrls.length > 0 ? normalizedProofPhotoUrls : null,
       status: isCredit ? 'pending' : 'completed',
-      notes: validatedData.notes || null,
+      notes: normalizedNotes,
       created_at: new Date().toISOString()
     };
 
@@ -589,6 +624,21 @@ export async function POST(request: NextRequest) {
 
       if (!error) {
         break;
+      }
+
+      const message = String(error.message || '');
+      const customerFkError = message.includes('sales_transactions_customer_id_fkey');
+      if (customerFkError && insertPayload.customer_id) {
+        const existingNotes = String(insertPayload.notes || '').trim();
+        const fallbackNote = fallbackCustomerName ? `[Customer: ${fallbackCustomerName}]` : '';
+
+        insertPayload.customer_id = null;
+        if (fallbackNote && !existingNotes.includes(fallbackNote)) {
+          insertPayload.notes = [existingNotes, fallbackNote].filter(Boolean).join(' ').trim();
+        }
+
+        console.warn('[sales] customer_id FK mismatch detected. Retrying insert with customer_id=null.');
+        continue;
       }
 
       const missingColumnMatch = /Could not find the '([^']+)' column/i.exec(String(error.message || ''));
@@ -672,22 +722,60 @@ export async function POST(request: NextRequest) {
     // Update customer outstanding balance if credit payment
     if (isCredit && body.customer_id) {
       try {
-        const customersTable = getCustomersTableByBranch(currentUser.branch as Branch | undefined);
+        const effectiveBranch = String(createdSale.branch || currentUser.branch || '');
+        const customersTable = getCustomersTableByBranch(effectiveBranch as Branch | undefined);
         // Get current outstanding balance
-        const { data: customer } = await supabaseAdmin
-          .from(customersTable)
-          .select('current_balance')
-          .eq('id', body.customer_id)
-          .single();
+        let customer: { current_balance?: number | string | null; outstandingBalance?: number | string | null } | null = null;
 
-        const currentBalance = Number(customer?.current_balance || 0);
+        const firstRead = await supabaseAdmin
+          .from(customersTable)
+          .select('current_balance, outstandingBalance')
+          .eq('id', body.customer_id)
+          .maybeSingle();
+
+        if (!firstRead.error) {
+          customer = firstRead.data;
+        } else if (isMissingColumnError(firstRead.error, 'outstandingBalance')) {
+          const fallbackRead = await supabaseAdmin
+            .from(customersTable)
+            .select('current_balance')
+            .eq('id', body.customer_id)
+            .maybeSingle();
+
+          customer = (fallbackRead.data || null) as { current_balance?: number | string | null } | null;
+        } else if (isMissingColumnError(firstRead.error, 'current_balance')) {
+          const fallbackRead = await supabaseAdmin
+            .from(customersTable)
+            .select('outstandingBalance')
+            .eq('id', body.customer_id)
+            .maybeSingle();
+
+          customer = (fallbackRead.data || null) as { outstandingBalance?: number | string | null } | null;
+        }
+
+        const currentBalance = Number(customer?.current_balance ?? customer?.outstandingBalance ?? 0);
         const newBalance = currentBalance + validatedData.total_amount;
 
         // Update customer's outstanding balance
-        await supabaseAdmin
+        const fullUpdate = await supabaseAdmin
           .from(customersTable)
-          .update({ current_balance: newBalance })
+          .update({
+            current_balance: newBalance,
+            outstandingBalance: newBalance,
+          })
           .eq('id', body.customer_id);
+
+        if (fullUpdate.error && isMissingColumnError(fullUpdate.error, 'outstandingBalance')) {
+          await supabaseAdmin
+            .from(customersTable)
+            .update({ current_balance: newBalance })
+            .eq('id', body.customer_id);
+        } else if (fullUpdate.error && isMissingColumnError(fullUpdate.error, 'current_balance')) {
+          await supabaseAdmin
+            .from(customersTable)
+            .update({ outstandingBalance: newBalance })
+            .eq('id', body.customer_id);
+        }
           
         console.log(`Updated customer ${body.customer_id} outstanding: ${currentBalance} -> ${newBalance}`);
       } catch (updateErr) {

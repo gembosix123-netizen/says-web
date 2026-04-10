@@ -11,6 +11,7 @@ interface AnalyticsDashboardProps {
   salesUsers: User[];
   stockAudits: StockAudit[];
   customers: Customer[];
+    branchScope?: string;
 }
 
 interface LowStockAlert {
@@ -37,11 +38,48 @@ const AGENT_BRANCH_MAP: Record<string, string> = {
     u3: 'Kinabatangan'
 };
 
-export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
-  const { t } = useLanguage();
-  const [selectedBranch, setSelectedBranch] = useState('all');
-  const [dateRange, setDateRange] = useState<DateRange>({ start: '', end: '' });
-  const [exchangeReturns, setExchangeReturns] = useState<ExchangeReturn[]>([]);
+export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers, branchScope = 'all' }: AnalyticsDashboardProps) {
+    const { t } = useLanguage();
+    const [selectedBranch, setSelectedBranch] = useState('all');
+    const [dateRange, setDateRange] = useState<DateRange>({ start: '', end: '' });
+    const [exchangeReturns, setExchangeReturns] = useState<ExchangeReturn[]>([]);
+    const [liveTransactions, setLiveTransactions] = useState<Transaction[]>(transactions || []);
+    const [liveStockAudits, setLiveStockAudits] = useState<StockAudit[]>(stockAudits || []);
+
+    const formatDateKey = (value: string | Date) => {
+        const dateValue = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(dateValue.getTime())) return '';
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).format(dateValue);
+    };
+
+    const getTransactionDateKey = (transaction: Transaction) => {
+        const transactionRecord = transaction as Transaction & {
+            created_at?: string;
+            transactionDate?: string;
+        };
+
+        // Prioritise transactionDate (= transaction_date in DB, i.e. the real business date).
+        // Fall back to createdAt / created_at only when no business date is recorded.
+        // This ensures backdated imports (created_at = import date, transaction_date = real date)
+        // are grouped under their actual month, not under the import month.
+        const rawDate = transactionRecord.transactionDate || transactionRecord.createdAt || transactionRecord.created_at || '';
+        if (!rawDate) return '';
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+            return rawDate;
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}T/.test(rawDate)) {
+            return rawDate.slice(0, 10);
+        }
+
+        return formatDateKey(rawDate);
+    };
+
+    const getEffectiveBranch = () => {
+        if (selectedBranch !== 'all') return selectedBranch;
+        return 'all';
+    };
 
   useEffect(() => {
     const now = new Date();
@@ -53,14 +91,77 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
     setDateRange({ start: firstDay, end: today });
   }, []);
 
+    useEffect(() => {
+        setLiveTransactions(transactions || []);
+    }, [transactions]);
+
+    useEffect(() => {
+        setLiveStockAudits(stockAudits || []);
+    }, [stockAudits]);
+
+    useEffect(() => {
+        let isCancelled = false;
+
+        const fetchRealtimeData = async () => {
+            try {
+                const branchParam = branchScope !== 'all' ? branchScope : getEffectiveBranch();
+                const salesParams = new URLSearchParams();
+
+                if (branchParam !== 'all') {
+                    salesParams.set('branch', branchParam);
+                }
+
+                const [salesResponse, auditsResponse] = await Promise.all([
+                    fetch(`/api/sales?${salesParams.toString()}`, { cache: 'no-store' }),
+                    fetch('/api/stock-audits', { cache: 'no-store' }),
+                ]);
+
+                if (!isCancelled && salesResponse.ok) {
+                    const salesData = await salesResponse.json();
+                    if (Array.isArray(salesData)) {
+                        setLiveTransactions(salesData as Transaction[]);
+                    }
+                }
+
+                if (!isCancelled && auditsResponse.ok) {
+                    const auditData = await auditsResponse.json();
+                    if (Array.isArray(auditData)) {
+                        setLiveStockAudits(auditData as StockAudit[]);
+                    }
+                }
+            } catch (error) {
+                console.error('Realtime refresh failed:', error);
+            }
+        };
+
+    fetchRealtimeData();
+    const timer = window.setInterval(fetchRealtimeData, 30000);
+
+        return () => {
+            isCancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [branchScope, selectedBranch]);
+
   // Fetch exchange/return data
   useEffect(() => {
     const fetchExchangeReturns = async () => {
       try {
         const params = new URLSearchParams();
-        if (selectedBranch !== 'all') {
-          params.set('branch', selectedBranch);
+                const effectiveBranch = branchScope !== 'all' ? branchScope : getEffectiveBranch();
+
+                if (effectiveBranch !== 'all') {
+                    params.set('branch', effectiveBranch);
+                }
+
+                if (dateRange.start) {
+                    params.set('startDate', dateRange.start);
+                }
+
+                if (dateRange.end) {
+                    params.set('endDate', dateRange.end);
         }
+
         const response = await fetch(`/api/exchange-returns?${params.toString()}`);
         if (response.ok) {
           const data = await response.json();
@@ -71,29 +172,29 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
       }
     };
     fetchExchangeReturns();
-  }, [selectedBranch]);
+    }, [selectedBranch, dateRange, branchScope]);
 
   // Get unique branches from transactions
   const branches = useMemo(() => {
     const uniqueBranches = new Set<string>();
-    transactions?.forEach(t => {
+        liveTransactions?.forEach(t => {
       if (t.branch) uniqueBranches.add(t.branch);
     });
     return Array.from(uniqueBranches).sort();
-  }, [transactions]);
+    }, [liveTransactions]);
 
   // Filter transactions based on selected branch
   const filteredTransactions = useMemo(() => {
     if (selectedBranch === 'all') {
-      return transactions || [];
+            return liveTransactions || [];
     }
-    return (transactions || []).filter(t => t.branch === selectedBranch);
-  }, [transactions, selectedBranch]);
+        return (liveTransactions || []).filter(t => t.branch === selectedBranch);
+    }, [liveTransactions, selectedBranch]);
 
     const monthlyTransactions = useMemo(() => {
         if (!dateRange.start && !dateRange.end) return filteredTransactions;
         return filteredTransactions.filter((transaction) => {
-            const d = transaction.createdAt?.split('T')[0] ?? '';
+            const d = getTransactionDateKey(transaction);
             if (dateRange.start && d < dateRange.start) return false;
             if (dateRange.end   && d > dateRange.end)   return false;
             return true;
@@ -162,12 +263,25 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
   // Stock Alerts (Latest audit for each product < 10)
   const lowStockAlerts = useMemo(() => {
      const alerts: LowStockAlert[] = [];
-     stockAudits?.forEach(audit => {
+         const isScopedDashboard = branchScope !== 'all';
+         const branchFilteredCustomers = selectedBranch === 'all'
+             ? customers
+             : customers.filter((customer) => customer.branch === selectedBranch);
+         const customerIndex = new Map(branchFilteredCustomers.map((customer) => [customer.id, customer]));
+
+         liveStockAudits?.forEach(audit => {
+                 const customer = customerIndex.get(audit.customerId) || customers.find(c => c.id === audit.customerId);
+
+                 if (isScopedDashboard && !customer) {
+                     return;
+                 }
+
+                 if (selectedBranch !== 'all' && customer?.branch && customer.branch !== selectedBranch) {
+                     return;
+                 }
+
          audit.items?.forEach(item => {
              if (item.physicalStock < 10) {
-                 // Try to find customer by ID
-                 const customer = customers.find(c => c.id === audit.customerId);
-                 
                  // Determine customer/location name with better fallbacks
                  let customerName = 'Unknown';
                  if (customer?.name) {
@@ -188,28 +302,30 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
          });
      });
      return alerts.sort((a, b) => new Date(b.auditDate).getTime() - new Date(a.auditDate).getTime());
-  }, [stockAudits, customers]);
+  }, [liveStockAudits, customers, selectedBranch, branchScope]);
 
   // Sales Trend (Last 7 days)
   const salesTrend = useMemo(() => {
       const days = 7;
+      const rangeEnd = dateRange.end || formatDateKey(new Date());
+      const endDate = new Date(`${rangeEnd}T12:00:00+08:00`);
       const data = new Array(days).fill(0).map((_, i) => {
-          const d = new Date();
+          const d = new Date(endDate);
           d.setDate(d.getDate() - (days - 1 - i));
-          return { date: d.toISOString().split('T')[0], total: 0 };
+          return { date: formatDateKey(d), total: 0 };
       });
       
       monthlyTransactions.forEach(t => {
-          if (t.createdAt) {
-              const date = t.createdAt.split('T')[0];
-              const dayData = data.find(d => d.date === date);
-              if (dayData) {
-                  dayData.total += Number(t.total || 0);
-              }
+          const date = getTransactionDateKey(t);
+          if (date) {
+            const dayData = data.find(d => d.date === date);
+            if (dayData) {
+                dayData.total += Number(t.total || 0);
+            }
           }
       });
       return data;
-  }, [monthlyTransactions]);
+  }, [monthlyTransactions, dateRange]);
 
   const maxSales = Math.max(...salesTrend.map(d => d.total), 1);
 

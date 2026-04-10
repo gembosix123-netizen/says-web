@@ -66,17 +66,34 @@ export function getSalesTableByBranch(_branch: Branch): 'sales_transactions' {
 
 /**
  * Get the appropriate customers table name based on branch
- * - Kota Kinabalu -> customers_kb
- * - Kinabatangan -> customers_kk
+ * - Kinabatangan / KB -> customers_kb
+ * - Kota Kinabalu / KK -> customers_kk
  */
 export function getCustomersTableByBranch(branch?: string): 'customers_kb' | 'customers_kk' {
-  if (!branch || branch === 'Kota Kinabalu' || branch === 'KB') {
+  const normalized = (branch || '').trim().toLowerCase();
+
+  if (!normalized) {
     return 'customers_kb';
   }
-  if (branch === 'Kinabatangan' || branch === 'KK') {
+
+  // KB admin/branch must write to customers_kb.
+  if (normalized === 'kinabatangan' || normalized === 'kb') {
+    return 'customers_kb';
+  }
+
+  // KK admin/branch must write to customers_kk.
+  if (normalized === 'kota kinabalu' || normalized === 'kk') {
     return 'customers_kk';
   }
-  // Default to KB if branch is unclear
+
+  // Tolerate variant spellings/labels from legacy data.
+  if (normalized.includes('kinabatangan')) {
+    return 'customers_kb';
+  }
+  if (normalized.includes('kota kinabalu')) {
+    return 'customers_kk';
+  }
+
   return 'customers_kb';
 }
 

@@ -24,6 +24,7 @@ export default async function KinabatanganPage() {
         salesUsers={salesUsers}
         stockAudits={stockAudits}
         customers={customers}
+        branchScope={BRANCH_NAME}
       />
     </div>
   );

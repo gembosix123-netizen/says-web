@@ -4,6 +4,17 @@ import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { canManageProducts } from '@/lib/permissions';
 
+type BranchName = 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
+
+const normalizeBranch = (value: unknown): BranchName | null => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'kota kinabalu' || raw === 'kota-kinabalu' || raw === 'kk') return 'Kota Kinabalu';
+  if (raw === 'kinabatangan' || raw === 'kb') return 'Kinabatangan';
+  if (raw === 'hq') return 'HQ';
+  return null;
+};
+
 /**
  * GET /api/products/prices?product_id=X&branch=Y&salesman_id=Z
  * Returns price overrides. If product_id given, returns all overrides for that product.
@@ -20,16 +31,22 @@ export async function GET(request: NextRequest) {
   const user = getSessionUserFromRequest(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!supabaseAdmin) return NextResponse.json({ error: 'DB not available' }, { status: 500 });
+  const role = normalizeRole(user.role);
+  const userBranch = normalizeBranch(user.branch);
+  if (role !== 'Main Admin' && !userBranch) {
+    return NextResponse.json({ error: 'Branch assignment required for this account' }, { status: 403 });
+  }
 
   const { searchParams } = new URL(request.url);
   const productId = searchParams.get('product_id');
-  const branch = searchParams.get('branch');
+  const branch = normalizeBranch(searchParams.get('branch'));
   const salesmanId = searchParams.get('salesman_id');
+  const branchScope = role === 'Main Admin' ? branch : userBranch;
 
   let query = supabaseAdmin.from('product_prices').select('*').order('created_at');
 
   if (productId) query = query.eq('product_id', productId);
-  if (branch) query = query.eq('branch', branch);
+  if (branchScope) query = query.eq('branch', branchScope);
   if (salesmanId) query = query.eq('salesman_id', salesmanId);
 
   const { data, error } = await query;
@@ -48,9 +65,22 @@ export async function POST(request: NextRequest) {
   }
 
   if (!supabaseAdmin) return NextResponse.json({ error: 'DB not available' }, { status: 500 });
+  const userBranch = normalizeBranch(user.branch);
+  if (role !== 'Main Admin' && !userBranch) {
+    return NextResponse.json({ error: 'Branch assignment required for this account' }, { status: 403 });
+  }
 
   const body = await request.json();
   const { product_id, branch, salesman_id, price, notes } = body;
+  const requestedBranch = normalizeBranch(branch);
+  const branchScope = role === 'Main Admin' ? requestedBranch : userBranch;
+
+  if (!branchScope) {
+    return NextResponse.json({ error: 'branch required for price override' }, { status: 400 });
+  }
+  if (role !== 'Main Admin' && requestedBranch && requestedBranch !== userBranch) {
+    return NextResponse.json({ error: 'Tidak dibenarkan akses branch lain' }, { status: 403 });
+  }
 
   if (!product_id || price == null) {
     return NextResponse.json({ error: 'product_id and price required' }, { status: 400 });
@@ -62,7 +92,7 @@ export async function POST(request: NextRequest) {
 
   const record = {
     product_id,
-    branch: branch || null,
+    branch: branchScope,
     salesman_id: salesman_id || null,
     price: Number(price),
     notes: notes || null,
@@ -90,10 +120,27 @@ export async function DELETE(request: NextRequest) {
   }
 
   if (!supabaseAdmin) return NextResponse.json({ error: 'DB not available' }, { status: 500 });
+  const userBranch = normalizeBranch(user.branch);
+  if (role !== 'Main Admin' && !userBranch) {
+    return NextResponse.json({ error: 'Branch assignment required for this account' }, { status: 403 });
+  }
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  if (role !== 'Main Admin') {
+    const { data: row, error: rowError } = await supabaseAdmin
+      .from('product_prices')
+      .select('id, branch')
+      .eq('id', id)
+      .single();
+
+    if (rowError || !row) return NextResponse.json({ error: 'Price override not found' }, { status: 404 });
+    if (normalizeBranch(row.branch) !== userBranch) {
+      return NextResponse.json({ error: 'Tidak dibenarkan akses branch lain' }, { status: 403 });
+    }
+  }
 
   const { error } = await supabaseAdmin.from('product_prices').delete().eq('id', id);
   if (error) return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
