@@ -10,7 +10,7 @@ interface Order {
   customer_id: string | null;
   customer_name: string | null;
   customerId?: string; // Legacy support
-  items: { id: string; name?: string; product_name?: string; quantity: number; price: number; unit_price?: number }[];
+  items: { id: string; product_id?: string; name?: string; product_name?: string; quantity: number; price: number; unit_price?: number }[];
   total: number;
   status: string;
   createdAt: string;
@@ -227,7 +227,7 @@ export default function OrderManagement() {
                                 {(order.items || []).map((item, idx) => (
                                     <div key={idx} className="grid grid-cols-3 gap-2 text-sm py-1">
                                         <span className="text-slate-300 truncate">
-                                            {item.name || item.product_name || getProductName(item.id || item.product_id)}
+                                            {item.name || item.product_name || getProductName(item.id ?? item.product_id ?? '')}
                                         </span>
                                         <span className="text-slate-400 text-center">x{item.quantity}</span>
                                         <span className="text-slate-400 text-right">

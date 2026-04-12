@@ -369,7 +369,8 @@ export async function GET(request: NextRequest) {
     [...canonicalPending, ...legacyPending].forEach((sale) => {
       const id = String(sale.id || '');
       if (!id) return;
-      if (!branchMatches(sale.branch, branch)) return;
+      const saleBranch = typeof sale.branch === 'string' ? sale.branch : null;
+      if (!branchMatches(saleBranch, branch)) return;
       if (!mergedById.has(id)) {
         mergedById.set(id, sale);
       }
@@ -378,18 +379,23 @@ export async function GET(request: NextRequest) {
     pendingSales = Array.from(mergedById.values());
 
     // Format response
-    const formatted = pendingSales.map(sale => ({
-      id: sale.id,
-      invoice: sale.invoice,
-      customerName: sale.customer_name || extractCustomerFromNotes(sale.notes) || 'N/A',
-      customerId: sale.customer_id,
-      amount: parseFloat(sale.grand_total || sale.total_amount || sale.amount || sale.subtotal_amount || 0),
-      branch: sale.branch,
-      createdAt: sale.created_at,
-      paymentStatus: sale.payment_status || sale.status || 'pending',
-      salesmanId: sale.salesman_id || sale.user_id,
-      salesmanName: sale.salesman_name || sale.user_name || null
-    }));
+    const formatted = pendingSales.map((sale) => {
+      const notesText = typeof sale.notes === 'string' ? sale.notes : null;
+      const rawAmount = sale.grand_total ?? sale.total_amount ?? sale.amount ?? sale.subtotal_amount ?? 0;
+
+      return {
+        id: sale.id,
+        invoice: sale.invoice,
+        customerName: sale.customer_name || extractCustomerFromNotes(notesText) || 'N/A',
+        customerId: sale.customer_id,
+        amount: Number(typeof rawAmount === 'string' || typeof rawAmount === 'number' ? rawAmount : 0),
+        branch: sale.branch,
+        createdAt: sale.created_at,
+        paymentStatus: sale.payment_status || sale.status || 'pending',
+        salesmanId: sale.salesman_id || sale.user_id,
+        salesmanName: sale.salesman_name || sale.user_name || null
+      };
+    });
 
     return NextResponse.json(formatted);
 

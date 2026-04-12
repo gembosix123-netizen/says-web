@@ -712,6 +712,13 @@ export async function POST(request: NextRequest) {
       .from(SALES_ITEMS_TABLE)
       .insert(saleItems);
 
+    const createdSaleId = String(createdSale.id || '');
+    const createdSaleInvoice = typeof createdSale.invoice === 'string' ? createdSale.invoice : undefined;
+    const proofPhotoFallback =
+      typeof createdSale.proof_photo_url === 'string'
+        ? createdSale.proof_photo_url
+        : (typeof resolvedReceiptUrl === 'string' ? resolvedReceiptUrl : null);
+
     if (itemsError) {
       console.error('Supabase error inserting sales items:', itemsError);
       // Best effort cleanup for orphaned transaction
@@ -723,7 +730,7 @@ export async function POST(request: NextRequest) {
         module: 'sales',
         action: 'create_sale',
         entityType: 'sales_transaction',
-        entityId: createdSale.id,
+        entityId: createdSaleId,
         branch,
         status: 'failed',
         sourceSystem: 'supabase',
@@ -832,11 +839,11 @@ export async function POST(request: NextRequest) {
       receiptUrl: createdSale.receipt_url || resolvedReceiptUrl || null,
       proofPhotoUrl: normalizeProofPhotoUrls(
         createdSale.proof_photo_urls,
-        createdSale.proof_photo_url || resolvedReceiptUrl || null
+        proofPhotoFallback
       )[0] || null,
       proofPhotoUrls: normalizeProofPhotoUrls(
         createdSale.proof_photo_urls,
-        createdSale.proof_photo_url || resolvedReceiptUrl || null
+        proofPhotoFallback
       )
     };
 
@@ -846,10 +853,10 @@ export async function POST(request: NextRequest) {
       module: 'sales',
       action: 'create_sale',
       entityType: 'sales_transaction',
-      entityId: createdSale.id,
+      entityId: createdSaleId,
       branch,
       status: 'success',
-      referenceNo: createdSale.invoice,
+      referenceNo: createdSaleInvoice,
       sourceSystem: 'supabase',
       metadata: {
         invoice: createdSale.invoice,
