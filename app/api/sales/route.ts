@@ -31,6 +31,21 @@ function normalizeBranchCode(branch = 'XX') {
   return initials || compact.slice(0, 4);
 }
 
+function normalizeBranchValue(value?: string | null): string {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function branchMatches(value?: string | null, expected?: string | null): boolean {
+  const left = normalizeBranchValue(value);
+  const right = normalizeBranchValue(expected);
+  if (!right || right === 'all') return true;
+  if (!left) return false;
+  return left === right;
+}
+
 function isMissingColumnError(error: unknown, columnName: string): boolean {
   const message = String((error as { message?: string })?.message || '').toLowerCase();
   return message.includes(columnName.toLowerCase()) && (
@@ -193,7 +208,7 @@ export async function GET(request: NextRequest) {
       const allTx = await db.transactions.getAll();
       let filtered = (!branch || branch === 'all')
         ? allTx
-        : allTx.filter((t) => t.branch === branch);
+        : allTx.filter((t) => branchMatches(t.branch, branch));
       if (startDate) filtered = filtered.filter((t) => t.createdAt && t.createdAt >= startDate);
       if (endDate)   filtered = filtered.filter((t) => t.createdAt && t.createdAt <= endDate + 'T23:59:59.999Z');
       return NextResponse.json(filtered);
@@ -220,7 +235,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false });
 
     if (branch && branch !== 'all') {
-      query = query.eq('branch', branch);
+      query = query.ilike('branch', normalizeBranchValue(branch));
     }
 
     if (startDate) {
@@ -242,7 +257,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch sales data' }, { status: 500 });
     }
 
-    const salesAll = salesRows || [];
+    const salesAll = (salesRows || []).filter((sale) => branchMatches(sale.branch, branch));
     const saleIds = salesAll.map((sale) => sale.id);
     const customerIds = Array.from(new Set(salesAll.map((sale) => sale.customer_id).filter(Boolean)));
     const userIds = Array.from(new Set(salesAll.map((sale) => sale.user_id).filter(Boolean)));
@@ -374,6 +389,7 @@ export async function GET(request: NextRequest) {
         total,
         total_amount: total,
         branch: sale.branch,
+        area: sale.area || null,
         items,
         status: sale.status || 'completed',
         paymentStatus,
@@ -608,7 +624,7 @@ export async function POST(request: NextRequest) {
     };
 
     const insertPayload: Record<string, unknown> = { ...saleData };
-    let sale: Record<string, any> | null = null;
+    let sale: Record<string, unknown> | null = null;
     let error: { message?: string } | null = null;
 
     // Backward-compatible fallback: some deployments may not have all optional columns yet.
@@ -619,7 +635,7 @@ export async function POST(request: NextRequest) {
         .select()
         .single();
 
-      sale = (insertResult.data as Record<string, any> | null) || null;
+      sale = (insertResult.data as Record<string, unknown> | null) || null;
       error = insertResult.error;
 
       if (!error) {

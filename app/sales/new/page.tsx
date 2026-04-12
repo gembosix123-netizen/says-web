@@ -249,6 +249,8 @@ export default function NewSalePage() {
   const [pendingDebts, setPendingDebts] = useState<PendingDebt[]>([]);
   const [loadingDebts, setLoadingDebts] = useState(false);
   const [selectedDebtId, setSelectedDebtId] = useState('');
+  const [allDebtsByCustomer, setAllDebtsByCustomer] = useState<Record<string, number>>({});
+  const [showDebtWarning, setShowDebtWarning] = useState(false);
   const [successData, setSuccessData] = useState<{
     invoiceNo: string;
     receiptNo: string | null;
@@ -294,10 +296,11 @@ export default function NewSalePage() {
 
   const fetchData = async () => {
     try {
-      const [customersRes, productsRes, userRes] = await Promise.all([
+      const [customersRes, productsRes, userRes, debtsRes] = await Promise.all([
         fetch('/api/customers').then(res => res.json()),
         fetch('/api/inventory/van').then(res => res.json()),
-        fetch('/api/auth/me').then(res => res.json())
+        fetch('/api/auth/me').then(res => res.json()),
+        fetch('/api/sales/collect-payment?status=pending').then(res => res.ok ? res.json() : [])
       ]);
 
       if (Array.isArray(customersRes)) setCustomers(customersRes);
@@ -317,6 +320,16 @@ export default function NewSalePage() {
             stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
           };
         }));
+      }
+
+      if (Array.isArray(debtsRes)) {
+        const debtMap: Record<string, number> = {};
+        debtsRes.forEach((row: Record<string, unknown>) => {
+          const customerId = String(row.customerId || row.customer_id || '');
+          if (!customerId) return;
+          debtMap[customerId] = (debtMap[customerId] || 0) + Number(row.amount || 0);
+        });
+        setAllDebtsByCustomer(debtMap);
       }
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -452,8 +465,8 @@ export default function NewSalePage() {
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       const filtered = list
-        .filter((row: any) => String(row.customerId || '') === customerId)
-        .map((row: any) => ({
+        .filter((row: Record<string, unknown>) => String(row.customerId || '') === customerId)
+        .map((row: Record<string, unknown>) => ({
           id: String(row.id),
           invoice: String(row.invoice || '-'),
           customerName: String(row.customerName || ''),
@@ -1198,26 +1211,38 @@ export default function NewSalePage() {
                 )}
 
                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {filteredCustomers.map((customer) => (
-                    <div
-                      key={customer.id}
-                      className={`p-4 rounded-lg cursor-pointer transition-all ${
-                        selectedCustomer?.id === customer.id
-                          ? 'bg-blue-500/20 border-2 border-blue-500'
-                          : 'bg-slate-800 border-2 border-transparent hover:border-slate-600'
-                      }`}
-                      onClick={() => setSelectedCustomer(customer)}
-                    >
-                      <p className="font-semibold text-white">{customer.name}</p>
-                      <p className="text-white/60 text-sm">{customer.phone}</p>
-                      {customerArea(customer) && (
-                        <p className="text-blue-300 text-xs mt-1 uppercase tracking-wide">{customerArea(customer)}</p>
-                      )}
-                      {customer.address && (
-                        <p className="text-white/40 text-sm mt-1">{customer.address}</p>
-                      )}
-                    </div>
-                  ))}
+                  {filteredCustomers.map((customer) => {
+                    const debtAmount = allDebtsByCustomer[customer.id] || 0;
+                    return (
+                      <div
+                        key={customer.id}
+                        className={`p-4 rounded-lg cursor-pointer transition-all ${
+                          selectedCustomer?.id === customer.id
+                            ? 'bg-blue-500/20 border-2 border-blue-500'
+                            : debtAmount > 0
+                              ? 'bg-red-900/20 border-2 border-red-500/40 hover:border-red-500/70'
+                              : 'bg-slate-800 border-2 border-transparent hover:border-slate-600'
+                        }`}
+                        onClick={() => setSelectedCustomer(customer)}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold text-white">{customer.name}</p>
+                          {debtAmount > 0 && (
+                            <span className="text-xs font-bold bg-red-600 text-white px-2 py-0.5 rounded-full">
+                              HUTANG RM {debtAmount.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-white/60 text-sm">{customer.phone}</p>
+                        {customerArea(customer) && (
+                          <p className="text-blue-300 text-xs mt-1 uppercase tracking-wide">{customerArea(customer)}</p>
+                        )}
+                        {customer.address && (
+                          <p className="text-white/40 text-sm mt-1">{customer.address}</p>
+                        )}
+                      </div>
+                    );
+                  })}
                   {filteredCustomers.length === 0 && (
                     <div className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-6 text-center text-sm text-white/50">
                       Tiada pelanggan dijumpai untuk kawasan ini.
@@ -1225,12 +1250,68 @@ export default function NewSalePage() {
                   )}
                 </div>
 
+                {showDebtWarning && selectedCustomer && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+                    <div className="bg-slate-900 border border-red-500/50 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+                      <div className="flex items-center gap-3 mb-4">
+                        <span className="text-3xl">!</span>
+                        <div>
+                          <p className="font-bold text-white text-lg">Hutang Belum Diselesaikan</p>
+                          <p className="text-red-300 text-sm">{selectedCustomer.name}</p>
+                        </div>
+                      </div>
+                      <p className="text-slate-300 text-sm mb-2">Kedai ini mempunyai hutang tertunggak sebanyak:</p>
+                      <p className="text-3xl font-bold text-red-400 mb-4">
+                        RM {(allDebtsByCustomer[selectedCustomer.id] || 0).toFixed(2)}
+                      </p>
+                      <p className="text-slate-400 text-xs mb-5">
+                        Mengikut peraturan Bill-to-Bill, hutang perlu diselesaikan sebelum ambil barang baharu.
+                      </p>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => {
+                            setShowDebtWarning(false);
+                            setDebtOnlyMode(true);
+                            setStep(4);
+                          }}
+                          className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-colors"
+                        >
+                          Kutip Hutang Dahulu
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowDebtWarning(false);
+                            setStep(2);
+                          }}
+                          className="w-full bg-slate-700 hover:bg-slate-600 text-white/70 font-medium py-3 rounded-xl transition-colors text-sm"
+                        >
+                          Teruskan Ambil Barang (hutang kekal)
+                        </button>
+                        <button
+                          onClick={() => setShowDebtWarning(false)}
+                          className="w-full text-slate-500 hover:text-slate-300 py-2 text-sm transition-colors"
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <Button
                   variant="primary"
                   size="lg"
                   className="w-full mt-4"
                   disabled={!selectedCustomer}
-                  onClick={() => setStep(2)}
+                  onClick={() => {
+                    if (!selectedCustomer) return;
+                    const debtAmount = allDebtsByCustomer[selectedCustomer.id] || 0;
+                    if (debtAmount > 0) {
+                      setShowDebtWarning(true);
+                      return;
+                    }
+                    setStep(2);
+                  }}
                 >
                   Seterusnya
                 </Button>

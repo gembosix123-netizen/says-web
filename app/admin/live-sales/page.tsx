@@ -5,7 +5,7 @@ import { Transaction } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { RefreshCw, Printer, ExternalLink } from 'lucide-react';
-import { normalizeRole, type NormalizedRole } from '@/lib/roles';
+import { normalizeRole } from '@/lib/roles';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,9 @@ function getProofPhotos(sale: { proofPhotoUrl?: string | null; proofPhotoUrls?: 
 type Sale = Transaction & {
   salesmanName?: string | null;
   payment_method?: string | null;
+  paymentStatus?: string | null;
   customer_name?: string | null;
+  area?: string | null;
   receiptNo?: string | null;
   billingRefNo?: string | null;
   transferRefNo?: string | null;
@@ -64,15 +66,64 @@ type Sale = Transaction & {
   transactionDate?: string | null;
 };
 
+type QuickRange = 'day' | 'week' | 'month' | 'overall';
+
+function getSaleDate(sale: Sale): Date | null {
+  const raw = sale.transactionDate || sale.createdAt || null;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isWithinQuickRange(sale: Sale, range: QuickRange) {
+  if (range === 'overall') return true;
+  const saleDate = getSaleDate(sale);
+  if (!saleDate) return false;
+
+  const now = new Date();
+
+  if (range === 'day') {
+    return saleDate.toDateString() === now.toDateString();
+  }
+
+  if (range === 'week') {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(now.getDate() - 6);
+    return saleDate >= start && saleDate <= now;
+  }
+
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  return saleDate >= startOfMonth && saleDate <= now;
+}
+
+function normalizePaymentCategory(method?: string | null) {
+  const value = String(method || '').toLowerCase();
+  if (value === 'bill_to_bill') return 'credit';
+  if (value === 'bank_transfer') return 'transfer';
+  if (value === 'qr_code') return 'qr';
+  if (value === 'card') return 'card';
+  return 'cash';
+}
+
+function normalizeOutstandingStatus(sale: Sale) {
+  const status = String(sale.paymentStatus || sale.status || '').toLowerCase().trim();
+  if (status.includes('pending')) return 'unpaid';
+  if (status === 'paid' || status === 'completed') return 'paid';
+  if (normalizePaymentCategory(sale.payment_method ?? sale.payment?.method) === 'credit') return 'unpaid';
+  return 'paid';
+}
+
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default function AdminLiveSalesPage() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [branch, setBranch] = useState('all');
-  const [branches, setBranches] = useState<string[]>([]);
   const [salesStaff, setSalesStaff] = useState('all');
-  const [currentRole, setCurrentRole] = useState<NormalizedRole>('');
-  const [currentBranch, setCurrentBranch] = useState('');
+  const [area, setArea] = useState('all');
+  const [paymentCategory, setPaymentCategory] = useState('all');
+  const [outstandingStatus, setOutstandingStatus] = useState<'all' | 'unpaid' | 'paid'>('all');
+  const [quickRange, setQuickRange] = useState<QuickRange>('overall');
   const [loading, setLoading] = useState(true);
   const [synced, setSynced] = useState<string | null>(null);
   const [live, setLive] = useState(false);
@@ -86,8 +137,6 @@ export default function AdminLiveSalesPage() {
 
         const user = await response.json();
         const normalized = normalizeRole(user?.role || '');
-        setCurrentRole(normalized);
-        setCurrentBranch(String(user?.branch || ''));
 
         if (normalized === 'Admin' && user?.branch) {
           setBranch(String(user.branch));
@@ -110,9 +159,6 @@ export default function AdminLiveSalesPage() {
       const rows: Sale[] = Array.isArray(data) ? data : [];
       setSales(rows);
       setSynced(new Date().toISOString());
-      // collect unique branches from response
-      const uniq = Array.from(new Set(rows.map(r => r.branch).filter(Boolean))) as string[];
-      if (uniq.length) setBranches(uniq);
     } catch (e) {
       console.error(e);
     } finally {
@@ -149,14 +195,19 @@ export default function AdminLiveSalesPage() {
 
   useEffect(() => {
     setSalesStaff('all');
+    setArea('all');
   }, [branch]);
 
-  const isMainAdmin = currentRole === 'Main Admin';
-  const mustPickBranchFirst = isMainAdmin && branch === 'all';
+  const areaOptions = React.useMemo(() => {
+    const unique = new Set<string>();
+    sales.forEach((sale) => {
+      const value = String(sale.area || '').trim();
+      if (value) unique.add(value);
+    });
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+  }, [sales]);
 
   const salesStaffOptions = React.useMemo(() => {
-    if (mustPickBranchFirst) return [] as Array<{ key: string; label: string }>;
-
     const unique = new Map<string, string>();
 
     sales.forEach((sale) => {
@@ -170,17 +221,67 @@ export default function AdminLiveSalesPage() {
     return Array.from(unique.entries())
       .map(([key, label]) => ({ key, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [mustPickBranchFirst, sales]);
+  }, [sales]);
+
+  const baseFilteredSales = React.useMemo(() => {
+    return sales.filter((sale) => {
+      if (salesStaff !== 'all') {
+        const label = getSalesUser(sale);
+        const key = sale.salesmanId ? `id:${sale.salesmanId}` : `name:${label}`;
+        if (key !== salesStaff) return false;
+      }
+
+      if (area !== 'all') {
+        const saleArea = String(sale.area || '').trim();
+        if (saleArea !== area) return false;
+      }
+
+      if (paymentCategory !== 'all') {
+        const category = normalizePaymentCategory(sale.payment_method ?? sale.payment?.method);
+        if (category !== paymentCategory) return false;
+      }
+
+      if (!isWithinQuickRange(sale, quickRange)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [sales, salesStaff, area, paymentCategory, quickRange]);
 
   const filteredSales = React.useMemo(() => {
-    if (salesStaff === 'all') return sales;
+    if (outstandingStatus === 'all') return baseFilteredSales;
+    return baseFilteredSales.filter((sale) => normalizeOutstandingStatus(sale) === outstandingStatus);
+  }, [baseFilteredSales, outstandingStatus]);
 
-    return sales.filter((sale) => {
-      const label = getSalesUser(sale);
-      const key = sale.salesmanId ? `id:${sale.salesmanId}` : `name:${label}`;
-      return key === salesStaff;
+  const tallySummary = React.useMemo(() => {
+    let unpaidCount = 0;
+    let paidCount = 0;
+    let unpaidAmount = 0;
+    let paidAmount = 0;
+
+    baseFilteredSales.forEach((sale) => {
+      const amount = Number(sale.total ?? 0);
+      if (normalizeOutstandingStatus(sale) === 'unpaid') {
+        unpaidCount += 1;
+        unpaidAmount += amount;
+      } else {
+        paidCount += 1;
+        paidAmount += amount;
+      }
     });
-  }, [sales, salesStaff]);
+
+    const totalCount = unpaidCount + paidCount;
+    const collectionRate = totalCount > 0 ? (paidCount / totalCount) * 100 : 0;
+
+    return {
+      unpaidCount,
+      paidCount,
+      unpaidAmount,
+      paidAmount,
+      collectionRate,
+    };
+  }, [baseFilteredSales]);
 
   const totalRevenue = filteredSales.reduce((s, r) => s + Number(r.total ?? 0), 0);
 
@@ -287,18 +388,17 @@ export default function AdminLiveSalesPage() {
         </div>
       </div>
 
-      {/* ── filter bar ── */}
+      {/* ── primary filter bar ── */}
       <div className="soft-panel p-4 rounded-xl flex flex-wrap items-center gap-4">
         <div>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mr-2">Branch:</label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mr-2">Area:</label>
           <select
-            value={branch}
-            onChange={e => setBranch(e.target.value)}
-            disabled={currentRole === 'Admin' && !!currentBranch}
+            value={area}
+            onChange={e => setArea(e.target.value)}
             className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
           >
-            <option value="all">Semua Branch</option>
-            {branches.map(b => <option key={b} value={b}>{b}</option>)}
+            <option value="all">Semua Area</option>
+            {areaOptions.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </div>
         <div>
@@ -306,7 +406,6 @@ export default function AdminLiveSalesPage() {
           <select
             value={salesStaff}
             onChange={e => setSalesStaff(e.target.value)}
-            disabled={mustPickBranchFirst}
             className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 min-w-[220px] disabled:opacity-60"
           >
             <option value="all">Semua Sales Staff</option>
@@ -314,13 +413,91 @@ export default function AdminLiveSalesPage() {
               <option key={staff.key} value={staff.key}>{staff.label}</option>
             ))}
           </select>
-          {mustPickBranchFirst && (
-            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Untuk Main Admin, sila pilih branch dahulu sebelum tapis sales staff.</p>
-          )}
         </div>
         <div className="flex items-center gap-4 ml-auto text-sm">
           <span className="text-slate-500 dark:text-slate-400"><span className="font-bold text-slate-900 dark:text-white">{filteredSales.length}</span> rekod</span>
           <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(totalRevenue)}</span>
+        </div>
+      </div>
+
+      {/* ── secondary filter bar ── */}
+      <div className="soft-panel p-4 rounded-xl flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Status Hutang</span>
+          {([
+            { key: 'all', label: 'Semua' },
+            { key: 'unpaid', label: 'Belum Dibayar' },
+            { key: 'paid', label: 'Sudah Dibayar' },
+          ] as const).map((item) => (
+            <button
+              key={item.key}
+              onClick={() => setOutstandingStatus(item.key)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold border transition-colors ${
+                outstandingStatus === item.key
+                  ? 'bg-blue-600 text-white border-blue-500'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Kategori Payment</span>
+          <select
+            value={paymentCategory}
+            onChange={(e) => setPaymentCategory(e.target.value)}
+            className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">Semua Kategori</option>
+            <option value="cash">Tunai</option>
+            <option value="credit">Kredit (Bill-to-Bill)</option>
+            <option value="transfer">Pindahan Bank</option>
+            <option value="qr">QR Code</option>
+            <option value="card">Kad</option>
+          </select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 ml-auto">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Range</span>
+          {([
+            { key: 'day', label: 'Day' },
+            { key: 'week', label: 'Week' },
+            { key: 'month', label: 'Month' },
+            { key: 'overall', label: 'Overall' },
+          ] as const).map((item) => (
+            <button
+              key={item.key}
+              onClick={() => setQuickRange(item.key)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold border transition-colors ${
+                quickRange === item.key
+                  ? 'bg-emerald-600 text-white border-emerald-500'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── tally summary ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="soft-panel p-4 rounded-xl border border-amber-300/40 dark:border-amber-700/40">
+          <p className="text-xs uppercase tracking-wide font-semibold text-amber-700 dark:text-amber-300">Belum Terbayar</p>
+          <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-300">{formatCurrency(tallySummary.unpaidAmount)}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{tallySummary.unpaidCount} rekod</p>
+        </div>
+        <div className="soft-panel p-4 rounded-xl border border-emerald-300/40 dark:border-emerald-700/40">
+          <p className="text-xs uppercase tracking-wide font-semibold text-emerald-700 dark:text-emerald-300">Sudah Terbayar</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-300">{formatCurrency(tallySummary.paidAmount)}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{tallySummary.paidCount} rekod</p>
+        </div>
+        <div className="soft-panel p-4 rounded-xl border border-blue-300/40 dark:border-blue-700/40">
+          <p className="text-xs uppercase tracking-wide font-semibold text-blue-700 dark:text-blue-300">Kadar Kutipan</p>
+          <p className="mt-1 text-2xl font-bold text-blue-600 dark:text-blue-300">{tallySummary.collectionRate.toFixed(1)}%</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Berdasarkan set filter semasa (kecuali status hutang)</p>
         </div>
       </div>
 
@@ -335,16 +512,17 @@ export default function AdminLiveSalesPage() {
             Tiada rekod jualan untuk branch ini.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[68vh]">
             <table className="w-full text-sm text-left">
               <thead className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 <tr>
                   <th className="px-4 py-3">No. Invois</th>
                   <th className="px-4 py-3">Kedai / Pelanggan</th>
-                  <th className="px-4 py-3">Branch</th>
+                  <th className="px-4 py-3">Area</th>
                   <th className="px-4 py-3">User Sales</th>
                   <th className="px-4 py-3">Masa</th>
                   <th className="px-4 py-3">Kaedah Bayaran</th>
+                  <th className="px-4 py-3">Status Hutang</th>
                   <th className="px-4 py-3">No. Rujukan</th>
                   <th className="px-4 py-3">Bukti</th>
                   <th className="px-4 py-3 text-right">Jumlah</th>
@@ -356,13 +534,24 @@ export default function AdminLiveSalesPage() {
                   <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400 whitespace-nowrap">{sale.invoice || sale.id}</td>
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{getCustomerName(sale)}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{sale.branch ?? '–'}</td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{sale.area || '–'}</td>
                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200 font-medium">{getSalesUser(sale)}</td>
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap text-xs">{fmtTime(sale.transactionDate ?? sale.createdAt)}</td>
                     <td className="px-4 py-3">
                       <span className="inline-block rounded-full bg-slate-100 dark:bg-slate-900 px-2.5 py-1 text-xs text-slate-600 dark:text-slate-300">
                         {getPaymentLabel(sale.payment_method ?? sale.payment?.method)}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {normalizeOutstandingStatus(sale) === 'unpaid' ? (
+                        <span className="inline-block rounded-full bg-amber-100 dark:bg-amber-900/30 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300">
+                          Belum Dibayar
+                        </span>
+                      ) : (
+                        <span className="inline-block rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-1 text-xs text-emerald-700 dark:text-emerald-300">
+                          Sudah Terbayar
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{getRef(sale)}</td>
                     <td className="px-4 py-3 text-center">

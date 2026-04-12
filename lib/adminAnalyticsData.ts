@@ -52,6 +52,22 @@ type UserRow = {
   commission_rate?: number | string | null;
 };
 
+function normalizeBranchValue(value?: string | null): string {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function branchMatches(value?: string | null, expected?: string): boolean {
+  const left = normalizeBranchValue(value);
+  const right = normalizeBranchValue(expected);
+
+  if (!right) return true;
+  if (!left) return false;
+  return left === right;
+}
+
 export async function getAdminAnalyticsData(branch?: string): Promise<{
   transactions: Transaction[];
   products: Product[];
@@ -60,6 +76,7 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   customers: Customer[];
 }> {
   const useBranchFilter = Boolean(branch);
+  const normalizedBranch = normalizeBranchValue(branch);
 
   if (!supabaseAdmin) {
     const transactions = (await db.transactions.getAll()) as Transaction[];
@@ -69,10 +86,10 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
     const customers = (await db.customers.getAll()) as Customer[];
 
     const filteredTransactions = useBranchFilter
-      ? transactions.filter((t) => t.branch === branch)
+      ? transactions.filter((t) => branchMatches(t.branch, normalizedBranch))
       : transactions;
     const salesUsers = useBranchFilter
-      ? users.filter((u) => u.role === 'Sales' && u.branch === branch)
+      ? users.filter((u) => u.role === 'Sales' && branchMatches(u.branch, normalizedBranch))
       : users.filter((u) => u.role === 'Sales');
 
     return {
@@ -85,26 +102,35 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   }
 
   let txQuery = supabaseAdmin.from('sales_transactions').select('*').order('created_at', { ascending: false });
-  if (useBranchFilter) {
-    txQuery = txQuery.eq('branch', branch);
+  if (useBranchFilter && normalizedBranch) {
+    txQuery = txQuery.ilike('branch', normalizedBranch);
   }
 
   // Get the correct customers table based on branch
   const customersTable = getCustomersTableByBranch(branch);
 
   let productQuery = supabaseAdmin.from('products').select('*');
-  if (useBranchFilter) {
-    productQuery = productQuery.eq('branch', branch);
+  if (useBranchFilter && normalizedBranch) {
+    productQuery = productQuery.ilike('branch', normalizedBranch);
   }
 
-  const [{ data: txRowsRaw, error: txError }, { data: productRows, error: productError }, { data: userRows, error: userError }, { data: customerRows, error: customerError }] = await Promise.all([
+  const [
+    { data: txRowsRaw, error: txError },
+    { data: productRows, error: productError },
+    { data: userRows, error: userError },
+    { data: customerRows, error: customerError },
+  ] = await Promise.all([
     txQuery,
     productQuery,
     supabaseAdmin.from('users').select('*'),
-    supabaseAdmin.from(customersTable).select('*')
+    supabaseAdmin.from(customersTable).select('*'),
   ]);
 
-  if (txError || productError || userError || customerError) {
+  // Only hard-fallback to local db if the primary transactions query fails.
+  // Secondary query failures (products, users, customers tables) are handled below
+  // by using empty arrays so we don't silently lose all transaction data.
+  if (txError) {
+    console.error('[adminAnalyticsData] transactions query failed, falling back to local db:', txError);
     const transactions = (await db.transactions.getAll()) as Transaction[];
     const products = (await db.products.getAll()) as Product[];
     const users = (await db.users.getAll()) as User[];
@@ -112,10 +138,10 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
     const customers = (await db.customers.getAll()) as Customer[];
 
     const filteredTransactions = useBranchFilter
-      ? transactions.filter((t) => t.branch === branch)
+      ? transactions.filter((t) => branchMatches(t.branch, normalizedBranch))
       : transactions;
     const salesUsers = useBranchFilter
-      ? users.filter((u) => u.role === 'Sales' && u.branch === branch)
+      ? users.filter((u) => u.role === 'Sales' && branchMatches(u.branch, normalizedBranch))
       : users.filter((u) => u.role === 'Sales');
 
     return {
@@ -127,7 +153,12 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
     };
   }
 
-  const txRows = (txRowsRaw || []) as SalesTransactionRow[];
+  if (productError) console.error('[adminAnalyticsData] products query failed:', productError);
+  if (userError) console.error('[adminAnalyticsData] users query failed:', userError);
+  if (customerError) console.error('[adminAnalyticsData] customers table query failed (table:', customersTable, '):', customerError);
+
+  const txRows = ((txRowsRaw || []) as SalesTransactionRow[])
+    .filter((row) => !useBranchFilter || branchMatches(row.branch, normalizedBranch));
   const txIds = txRows.map((row) => row.id);
 
   let itemsByTxId: Record<string, SalesItemRow[]> = {};
@@ -173,7 +204,7 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   })) as User[];
 
   const salesUsers = useBranchFilter
-    ? users.filter((u) => u.role === 'Sales' && u.branch === branch)
+    ? users.filter((u) => u.role === 'Sales' && branchMatches(u.branch, normalizedBranch))
     : users.filter((u) => u.role === 'Sales');
 
   const transactions = txRows.map((row) => {

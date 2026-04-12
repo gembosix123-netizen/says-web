@@ -6,7 +6,16 @@ import { logAuditEvent } from '@/lib/audit';
 import { Branch, getCustomersTableByBranch } from '@/lib/branchPermissions';
 
 const VALID_PAYMENT_METHODS = ['cash', 'bill_to_bill', 'bank_transfer', 'qr_code', 'card', 'ewallet'];
+const VALID_IMPORT_BRANCHES = ['Kota Kinabalu', 'Kinabatangan'];
 const REQUIRED_COLUMNS = ['month', 'branch', 'payment_method', 'amount'];
+
+function isCustomerForeignKeyError(error: unknown): boolean {
+  const msg = String((error as { message?: string })?.message || '').toLowerCase();
+  return (
+    msg.includes('customer_id') &&
+    (msg.includes('foreign key') || msg.includes('fkey') || msg.includes('violates'))
+  );
+}
 
 interface ImportRow {
   month: string;
@@ -101,6 +110,21 @@ function getValidBranch(branch?: string): Branch | undefined {
   return undefined;
 }
 
+function normalizeImportBranch(raw?: string): 'Kota Kinabalu' | 'Kinabatangan' | null {
+  const normalized = String(raw || '').trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized === 'kota kinabalu' || normalized === 'kk' || normalized.includes('kota kinabalu')) {
+    return 'Kota Kinabalu';
+  }
+
+  if (normalized === 'kinabatangan' || normalized === 'kb' || normalized.includes('kinabatangan')) {
+    return 'Kinabatangan';
+  }
+
+  return null;
+}
+
 function validateRow(row: ImportRow, rowIndex: number): RowError[] {
   const errors: RowError[] = [];
 
@@ -111,6 +135,12 @@ function validateRow(row: ImportRow, rowIndex: number): RowError[] {
 
   if (!row.branch || String(row.branch).trim() === '') {
     errors.push({ row: rowIndex, field: 'branch', message: 'Cawangan wajib diisi' });
+  } else if (!normalizeImportBranch(String(row.branch))) {
+    errors.push({
+      row: rowIndex,
+      field: 'branch',
+      message: `Cawangan tidak sah. Guna: ${VALID_IMPORT_BRANCHES.join(', ')}`,
+    });
   }
 
   const method = String(row.payment_method || '').trim().toLowerCase();
@@ -236,21 +266,31 @@ export async function POST(request: NextRequest) {
     // Confirm mode — build upsert records into sales_transactions
     const now = new Date().toISOString();
 
-    // Lookup customer IDs by name (case-insensitive) for all unique names in the import
-    // Note: Search in the user's branch customer table
+    // Lookup customer IDs by name from canonical `customers` table.
+    // sales_transactions.customer_id FK points to public.customers(id),
+    // so we must only assign IDs that exist there.
     const uniqueCustomerNames = Array.from(
       new Set(rows.map((r) => String(r.customer_name || '').trim()).filter(Boolean))
     );
     const customerNameToId: Record<string, string> = {};
     if (uniqueCustomerNames.length > 0) {
-      const customersTable = getCustomersTableByBranch(getValidBranch(currentUser.branch));
-      const { data: customerRows } = await supabaseAdmin
-        .from(customersTable)
-        .select('id, name')
-        .in('name', uniqueCustomerNames);
-      (customerRows || []).forEach((c) => {
-        customerNameToId[c.name.toLowerCase()] = c.id;
-      });
+      // Load all customers and match case-insensitively in memory.
+      // PostgreSQL .in() is case-sensitive so exact-match would miss
+      // names that differ only in capitalisation (e.g. "SINTONG ENTERPRISE" vs "Sintong Enterprise").
+      const { data: customerRows, error: customerLookupError } = await supabaseAdmin
+        .from('customers')
+        .select('id, name');
+
+      if (customerLookupError) {
+        console.warn('Backdated import customer lookup warning:', customerLookupError.message);
+      } else {
+        (customerRows || []).forEach((c) => {
+          // Key by normalised (lowercase + collapsed whitespace) name so minor
+          // spacing/casing differences in the CSV still resolve to the right ID.
+          const key = String(c.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+          if (key) customerNameToId[key] = String(c.id || '');
+        });
+      }
     }
 
     // For non-Main Admin, force all records to the user's own branch regardless
@@ -262,7 +302,7 @@ export async function POST(request: NextRequest) {
       const monthStr = String(row.month).trim(); // YYYY-MM
       const customerName = String(row.customer_name || '').trim();
       const resolvedCustomerId = customerName
-        ? (customerNameToId[customerName.toLowerCase()] ?? null)
+        ? (customerNameToId[customerName.toLowerCase().replace(/\s+/g, ' ').trim()] ?? null)
         : null;
       // Use the ref_no that was set by the client (already prefixed with BACK-)
       const refValue = String(row.receipt_no || row.billing_ref_no || row.transfer_ref_no || row.qr_txn_ref_no || '').trim()
@@ -272,7 +312,8 @@ export async function POST(request: NextRequest) {
         ? `${(row as ImportRow & { transaction_date?: string }).transaction_date}T00:00:00.000Z`
         : `${monthStr}-01T00:00:00.000Z`;
       // Use enforcedBranch for Admin; Main Admin can specify per-row branch from CSV
-      const rowBranch = enforcedBranch ?? String(row.branch).trim();
+      const normalizedRowBranch = normalizeImportBranch(String(row.branch));
+      const rowBranch = enforcedBranch ?? normalizedRowBranch ?? String(row.branch).trim();
       return {
         invoice: refValue,
         branch: rowBranch,
@@ -304,7 +345,35 @@ export async function POST(request: NextRequest) {
       .insert(records)
       .select('id');
 
-    if (insertError) {
+    let insertedRows = inserted;
+    let finalInsertError = insertError;
+
+    // Fallback: if DB FK for customer_id still rejects a subset of rows,
+    // retry with null customer_id while keeping customer names in notes.
+    if (finalInsertError && isCustomerForeignKeyError(finalInsertError)) {
+      const fallbackRecords = records.map((record, idx) => {
+        const customerName = String(rows[idx]?.customer_name || '').trim();
+        const existingNotes = String(record.notes || '').trim();
+        const hasCustomerTag = /\[Customer:\s*.*?\]/i.test(existingNotes);
+        const customerTag = customerName && !hasCustomerTag ? `[Customer: ${customerName}]` : '';
+
+        return {
+          ...record,
+          customer_id: null,
+          notes: [existingNotes, customerTag].filter(Boolean).join(' ') || 'Backdated import',
+        };
+      });
+
+      const retry = await supabaseAdmin
+        .from('sales_transactions')
+        .insert(fallbackRecords)
+        .select('id');
+
+      insertedRows = retry.data;
+      finalInsertError = retry.error;
+    }
+
+    if (finalInsertError) {
       await logAuditEvent({
         request,
         actor: currentUser,
@@ -313,9 +382,9 @@ export async function POST(request: NextRequest) {
         entityType: 'sales_transaction',
         status: 'failed',
         sourceSystem: 'supabase',
-        metadata: { error: insertError.message, rows: rows.length },
+        metadata: { error: finalInsertError.message, rows: rows.length },
       });
-      return NextResponse.json({ error: 'Gagal import data', details: insertError.message }, { status: 500 });
+      return NextResponse.json({ error: 'Gagal import data', details: finalInsertError.message }, { status: 500 });
     }
 
     await logAuditEvent({
@@ -326,7 +395,7 @@ export async function POST(request: NextRequest) {
       entityType: 'sales_transaction',
       status: 'success',
       sourceSystem: 'supabase',
-      metadata: { rows_imported: inserted?.length ?? rows.length },
+      metadata: { rows_imported: insertedRows?.length ?? rows.length },
     });
 
     // Auto-reconcile previously unmatched backdated rows in relevant branch(es).
@@ -338,9 +407,9 @@ export async function POST(request: NextRequest) {
       mode: 'confirm',
       valid: true,
       total: rows.length,
-      imported: inserted?.length ?? rows.length,
+      imported: insertedRows?.length ?? rows.length,
       reconciled,
-      message: `${inserted?.length ?? rows.length} rekod berjaya diimport ke database.${reconciled > 0 ? ` ${reconciled} rekod lama berjaya dipadankan semula dengan customer.` : ''}`,
+      message: `${insertedRows?.length ?? rows.length} rekod berjaya diimport ke database.${reconciled > 0 ? ` ${reconciled} rekod lama berjaya dipadankan semula dengan customer.` : ''}`,
     });
   } catch (error) {
     console.error('Backdated import error:', error);

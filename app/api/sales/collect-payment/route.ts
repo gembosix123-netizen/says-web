@@ -6,8 +6,24 @@ import { normalizeRole } from '@/lib/roles';
 import { canAccessSalesRoutes } from '@/lib/permissions';
 import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 
+const TABLE_CANONICAL = 'sales_transactions';
 const TABLE_KOTA = 'sales_kota_kinabalu';
 const TABLE_KIN = 'sales_kinabatangan';
+
+function normalizeBranchValue(value?: string | null): string {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function branchMatches(value?: string | null, expected?: string | null): boolean {
+  const left = normalizeBranchValue(value);
+  const right = normalizeBranchValue(expected);
+  if (!right || right === 'all') return true;
+  if (!left) return false;
+  return left === right;
+}
 
 function isMissingColumnError(error: unknown, columnName: string): boolean {
   const message = String((error as { message?: string })?.message || '').toLowerCase();
@@ -72,27 +88,48 @@ export async function POST(request: NextRequest) {
 
     const { saleId, amount, payment_method, reference_number, notes, receipt_url } = validation.data;
 
-    // Get branch from sale record
-    const branch = body.branch;
-    
-    // Determine which table
-    const target = (branch === 'Kinabatangan' || branch?.toLowerCase().includes('kina')) 
-      ? TABLE_KIN 
-      : TABLE_KOTA;
+    // Get branch hint from request; actual branch will be taken from matched sale record.
+    const branch = String(body.branch || '').trim();
 
-    // Get the sale
-    const { data: sale, error: fetchError } = await supabaseAdmin
-      .from(target)
+    // Resolve sale source table (canonical first, then legacy fallback).
+    let target = TABLE_CANONICAL;
+    let sale: Record<string, unknown> | null = null;
+
+    const canonicalFetch = await supabaseAdmin
+      .from(TABLE_CANONICAL)
       .select('*')
       .eq('id', saleId)
-      .single();
+      .maybeSingle();
 
-    if (fetchError || !sale) {
+    if (!canonicalFetch.error && canonicalFetch.data) {
+      sale = canonicalFetch.data as Record<string, unknown>;
+      target = TABLE_CANONICAL;
+    } else {
+      const tryTables = branchMatches(branch, 'Kinabatangan')
+        ? [TABLE_KIN, TABLE_KOTA]
+        : [TABLE_KOTA, TABLE_KIN];
+
+      for (const table of tryTables) {
+        const legacyFetch = await supabaseAdmin
+          .from(table)
+          .select('*')
+          .eq('id', saleId)
+          .maybeSingle();
+
+        if (!legacyFetch.error && legacyFetch.data) {
+          sale = legacyFetch.data as Record<string, unknown>;
+          target = table;
+          break;
+        }
+      }
+    }
+
+    if (!sale) {
       return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
     }
 
     // Check if already paid
-    if (sale.payment_status === 'paid') {
+    if (sale.payment_status === 'paid' || sale.status === 'completed') {
       return NextResponse.json({ error: 'Sale already paid' }, { status: 400 });
     }
 
@@ -129,25 +166,34 @@ export async function POST(request: NextRequest) {
 
     let updateError: unknown = null;
 
-    const legacyUpdate = await supabaseAdmin
-      .from(target)
-      .update(legacyUpdatePayload)
-      .eq('id', saleId);
-
-    updateError = legacyUpdate.error;
-
-    if (updateError && (
-      isMissingColumnError(updateError, 'payment_status') ||
-      isMissingColumnError(updateError, 'amount_paid') ||
-      isMissingColumnError(updateError, 'payment_notes') ||
-      isMissingColumnError(updateError, 'reference_number')
-    )) {
+    if (target === TABLE_CANONICAL) {
       const canonicalUpdate = await supabaseAdmin
         .from(target)
         .update(canonicalUpdatePayload)
         .eq('id', saleId);
 
       updateError = canonicalUpdate.error;
+    } else {
+      const legacyUpdate = await supabaseAdmin
+        .from(target)
+        .update(legacyUpdatePayload)
+        .eq('id', saleId);
+
+      updateError = legacyUpdate.error;
+
+      if (updateError && (
+        isMissingColumnError(updateError, 'payment_status') ||
+        isMissingColumnError(updateError, 'amount_paid') ||
+        isMissingColumnError(updateError, 'payment_notes') ||
+        isMissingColumnError(updateError, 'reference_number')
+      )) {
+        const canonicalUpdate = await supabaseAdmin
+          .from(target)
+          .update(canonicalUpdatePayload)
+          .eq('id', saleId);
+
+        updateError = canonicalUpdate.error;
+      }
     }
 
     if (updateError) {
@@ -190,7 +236,7 @@ export async function POST(request: NextRequest) {
         }
 
         const currentBalance = Number(customer?.current_balance ?? customer?.outstandingBalance ?? 0);
-        const saleAmount = parseFloat(sale.total_amount || sale.amount || 0);
+        const saleAmount = parseFloat(sale.grand_total || sale.total_amount || sale.amount || sale.subtotal_amount || 0);
         const newBalance = Math.max(0, currentBalance - saleAmount);
 
         const fullUpdate = await supabaseAdmin
@@ -223,7 +269,7 @@ export async function POST(request: NextRequest) {
       success: true, 
       message: 'Payment collected successfully',
       saleId,
-      amountPaid: amount || sale.total_amount
+      amountPaid: amount || sale.grand_total || sale.total_amount || sale.amount || sale.subtotal_amount
     });
 
   } catch (error) {
@@ -261,55 +307,74 @@ export async function GET(request: NextRequest) {
       branch = currentUser.branch ?? null;
     }
 
-    let pendingSales = [];
+    let pendingSales: Array<Record<string, unknown>> = [];
 
     const fetchPending = async (table: string) => {
-      let query = supabaseAdmin!
+      const expectedStatus = status === 'pending' ? 'pending' : 'completed';
+
+      // Prefer canonical status column first.
+      let canonicalQuery = supabaseAdmin!
+        .from(table)
+        .select('*')
+        .eq('status', expectedStatus)
+        .order('created_at', { ascending: false });
+
+      if (branch && branch !== 'all') {
+        canonicalQuery = canonicalQuery.ilike('branch', normalizeBranchValue(branch));
+      }
+
+      const canonicalResult = await canonicalQuery;
+      if (!canonicalResult.error) {
+        return (canonicalResult.data || []) as Array<Record<string, unknown>>;
+      }
+
+      // Backward fallback: legacy schema may still use payment_status.
+      if (!isMissingColumnError(canonicalResult.error, 'status')) {
+        return [];
+      }
+
+      let legacyQuery = supabaseAdmin!
         .from(table)
         .select('*')
         .eq('payment_status', status)
         .order('created_at', { ascending: false });
 
       if (branch && branch !== 'all') {
-        query = query.eq('branch', branch);
+        legacyQuery = legacyQuery.ilike('branch', normalizeBranchValue(branch));
       }
 
-      const { data, error } = await query;
-
-      if (!error) {
-        return data || [];
-      }
-
-      // Fallback for canonical schema that uses `status` instead of `payment_status`.
-      if (isMissingColumnError(error, 'payment_status')) {
-        let fallbackQuery = supabaseAdmin!
-          .from(table)
-          .select('*')
-          .eq('status', status === 'pending' ? 'pending' : 'completed')
-          .order('created_at', { ascending: false });
-
-        if (branch && branch !== 'all') {
-          fallbackQuery = fallbackQuery.eq('branch', branch);
-        }
-
-        const { data: fallbackData } = await fallbackQuery;
-        return fallbackData || [];
-      }
-
-      return [];
+      const legacyResult = await legacyQuery;
+      return (legacyResult.data || []) as Array<Record<string, unknown>>;
     };
 
+    // Canonical table stores both branches now.
+    const canonicalPending = await fetchPending(TABLE_CANONICAL);
+
+    // Merge legacy pending sales for deployments that still have old branch tables.
+    let legacyPending: Array<Record<string, unknown>> = [];
     if (!branch || branch === 'all') {
       const [kk, kin] = await Promise.all([
         fetchPending(TABLE_KOTA),
         fetchPending(TABLE_KIN)
       ]);
-      pendingSales = [...kk, ...kin];
-    } else if (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) {
-      pendingSales = await fetchPending(TABLE_KIN);
+      legacyPending = [...kk, ...kin];
+    } else if (branchMatches(branch, 'Kinabatangan')) {
+      legacyPending = await fetchPending(TABLE_KIN);
     } else {
-      pendingSales = await fetchPending(TABLE_KOTA);
+      legacyPending = await fetchPending(TABLE_KOTA);
     }
+
+    const mergedById = new Map<string, Record<string, unknown>>();
+    [...canonicalPending, ...legacyPending].forEach((sale) => {
+      const id = String(sale.id || '');
+      if (!id) return;
+      if (!branchMatches(sale.branch, branch)) return;
+      if (!mergedById.has(id)) {
+        mergedById.set(id, sale);
+      }
+    });
+
+    pendingSales = Array.from(mergedById.values());
 
     // Format response
     const formatted = pendingSales.map(sale => ({

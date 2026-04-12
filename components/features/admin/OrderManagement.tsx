@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react';
 import { ShoppingCart, Search, FileText, Package } from 'lucide-react';
 import ExchangeReturnModal from './ExchangeReturnModal';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Order {
   id: string;
@@ -14,6 +16,8 @@ interface Order {
   createdAt: string;
   created_at?: string;
   invoice?: string;
+  payment_method?: string;
+  salesmanName?: string;
 }
 
 interface Customer {
@@ -34,6 +38,96 @@ export default function OrderManagement() {
   const [filter, setFilter] = useState('');
   const [exchangeModalOpen, setExchangeModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  const handlePrintInvoice = (order: Order) => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Header
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(12, 10, pageWidth - 24, 30, 4, 4, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('HAJA YANONGS INDUSTRIES', 16, 22);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(203, 213, 225);
+    doc.text('Dokumen Jualan Rasmi', 16, 28);
+
+    const statusLabel = order.status === 'pending' ? 'INVOIS KREDIT' : 'INVOIS';
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(statusLabel, pageWidth - 14, 22, { align: 'right' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(203, 213, 225);
+    doc.text(`No. Invois: ${order.invoice || order.id.slice(0, 12)}`, pageWidth - 14, 28, { align: 'right' });
+    doc.text(`Tarikh: ${new Date(order.createdAt || order.created_at || '').toLocaleDateString('ms-MY')}`, pageWidth - 14, 33, { align: 'right' });
+
+    // Customer + Salesman info
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('BIL KEPADA', 14, 50);
+    doc.setFont('helvetica', 'normal');
+    const customerName = order.customer_name || 'Unknown Shop';
+    doc.text(customerName, 14, 56);
+
+    if (order.salesmanName) {
+      doc.text(`Jualan oleh: ${order.salesmanName}`, pageWidth - 14, 56, { align: 'right' });
+    }
+
+    const paymentMethodLabels: Record<string, string> = {
+      cash: 'Tunai', bill_to_bill: 'Kredit (Bill-to-Bill)',
+      bank_transfer: 'Pindahan Bank', qr_code: 'QR Code', card: 'Kad',
+    };
+    const paymentLabel = paymentMethodLabels[order.payment_method || ''] || (order.payment_method || '-');
+    doc.text(`Kaedah Bayaran: ${paymentLabel}`, pageWidth - 14, 62, { align: 'right' });
+
+    // Items table
+    const itemRows = (order.items || []).map((item) => {
+      const name = item.name || item.product_name || item.id;
+      const qty = item.quantity || 0;
+      const unitPrice = item.price || item.unit_price || 0;
+      const subtotal = qty * unitPrice;
+      return [name, qty, `RM ${unitPrice.toFixed(2)}`, `RM ${subtotal.toFixed(2)}`];
+    });
+
+    if (itemRows.length === 0) {
+      itemRows.push(['(Tiada item / Bayaran Hutang)', '-', '-', `RM ${Number(order.total || 0).toFixed(2)}`]);
+    }
+
+    autoTable(doc, {
+      startY: 68,
+      head: [['Produk', 'Qty', 'Harga Unit', 'Jumlah']],
+      body: itemRows,
+      theme: 'grid',
+      headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontSize: 9 },
+      styles: { fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 'auto' },
+        1: { halign: 'center', cellWidth: 20 },
+        2: { halign: 'right', cellWidth: 35 },
+        3: { halign: 'right', cellWidth: 35 },
+      },
+    });
+
+    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 100;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(`JUMLAH: RM ${Number(order.total || 0).toFixed(2)}`, pageWidth - 14, finalY + 10, { align: 'right' });
+
+    if (order.status === 'pending') {
+      doc.setTextColor(180, 0, 0);
+      doc.setFontSize(9);
+      doc.text('* Belum Dibayar — Kredit Belum Diselesaikan', 14, finalY + 10);
+    }
+
+    const filename = `invois_${(order.invoice || order.id).replace(/[^A-Z0-9\-]/gi, '_')}.pdf`;
+    doc.save(filename);
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -130,7 +224,7 @@ export default function OrderManagement() {
                                     <span className="text-center">Qty</span>
                                     <span className="text-right">Total</span>
                                 </div>
-                                {(order.items || []).map((item: any, idx) => (
+                                {(order.items || []).map((item, idx) => (
                                     <div key={idx} className="grid grid-cols-3 gap-2 text-sm py-1">
                                         <span className="text-slate-300 truncate">
                                             {item.name || item.product_name || getProductName(item.id || item.product_id)}
@@ -153,7 +247,10 @@ export default function OrderManagement() {
                                 >
                                     <Package size={16} /> Return/Exchange
                                 </button>
-                                <button className="flex items-center gap-2 text-blue-400 hover:text-white text-sm font-medium transition-colors">
+                                <button
+                                  onClick={() => handlePrintInvoice(order)}
+                                  className="flex items-center gap-2 text-blue-400 hover:text-white text-sm font-medium transition-colors"
+                                >
                                     <FileText size={16} /> Print Invoice
                                 </button>
                             </div>

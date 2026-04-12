@@ -61,8 +61,8 @@ function detectTransfer(custName: string): { isTransfer: boolean; cleanName: str
 function parseKinabatanganLegacyRows(
   aoa: unknown[][],
   branch: string
-): ImportRow[] {
-  if (!Array.isArray(aoa) || aoa.length === 0) return [];
+): { rows: ImportRow[]; skipped: number } {
+  if (!Array.isArray(aoa) || aoa.length === 0) return { rows: [], skipped: 0 };
 
   let headerIdx = -1;
   let header: string[] = [];
@@ -83,7 +83,7 @@ function parseKinabatanganLegacyRows(
     }
   }
 
-  if (headerIdx === -1) return [];
+  if (headerIdx === -1) return { rows: [], skipped: 0 };
 
   const findIndex = (patterns: RegExp[]) => header.findIndex((h) => patterns.some((p) => p.test(h)));
   const dateIdx = findIndex([/^date$/i]);
@@ -99,6 +99,7 @@ function parseKinabatanganLegacyRows(
   const remarkIdx = findIndex([/^remark$/i, /^notes?$/i]);
 
   const rows: ImportRow[] = [];
+  let skipped = 0;
 
   for (let i = headerIdx + 1; i < aoa.length; i += 1) {
     const row = aoa[i] || [];
@@ -107,11 +108,11 @@ function parseKinabatanganLegacyRows(
     const rawName = String(row[nameIdx] || '').trim();
     const rawStatus = String(row[statusIdx] || '').trim();
 
-    if (!rawDate || /^total$/i.test(rawDate) || /^status$/i.test(rawDate)) continue;
-    if (!rawInv || !rawName) continue;
+    if (!rawDate || /^total$/i.test(rawDate) || /^status$/i.test(rawDate)) { skipped++; continue; }
+    if (!rawInv || !rawName) { skipped++; continue; }
 
     const parsedDate = parseDateCell(rawDate);
-    if (!parsedDate) continue;
+    if (!parsedDate) { skipped++; continue; }
 
     const sale = Number(String(row[saleIdx] || '').replace(/[^0-9.-]/g, ''));
     const discount = Number(String(row[discountIdx] || '').replace(/[^0-9.-]/g, ''));
@@ -123,7 +124,7 @@ function parseKinabatanganLegacyRows(
       ? total
       : Math.max(0, (Number.isFinite(sale) ? sale : 0) - (Number.isFinite(discount) ? discount : 0) + (Number.isFinite(tax) ? tax : 0));
 
-    if (!Number.isFinite(computedTotal) || computedTotal <= 0) continue;
+    if (!Number.isFinite(computedTotal) || computedTotal <= 0) { skipped++; continue; }
 
     const statusNorm = rawStatus.toLowerCase();
     const isCredit = statusNorm.includes('unpaid') || statusNorm.includes('pending') || (Number.isFinite(balance) && balance > 0);
@@ -152,7 +153,7 @@ function parseKinabatanganLegacyRows(
     });
   }
 
-  return rows;
+  return { rows, skipped };
 }
 
 interface RowError {
@@ -171,6 +172,7 @@ interface ImportResult {
   imported?: number;
   message?: string;
   error?: string;
+  details?: string;
 }
 
 function parseCsv(text: string): ImportRow[] {
@@ -198,6 +200,7 @@ export default function BackdatedImportPage() {
   const [showCustomers, setShowCustomers] = useState(false);
   // Weekly Excel detection
   const [detectedFormat, setDetectedFormat] = useState<'standard' | 'weekly' | 'kinabatangan_legacy' | null>(null);
+  const [skippedRows, setSkippedRows] = useState(0);
   const [weeklyBranch, setWeeklyBranch] = useState('');
   const [userRole, setUserRole] = useState('');
 
@@ -247,11 +250,14 @@ export default function BackdatedImportPage() {
 
             // Kinabatangan legacy monthly invoice format (detailed columns from old system)
             const legacyBranch = userBranch || 'Kinabatangan';
+            let legacySkipped = 0;
             const legacyRows = wb.SheetNames.flatMap((sheetName) => {
               const ws = wb.Sheets[sheetName];
               if (!ws) return [] as ImportRow[];
               const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
-              return parseKinabatanganLegacyRows(aoa, legacyBranch);
+              const parsed = parseKinabatanganLegacyRows(aoa, legacyBranch);
+              legacySkipped += parsed.skipped;
+              return parsed.rows;
             });
 
             if (legacyRows.length > 0) {
@@ -259,6 +265,7 @@ export default function BackdatedImportPage() {
                 setWeeklyBranch('Kinabatangan');
               }
               setRows(legacyRows);
+              setSkippedRows(legacySkipped);
               setDetectedFormat('kinabatangan_legacy');
               return;
             }
@@ -572,10 +579,37 @@ export default function BackdatedImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows: rowsToSend }),
       });
-      const data: ImportResult = await res.json();
-      setResult(data);
-      if (mode === 'dry_run' && data.valid) setStep('validated');
-      if (mode === 'confirm' && data.valid) setStep('done');
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+
+      if (!res.ok) {
+        setResult({
+          mode,
+          valid: false,
+          total: rows.length,
+          error: String(data.error || 'Gagal memproses import'),
+          details: String(data.details || ''),
+        });
+        return;
+      }
+
+      const normalizedData: ImportResult = {
+        mode,
+        valid: Boolean(data.valid),
+        total: Number(data.total || rows.length),
+        error_count: typeof data.error_count === 'number' ? data.error_count : undefined,
+        errors: Array.isArray(data.errors) ? data.errors as RowError[] : undefined,
+        summary_by_method: (data.summary_by_method && typeof data.summary_by_method === 'object')
+          ? data.summary_by_method as Record<string, number>
+          : undefined,
+        imported: typeof data.imported === 'number' ? data.imported : undefined,
+        message: typeof data.message === 'string' ? data.message : undefined,
+        error: typeof data.error === 'string' ? data.error : undefined,
+        details: typeof data.details === 'string' ? data.details : undefined,
+      };
+
+      setResult(normalizedData);
+      if (mode === 'dry_run' && normalizedData.valid) setStep('validated');
+      if (mode === 'confirm' && normalizedData.valid) setStep('done');
     } catch {
       setResult({ mode, valid: false, total: rows.length, error: 'Connection error to server' });
     } finally {
@@ -589,6 +623,7 @@ export default function BackdatedImportPage() {
     setResult(null);
     setStep('upload');
     setDetectedFormat(null);
+    setSkippedRows(0);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -672,7 +707,7 @@ export default function BackdatedImportPage() {
             </p>
             <p className="text-xs text-emerald-700 dark:text-emerald-400">
               {detectedFormat === 'kinabatangan_legacy'
-                ? `${rows.length} transaksi dijumpai dari format Sales Invoice lama (detailed). Data telah dipetakan automatik untuk import backdated.`
+                ? `${rows.length} transaksi dijumpai dari format Sales Invoice lama (detailed). Data telah dipetakan automatik untuk import backdated.${skippedRows > 0 ? ` (${skippedRows} baris dibuang: baris Total/kosong/jumlah tidak sah)` : ''}`
                 : `${rows.length} transaksi dijumpai dari semua sheet WEEK (Cash · Transfer · Credit). Data sudah diproses secara automatik.`}
             </p>
             {/* Branch selector — only needed for Main Admin */}
@@ -836,7 +871,11 @@ export default function BackdatedImportPage() {
                 ? <CheckCircle className="text-emerald-600" size={20} />
                 : <XCircle className="text-red-500" size={20} />}
               <span className={`font-semibold text-sm ${result.valid ? 'text-emerald-800 dark:text-emerald-200' : 'text-red-700 dark:text-red-300'}`}>
-                {result.valid ? t('all_rows_valid') : `${result.error_count} ${t('errors_found_label')}`}
+                {result.valid
+                  ? t('all_rows_valid')
+                  : result.error && !result.error_count
+                    ? result.error
+                    : `${result.error_count ?? 0} ${t('errors_found_label')}`}
               </span>
             </div>
             {result.valid && result.summary_by_method && (
@@ -873,6 +912,19 @@ export default function BackdatedImportPage() {
             >
               {t('import_another')}
             </button>
+          </div>
+        )}
+
+        {result && result.mode === 'confirm' && !result.valid && (
+          <div className="rounded-xl border p-4 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
+            <div className="flex items-center gap-2 mb-1">
+              <XCircle className="text-red-500" size={20} />
+              <span className="font-semibold text-sm text-red-700 dark:text-red-300">Import gagal disimpan</span>
+            </div>
+            <p className="text-xs text-red-700 dark:text-red-300">{result.error || 'Ralat tidak diketahui semasa simpan data.'}</p>
+            {result.details && (
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">Butiran: {result.details}</p>
+            )}
           </div>
         )}
 
