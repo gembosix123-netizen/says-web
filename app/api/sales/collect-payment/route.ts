@@ -236,7 +236,8 @@ export async function POST(request: NextRequest) {
         }
 
         const currentBalance = Number(customer?.current_balance ?? customer?.outstandingBalance ?? 0);
-        const saleAmount = parseFloat(sale.grand_total || sale.total_amount || sale.amount || sale.subtotal_amount || 0);
+        const rawSaleAmount = sale.grand_total ?? sale.total_amount ?? sale.amount ?? sale.subtotal_amount ?? 0;
+        const saleAmount = Number(typeof rawSaleAmount === 'string' || typeof rawSaleAmount === 'number' ? rawSaleAmount : 0);
         const newBalance = Math.max(0, currentBalance - saleAmount);
 
         const fullUpdate = await supabaseAdmin
