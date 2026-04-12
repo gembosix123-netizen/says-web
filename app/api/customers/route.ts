@@ -54,6 +54,68 @@ const getErrorDetails = (error: unknown): string => {
   return typeof firstDetail === 'string' ? firstDetail : 'Unknown database error';
 };
 
+type CustomerTableName = 'customers_kb' | 'customers_kk';
+
+const getBranchLabelForTable = (table: CustomerTableName) => (
+  table === 'customers_kb' ? 'Kinabatangan' : 'Kota Kinabalu'
+);
+
+const resolveCustomerTables = (
+  branch: string | null | undefined,
+  includeAll = false
+): CustomerTableName[] => {
+  const normalized = (branch || '').trim().toLowerCase();
+
+  if (includeAll || normalized === 'hq' || normalized === 'all') {
+    return ['customers_kb', 'customers_kk'];
+  }
+
+  return [getCustomersTableByBranch(branch)];
+};
+
+const fetchCustomersFromTable = async ({
+  table,
+  role,
+  currentUserId,
+}: {
+  table: CustomerTableName;
+  role: ReturnType<typeof normalizeRole>;
+  currentUserId: string;
+}) => {
+  let baseQuery = supabaseAdmin!.from(table).select('*');
+
+  if (role === 'Sales') {
+    baseQuery = baseQuery.or(`assigned_to.is.null,assigned_to.eq.${currentUserId}`);
+  }
+
+  const activeQuery = await baseQuery.eq('is_active', true);
+
+  if (activeQuery.error && isMissingColumnError(activeQuery.error, 'is_active')) {
+    let fallbackBase = supabaseAdmin!.from(table).select('*');
+
+    if (role === 'Sales') {
+      fallbackBase = fallbackBase.or(`assigned_to.is.null,assigned_to.eq.${currentUserId}`);
+    }
+
+    const fallbackQuery = await fallbackBase;
+    if (fallbackQuery.error) throw fallbackQuery.error;
+
+    return (fallbackQuery.data || []).map((customer) => ({
+      ...customer,
+      branch: customer.branch || customer.town || getBranchLabelForTable(table),
+      customer_table: table,
+    }));
+  }
+
+  if (activeQuery.error) throw activeQuery.error;
+
+  return (activeQuery.data || []).map((customer) => ({
+    ...customer,
+    branch: customer.branch || customer.town || getBranchLabelForTable(table),
+    customer_table: table,
+  }));
+};
+
 // ============================================================================
 // GET HANDLER
 // ============================================================================
@@ -75,60 +137,62 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([]);
     }
 
-    // Get the correct customers table based on user's branch
-    const customersTable = getCustomersTableByBranch(currentUser.branch);
+    const requestedBranch = searchParams.get('branch');
+    const includeAll = searchParams.get('all') === 'true';
+    const role = normalizeRole(currentUser.role);
+    const canViewAllBranches = role === 'Main Admin' || (currentUser.branch || '').trim().toLowerCase() === 'hq';
+    const effectiveBranch = canViewAllBranches ? (requestedBranch || currentUser.branch) : currentUser.branch;
+    const tablesToQuery = resolveCustomerTables(
+      effectiveBranch,
+      canViewAllBranches && (includeAll || !requestedBranch)
+    );
 
     // Get single customer
     if (id) {
-      const { data: customer, error } = await supabaseAdmin
-        .from(customersTable)
-        .select('*')
-        .eq('id', id)
-        .single();
+      for (const table of tablesToQuery) {
+        const { data: customer, error } = await supabaseAdmin
+          .from(table)
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
 
-      if (error || !customer) {
-        return NextResponse.json(
-          { error: 'Customer not found' },
-          { status: 404 }
-        );
+        if (error) throw error;
+        if (!customer) continue;
+
+        if (
+          role === 'Sales' &&
+          customer.assigned_to &&
+          customer.assigned_to !== currentUser.id
+        ) {
+          return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+        }
+
+        return NextResponse.json({
+          ...customer,
+          branch: customer.branch || customer.town || getBranchLabelForTable(table),
+          customer_table: table,
+        });
       }
 
-      // Sales can only view their own or unassigned customers
-      const role = normalizeRole(currentUser.role);
-      if (
-        role === 'Sales' &&
-        customer.assigned_to &&
-        customer.assigned_to !== currentUser.id
-      ) {
-        return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
-      }
-
-      return NextResponse.json(customer);
+      return NextResponse.json(
+        { error: 'Customer not found' },
+        { status: 404 }
+      );
     }
 
-    // Get all customers (support schemas with/without is_active)
-    // Sales role sees only own customers + unassigned company customers
-    const role = normalizeRole(currentUser.role);
-    let baseQuery = supabaseAdmin.from(customersTable).select('*');
+    const customerGroups = await Promise.all(
+      tablesToQuery.map((table) => fetchCustomersFromTable({
+        table,
+        role,
+        currentUserId: currentUser.id,
+      }))
+    );
 
-    if (role === 'Sales') {
-      baseQuery = baseQuery.or(`assigned_to.is.null,assigned_to.eq.${currentUser.id}`);
-    }
+    const customers = customerGroups
+      .flat()
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
-    const activeQuery = await baseQuery.eq('is_active', true);
-
-    if (activeQuery.error && isMissingColumnError(activeQuery.error, 'is_active')) {
-      let fallbackBase = supabaseAdmin.from(customersTable).select('*');
-      if (role === 'Sales') {
-        fallbackBase = fallbackBase.or(`assigned_to.is.null,assigned_to.eq.${currentUser.id}`);
-      }
-      const fallbackQuery = await fallbackBase;
-      if (fallbackQuery.error) throw fallbackQuery.error;
-      return NextResponse.json(fallbackQuery.data || []);
-    }
-
-    if (activeQuery.error) throw activeQuery.error;
-    return NextResponse.json(activeQuery.data || []);
+    return NextResponse.json(customers);
 
   } catch (error) {
     console.error('Error fetching customers:', error);

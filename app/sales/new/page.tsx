@@ -68,6 +68,17 @@ interface ReturnItem {
   photoPreviews: string[];
 }
 
+interface PendingDebt {
+  id: string;
+  invoice: string;
+  customerName: string;
+  customerId: string;
+  amount: number;
+  branch: string;
+  createdAt: string;
+  paymentStatus: string;
+}
+
 const RETURN_REASONS = [
   'Rosak / Pecah',
   'Tamat Tempoh',
@@ -234,6 +245,10 @@ export default function NewSalePage() {
   const [submitting, setSubmitting] = useState(false);
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
   const [serviceStepError, setServiceStepError] = useState('');
+  const [debtOnlyMode, setDebtOnlyMode] = useState(false);
+  const [pendingDebts, setPendingDebts] = useState<PendingDebt[]>([]);
+  const [loadingDebts, setLoadingDebts] = useState(false);
+  const [selectedDebtId, setSelectedDebtId] = useState('');
   const [successData, setSuccessData] = useState<{
     invoiceNo: string;
     receiptNo: string | null;
@@ -420,6 +435,89 @@ export default function NewSalePage() {
   };
 
   const totalAmount = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  const selectedDebt = pendingDebts.find((debt) => debt.id === selectedDebtId) || null;
+  const totalOutstanding = pendingDebts.reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
+
+  const fetchPendingDebtsForCustomer = async (customerId: string) => {
+    if (!customerId) return;
+    setLoadingDebts(true);
+    try {
+      const res = await fetch('/api/sales/collect-payment?status=pending');
+      if (!res.ok) {
+        setPendingDebts([]);
+        setSelectedDebtId('');
+        return;
+      }
+
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : [];
+      const filtered = list
+        .filter((row: any) => String(row.customerId || '') === customerId)
+        .map((row: any) => ({
+          id: String(row.id),
+          invoice: String(row.invoice || '-'),
+          customerName: String(row.customerName || ''),
+          customerId: String(row.customerId || ''),
+          amount: Number(row.amount || 0),
+          branch: String(row.branch || userBranch || ''),
+          createdAt: String(row.createdAt || ''),
+          paymentStatus: String(row.paymentStatus || 'pending'),
+        }));
+
+      setPendingDebts(filtered);
+      setSelectedDebtId((current) => (current && filtered.some((item) => item.id === current)
+        ? current
+        : (filtered[0]?.id || '')));
+    } catch {
+      setPendingDebts([]);
+      setSelectedDebtId('');
+    } finally {
+      setLoadingDebts(false);
+    }
+  };
+
+  const handlePrintDebtStatement = () => {
+    if (!selectedCustomer) return;
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('STATEMENT OF ACCOUNT', 14, 16);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Customer: ${selectedCustomer.name}`, 14, 24);
+    doc.text(`Date: ${new Date().toLocaleDateString('ms-MY')}`, 14, 30);
+
+    autoTable(doc, {
+      startY: 36,
+      head: [['Invoice', 'Tarikh', 'Status', 'Amaun (RM)']],
+      body: pendingDebts.map((debt) => [
+        debt.invoice,
+        debt.createdAt ? new Date(debt.createdAt).toLocaleDateString('ms-MY') : '-',
+        String(debt.paymentStatus || 'pending').toUpperCase(),
+        Number(debt.amount || 0).toFixed(2),
+      ]),
+      theme: 'grid',
+      headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
+      styles: { fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 50 },
+        1: { cellWidth: 35 },
+        2: { cellWidth: 30, halign: 'center' },
+        3: { halign: 'right' },
+      },
+    });
+
+    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 36;
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Total Outstanding: RM ${totalOutstanding.toFixed(2)}`, 14, finalY + 10);
+    doc.save(`SOA_${selectedCustomer.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
+  useEffect(() => {
+    if (step !== 4 || !debtOnlyMode || !selectedCustomer?.id) return;
+    fetchPendingDebtsForCustomer(selectedCustomer.id);
+  }, [step, debtOnlyMode, selectedCustomer?.id]);
 
   const regenerateInvoiceNo = () => {
     setInvoiceNo(generateDocumentNumber('INV', userBranch || 'XX'));
@@ -720,7 +818,8 @@ export default function NewSalePage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedCustomer || cart.length === 0) return;
+    if (!selectedCustomer) return;
+    if (!debtOnlyMode && cart.length === 0) return;
 
     const resolvedInvoiceNo = invoiceNo.trim() || generateDocumentNumber('INV', userBranch || 'XX');
     const resolvedBillingRefNo = paymentMethod === 'bill_to_bill'
@@ -752,6 +851,64 @@ export default function NewSalePage() {
       }
 
       const primaryProofUrl = uploadedProofUrls[0] || null;
+
+      if (debtOnlyMode) {
+        if (!selectedDebt) {
+          throw new Error('Sila pilih invois hutang yang hendak dibayar');
+        }
+
+        const paymentResponse = await fetch('/api/sales/collect-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            saleId: selectedDebt.id,
+            branch: selectedDebt.branch,
+            amountPaid: selectedDebt.amount,
+            paymentMethod: paymentMethod,
+            referenceNo: paymentMethod === 'bill_to_bill'
+              ? resolvedBillingRefNo
+              : paymentMethod === 'bank_transfer'
+                ? resolvedTransferRefNo
+                : paymentMethod === 'qr_code'
+                  ? resolvedQrTxnRefNo
+                  : null,
+            receipt_url: primaryProofUrl,
+          }),
+        });
+
+        const paymentResult = await paymentResponse.json().catch(() => ({}));
+        if (!paymentResponse.ok) {
+          throw new Error(paymentResult?.error || 'Gagal merekod bayaran hutang');
+        }
+
+        const resolvedReferenceNo =
+          paymentMethod === 'bill_to_bill'
+            ? resolvedBillingRefNo
+            : paymentMethod === 'bank_transfer'
+              ? resolvedTransferRefNo
+              : paymentMethod === 'qr_code'
+                ? resolvedQrTxnRefNo
+                : null;
+
+        setSuccessData({
+          invoiceNo: selectedDebt.invoice,
+          receiptNo: null,
+          referenceNo: paymentMethod === 'cash' ? null : resolvedReferenceNo,
+          referenceLabel: paymentMethod === 'cash' ? null : getReferenceLabel(paymentMethod),
+          proofUploaded: uploadedProofUrls.length > 0,
+          customerName: selectedCustomer.name,
+          total: Number(selectedDebt.amount || 0),
+          paymentMethod,
+          items: [],
+          proofImageUrls: uploadedProofUrls,
+          returnedItems: [],
+        });
+
+        setPendingDebts((prev) => prev.filter((d) => d.id !== selectedDebt.id));
+        setSelectedDebtId('');
+        setStep(5);
+        return;
+      }
 
       const salesArea = (() => {
         try {
@@ -1316,11 +1473,25 @@ export default function NewSalePage() {
                     Kembali
                   </Button>
                   <Button
+                    variant="outline"
+                    size="lg"
+                    className="flex-1 border-amber-500/60 text-amber-300 hover:bg-amber-500/10"
+                    onClick={() => {
+                      setDebtOnlyMode(true);
+                      setStep(4);
+                    }}
+                  >
+                    Bayar Hutang Sahaja
+                  </Button>
+                  <Button
                     variant="primary"
                     size="lg"
                     className="flex-1"
                     disabled={cart.length === 0}
-                    onClick={() => setStep(4)}
+                    onClick={() => {
+                      setDebtOnlyMode(false);
+                      setStep(4);
+                    }}
                   >
                     Seterusnya
                   </Button>
@@ -1333,10 +1504,71 @@ export default function NewSalePage() {
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <ShoppingCart className="text-emerald-400" size={24} />
-                  <h2 className="text-xl font-bold text-white">Pembayaran</h2>
+                  <h2 className="text-xl font-bold text-white">
+                    {debtOnlyMode ? 'Bayaran Hutang (Tanpa Produk)' : 'Pembayaran'}
+                  </h2>
                 </div>
 
                 <div className="space-y-4">
+                  {debtOnlyMode && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm text-amber-200">
+                          Mod ini untuk pelanggan yang hanya mahu bayar hutang tanpa tambah produk baru.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handlePrintDebtStatement}
+                          disabled={pendingDebts.length === 0}
+                          className="text-xs px-3 py-1.5 rounded border border-amber-400/60 text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
+                        >
+                          <Printer size={12} className="inline mr-1" /> Cetak Statement
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs text-amber-100">
+                        <span>Jumlah outstanding pelanggan ini</span>
+                        <span className="font-bold">RM {totalOutstanding.toFixed(2)}</span>
+                      </div>
+
+                      {loadingDebts ? (
+                        <p className="text-sm text-white/70">Memuat data hutang...</p>
+                      ) : pendingDebts.length === 0 ? (
+                        <p className="text-sm text-white/70">Tiada invois hutang tertunggak untuk pelanggan ini.</p>
+                      ) : (
+                        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                          {pendingDebts.map((debt) => (
+                            <label
+                              key={debt.id}
+                              className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 cursor-pointer ${
+                                selectedDebtId === debt.id
+                                  ? 'border-amber-400 bg-amber-500/10'
+                                  : 'border-slate-700 bg-slate-800/60 hover:border-slate-500'
+                              }`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <input
+                                  type="radio"
+                                  name="selectedDebt"
+                                  className="mt-1"
+                                  checked={selectedDebtId === debt.id}
+                                  onChange={() => setSelectedDebtId(debt.id)}
+                                />
+                                <div>
+                                  <p className="text-sm text-white font-semibold">{debt.invoice}</p>
+                                  <p className="text-xs text-white/60">
+                                    {debt.createdAt ? new Date(debt.createdAt).toLocaleDateString('ms-MY') : '-'}
+                                  </p>
+                                </div>
+                              </div>
+                              <p className="text-sm font-bold text-amber-300">RM {Number(debt.amount || 0).toFixed(2)}</p>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div>
                     <div className="flex items-center justify-between mb-1 gap-3">
                       <label className="block text-white/60 text-sm">
@@ -1363,12 +1595,18 @@ export default function NewSalePage() {
                   <div>
                     <label className="block text-white/60 text-sm mb-2">Kaedah Pembayaran</label>
                     <div className="grid grid-cols-2 gap-3">
-                      {[
+                      {(debtOnlyMode
+                        ? [
+                            { value: 'cash', label: 'Tunai' },
+                            { value: 'bank_transfer', label: 'Bank Transfer' },
+                            { value: 'qr_code', label: 'QR Code' },
+                          ]
+                        : [
                         { value: 'cash', label: 'Tunai' },
                         { value: 'bill_to_bill', label: 'Kredit (Bill-to-Bill)' },
                         { value: 'bank_transfer', label: 'Bank Transfer' },
                         { value: 'qr_code', label: 'QR Code' },
-                      ].map((m) => (
+                      ]).map((m) => (
                         <button
                           key={m.value}
                           className={`p-3 rounded-lg border-2 transition-all text-sm ${
@@ -1546,17 +1784,23 @@ export default function NewSalePage() {
                       </div>
                       <div className="flex justify-between text-white/60">
                         <span>Item:</span>
-                        <span className="text-white">{cart.length} produk</span>
+                        <span className="text-white">{debtOnlyMode ? '0 produk (hutang sahaja)' : `${cart.length} produk`}</span>
                       </div>
                       <div className="flex justify-between text-white/60">
                         <span>Kuantiti:</span>
-                        <span className="text-white">{cart.reduce((sum, i) => sum + i.quantity, 0)} unit</span>
+                        <span className="text-white">{debtOnlyMode ? '0 unit' : `${cart.reduce((sum, i) => sum + i.quantity, 0)} unit`}</span>
                       </div>
+                      {debtOnlyMode && (
+                        <div className="flex justify-between text-white/60">
+                          <span>Invois Hutang:</span>
+                          <span className="text-white">{selectedDebt?.invoice || '-'}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="border-t border-slate-700 pt-3">
                       <div className="flex justify-between text-lg font-bold">
                         <span className="text-white">Jumlah:</span>
-                        <span className="text-emerald-400">RM {totalAmount.toFixed(2)}</span>
+                        <span className="text-emerald-400">RM {(debtOnlyMode ? Number(selectedDebt?.amount || 0) : totalAmount).toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -1575,10 +1819,10 @@ export default function NewSalePage() {
                     variant="primary"
                     size="lg"
                     className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-                    disabled={submitting}
+                    disabled={submitting || (debtOnlyMode && !selectedDebt)}
                     onClick={handleSubmit}
                   >
-                    {submitting ? 'Menyimpan...' : 'Selesai Jualan'}
+                    {submitting ? 'Menyimpan...' : (debtOnlyMode ? 'Selesaikan Bayaran Hutang' : 'Selesai Jualan')}
                   </Button>
                 </div>
               </Card>

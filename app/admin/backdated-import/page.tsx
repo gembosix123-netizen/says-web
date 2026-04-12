@@ -58,6 +58,103 @@ function detectTransfer(custName: string): { isTransfer: boolean; cleanName: str
   return { isTransfer: false, cleanName: custName };
 }
 
+function parseKinabatanganLegacyRows(
+  aoa: unknown[][],
+  branch: string
+): ImportRow[] {
+  if (!Array.isArray(aoa) || aoa.length === 0) return [];
+
+  let headerIdx = -1;
+  let header: string[] = [];
+
+  for (let i = 0; i < Math.min(aoa.length, 12); i += 1) {
+    const row = (aoa[i] || []).map((cell) => String(cell || '').trim().toLowerCase());
+    if (row.length === 0) continue;
+
+    const hasDate = row.some((h) => h === 'date');
+    const hasInv = row.some((h) => h.includes('inv'));
+    const hasName = row.some((h) => h === 'name' || h.includes('customer'));
+    const hasTotal = row.some((h) => h === 'total' || h.includes('balance') || h.includes('sale'));
+
+    if (hasDate && hasInv && hasName && hasTotal) {
+      headerIdx = i;
+      header = row;
+      break;
+    }
+  }
+
+  if (headerIdx === -1) return [];
+
+  const findIndex = (patterns: RegExp[]) => header.findIndex((h) => patterns.some((p) => p.test(h)));
+  const dateIdx = findIndex([/^date$/i]);
+  const invIdx = findIndex([/^inv/i]);
+  const nameIdx = findIndex([/^name$/i, /customer/i]);
+  const saleIdx = findIndex([/^sale$/i, /amount/i]);
+  const discountIdx = findIndex([/^discount$/i]);
+  const taxIdx = findIndex([/^tax$/i]);
+  const totalIdx = findIndex([/^total$/i]);
+  const balanceIdx = findIndex([/^balance$/i]);
+  const statusIdx = findIndex([/^status$/i]);
+  const byIdx = findIndex([/^by$/i, /sales/i]);
+  const remarkIdx = findIndex([/^remark$/i, /^notes?$/i]);
+
+  const rows: ImportRow[] = [];
+
+  for (let i = headerIdx + 1; i < aoa.length; i += 1) {
+    const row = aoa[i] || [];
+    const rawDate = String(row[dateIdx] || '').trim();
+    const rawInv = String(row[invIdx] || '').trim();
+    const rawName = String(row[nameIdx] || '').trim();
+    const rawStatus = String(row[statusIdx] || '').trim();
+
+    if (!rawDate || /^total$/i.test(rawDate) || /^status$/i.test(rawDate)) continue;
+    if (!rawInv || !rawName) continue;
+
+    const parsedDate = parseDateCell(rawDate);
+    if (!parsedDate) continue;
+
+    const sale = Number(String(row[saleIdx] || '').replace(/[^0-9.-]/g, ''));
+    const discount = Number(String(row[discountIdx] || '').replace(/[^0-9.-]/g, ''));
+    const tax = Number(String(row[taxIdx] || '').replace(/[^0-9.-]/g, ''));
+    const total = Number(String(row[totalIdx] || '').replace(/[^0-9.-]/g, ''));
+    const balance = Number(String(row[balanceIdx] || '').replace(/[^0-9.-]/g, ''));
+
+    const computedTotal = Number.isFinite(total) && total > 0
+      ? total
+      : Math.max(0, (Number.isFinite(sale) ? sale : 0) - (Number.isFinite(discount) ? discount : 0) + (Number.isFinite(tax) ? tax : 0));
+
+    if (!Number.isFinite(computedTotal) || computedTotal <= 0) continue;
+
+    const statusNorm = rawStatus.toLowerCase();
+    const isCredit = statusNorm.includes('unpaid') || statusNorm.includes('pending') || (Number.isFinite(balance) && balance > 0);
+    const paymentMethod = isCredit ? 'bill_to_bill' : 'cash';
+    const refNo = `BACK-${rawInv}`;
+
+    const salesman = byIdx >= 0 ? String(row[byIdx] || '').trim() : '';
+    const remark = remarkIdx >= 0 ? String(row[remarkIdx] || '').trim() : '';
+    const paymentNote = [
+      'Kinabatangan Legacy Import',
+      rawStatus ? `Status: ${rawStatus}` : '',
+      salesman ? `By: ${salesman}` : '',
+      remark ? `Remark: ${remark}` : '',
+    ].filter(Boolean).join(' | ');
+
+    rows.push({
+      month: parsedDate.month,
+      transaction_date: parsedDate.fullDate,
+      branch,
+      payment_method: paymentMethod,
+      amount: computedTotal,
+      customer_name: rawName,
+      receipt_no: paymentMethod === 'cash' ? refNo : undefined,
+      billing_ref_no: paymentMethod === 'bill_to_bill' ? refNo : undefined,
+      payment_note: paymentNote,
+    });
+  }
+
+  return rows;
+}
+
 interface RowError {
   row: number;
   field: string;
@@ -100,7 +197,7 @@ export default function BackdatedImportPage() {
   const [customers, setCustomers] = useState<CustomerRef[]>([]);
   const [showCustomers, setShowCustomers] = useState(false);
   // Weekly Excel detection
-  const [detectedFormat, setDetectedFormat] = useState<'standard' | 'weekly' | null>(null);
+  const [detectedFormat, setDetectedFormat] = useState<'standard' | 'weekly' | 'kinabatangan_legacy' | null>(null);
   const [weeklyBranch, setWeeklyBranch] = useState('');
   const [userRole, setUserRole] = useState('');
 
@@ -140,6 +237,31 @@ export default function BackdatedImportPage() {
             const fullBuf = excelEv.target?.result as ArrayBuffer;
             const XLSX = await import('xlsx');
             const wb = XLSX.read(fullBuf, { type: 'array' });
+            const userBranch = (() => {
+              try {
+                return JSON.parse(localStorage.getItem('user') || '{}').branch || '';
+              } catch {
+                return '';
+              }
+            })();
+
+            // Kinabatangan legacy monthly invoice format (detailed columns from old system)
+            const legacyBranch = userBranch || 'Kinabatangan';
+            const legacyRows = wb.SheetNames.flatMap((sheetName) => {
+              const ws = wb.Sheets[sheetName];
+              if (!ws) return [] as ImportRow[];
+              const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
+              return parseKinabatanganLegacyRows(aoa, legacyBranch);
+            });
+
+            if (legacyRows.length > 0) {
+              if (userRole === 'Main Admin' && !weeklyBranch) {
+                setWeeklyBranch('Kinabatangan');
+              }
+              setRows(legacyRows);
+              setDetectedFormat('kinabatangan_legacy');
+              return;
+            }
 
             // ── Detect weekly Excel format (sheets named WEEK 1, WEEK 2, …) ──
             const weekSheets = wb.SheetNames.filter((n) => /^WEEK \d+/i.test(n));
@@ -404,7 +526,7 @@ export default function BackdatedImportPage() {
       }
     };
     sniff.readAsArrayBuffer(file.slice(0, 4));
-  }, []);
+  }, [t, userRole, weeklyBranch]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -441,7 +563,7 @@ export default function BackdatedImportPage() {
     setLoading(true);
     setResult(null);
     // For weekly format, apply selected branch to all rows before sending
-    const rowsToSend = (detectedFormat === 'weekly' && weeklyBranch)
+    const rowsToSend = ((detectedFormat === 'weekly' || detectedFormat === 'kinabatangan_legacy') && weeklyBranch)
       ? rows.map((r) => ({ ...r, branch: weeklyBranch }))
       : rows;
     try {
@@ -540,13 +662,18 @@ export default function BackdatedImportPage() {
         </div>
 
         {/* Weekly Excel detected banner */}
-        {detectedFormat === 'weekly' && rows.length > 0 && (
+        {(detectedFormat === 'weekly' || detectedFormat === 'kinabatangan_legacy') && rows.length > 0 && (
           <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 space-y-2">
             <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
-              <CheckCircle size={16} /> Fail Weekly Excel Dikesan
+              <CheckCircle size={16} />
+              {detectedFormat === 'kinabatangan_legacy'
+                ? 'Fail Legacy Kinabatangan Dikesan'
+                : 'Fail Weekly Excel Dikesan'}
             </p>
             <p className="text-xs text-emerald-700 dark:text-emerald-400">
-              {rows.length} transaksi dijumpai dari semua sheet WEEK (Cash · Transfer · Credit). Data sudah diproses secara automatik.
+              {detectedFormat === 'kinabatangan_legacy'
+                ? `${rows.length} transaksi dijumpai dari format Sales Invoice lama (detailed). Data telah dipetakan automatik untuk import backdated.`
+                : `${rows.length} transaksi dijumpai dari semua sheet WEEK (Cash · Transfer · Credit). Data sudah diproses secara automatik.`}
             </p>
             {/* Branch selector — only needed for Main Admin */}
             {userRole === 'Main Admin' && (
@@ -617,7 +744,7 @@ export default function BackdatedImportPage() {
         )}
 
         {/* Re-upload button if already loaded a weekly file */}
-        {detectedFormat === 'weekly' && step !== 'done' && (
+        {(detectedFormat === 'weekly' || detectedFormat === 'kinabatangan_legacy') && step !== 'done' && (
           <div className="flex justify-end">
             <button onClick={handleReset} className="text-xs text-slate-500 hover:text-red-500 underline">
               Buang fail & muat semula

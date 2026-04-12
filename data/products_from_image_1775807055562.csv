@@ -1,0 +1,26 @@
+id,name,code,price,unit,is_active,created_at,current_stock,branch
+PROD-KK-0001,Yanong's Meatball 1Kg,MB1KG,17.5,pkt,true,,24,Kota Kinabalu
+PROD-KK-0002,Yanong's Meatball 800g,MB800G,15,pkt,true,,24,Kota Kinabalu
+PROD-KK-0003,Yanong's Meatball 500g,MB500G,10.5,pkt,true,,24,Kota Kinabalu
+PROD-KK-0004,Bakso Beranak Yanong 300g,BB1,8.5,pkt,true,,24,Kota Kinabalu
+PROD-KK-0005,Bakso Urat Yanong's 300g,BB2,13,pkt,true,,24,Kota Kinabalu
+PROD-KK-0006,Bakso Mercu Yanong 400g,BB3,15.3,pkt,true,,24,Kota Kinabalu
+PROD-KK-0007,Bakso Tahu Yanong 300g,BB4,15,pkt,true,,24,Kota Kinabalu
+PROD-KK-0008,Yanong Beef Burger 360g - 6pcs,BD1,15.8,pkt,true,,24,Kota Kinabalu
+PROD-KK-0009,Yanong Beef Burger 480g - 8 pcs,BD2,26,pkt,true,,24,Kota Kinabalu
+PROD-KK-0010,Yanong Mixed Burger 300g,BA1,14.5,pkt,true,,24,Kota Kinabalu
+PROD-KK-0011,Magello Kon Lo Mien Original Sauce 150 g,FP1,7.6,pkt,true,,24,Kota Kinabalu
+PROD-KK-0012,Magello Kon Lo Mien Spicy Sauce 150 g,FP2,8.3,pkt,true,,24,Kota Kinabalu
+PROD-KK-0013,Ayam Masak Palekko,RTE1,15,pkt,true,,24,Kota Kinabalu
+PROD-KK-0014,Jagung Stim Magello,RTE2,5.5,pkt,true,,24,Kota Kinabalu
+PROD-KK-0015,Bubur Kacang Hijau Maboona 150g,RTE3,6.5,pkt,true,,24,Kota Kinabalu
+PROD-KK-0016,Udang Masak Cili Maboona 150g,RTE4,8,pkt,true,,24,Kota Kinabalu
+PROD-KK-0017,Yanong's Fishball Putih Rebus (S) 1Kg,FB1,17,pkt,true,,1,Kota Kinabalu
+PROD-KK-0018,Yanong's Fishball Putih Rebus (K) 1Kg,FB2,17,pkt,true,,1,Kota Kinabalu
+PROD-KK-0019,Yanong's Fishball Goreng (S),FB3,17.6,pkt,true,,1,Kota Kinabalu
+PROD-KK-0020,Yanong's Fishball Putih Sayur (S),FB4,17.6,pkt,true,,1,Kota Kinabalu
+PROD-KK-0021,Yanong's Fishcake Pucuk Ikan Nipis (L),FC1,3.4,pkt,true,,1,Kota Kinabalu
+PROD-KK-0022,Yanong's Fishcake (P) Pucuk Ikan Nipis,FC2,4,pkt,true,,1,Kota Kinabalu
+PROD-KK-0023,Yanong's Pucuk Ikan Nipis Fishstick,FF1,25,pkt,true,,1,Kota Kinabalu
+PROD-KK-0024,Yanong's Lada goreng,FF2,17,pkt,true,,1,Kota Kinabalu
+PROD-KK-0025,Yanong's Fishstick Fishstick,FF3,17.7,pkt,true,,1,Kota Kinabalu

@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { canExportReports } from '@/lib/permissions';
+import { supabaseAdmin } from '@/lib/supabase';
 
 interface ReportProduct {
   name: string;
@@ -30,6 +31,24 @@ interface ExportReportData {
   dailyData?: ReportDailyData[];
 }
 
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  d.setDate(d.getDate() + days);
+  return d.toISOString();
+}
+
+function asDateLabel(isoDate: string): string {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('ms-MY');
+}
+
+function extractCustomerFromNotes(notes?: string | null): string {
+  const m = String(notes || '').match(/\[Customer:\s*(.*?)\]/i);
+  return m?.[1]?.trim() || '';
+}
+
 export async function POST(request: NextRequest) {
   try {
     const currentUser = getSessionUserFromRequest(request);
@@ -51,6 +70,108 @@ export async function POST(request: NextRequest) {
 
     // Create workbook
     const workbook = XLSX.utils.book_new();
+
+    // Kinabatangan legacy monthly sales-invoice layout (detailed old-system style)
+    if (branch === 'Kinabatangan' && supabaseAdmin) {
+      const [year, monthNum] = String(month).split('-').map(Number);
+      const start = `${month}-01T00:00:00Z`;
+      const endDay = new Date(year, monthNum, 0).getDate();
+      const end = `${month}-${String(endDay).padStart(2, '0')}T23:59:59Z`;
+
+      const { data: salesRows, error: salesError } = await supabaseAdmin
+        .from('sales_transactions')
+        .select('id,invoice,transaction_date,created_at,customer_id,customer_name,grand_total,subtotal_amount,status,notes,user_id')
+        .eq('branch', 'Kinabatangan')
+        .gte('created_at', start)
+        .lte('created_at', end)
+        .order('created_at', { ascending: false });
+
+      if (salesError) {
+        return NextResponse.json({ error: 'Failed to fetch Kinabatangan sales data' }, { status: 500 });
+      }
+
+      const sales = salesRows || [];
+      const userIds = Array.from(new Set(sales.map((s) => String(s.user_id || '')).filter(Boolean)));
+      const customerIds = Array.from(new Set(sales.map((s) => String(s.customer_id || '')).filter(Boolean)));
+
+      const [usersRes, kbRes, kkRes] = await Promise.all([
+        userIds.length > 0
+          ? supabaseAdmin.from('users').select('id,name,username').in('id', userIds)
+          : Promise.resolve({ data: [], error: null }),
+        customerIds.length > 0
+          ? supabaseAdmin.from('customers_kb').select('id,name').in('id', customerIds)
+          : Promise.resolve({ data: [], error: null }),
+        customerIds.length > 0
+          ? supabaseAdmin.from('customers_kk').select('id,name').in('id', customerIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      const usersById = Object.fromEntries((usersRes.data || []).map((u: any) => [String(u.id), String(u.name || u.username || '-')])) as Record<string, string>;
+      const customersById = Object.fromEntries(
+        [...(kbRes.data || []), ...(kkRes.data || [])].map((c: any) => [String(c.id), String(c.name || '-')])
+      ) as Record<string, string>;
+
+      const detailedRows: Array<Array<string | number>> = [
+        ['Sale Invoice'],
+        [],
+        ['Date', month],
+        ['Status', 'All'],
+        ['User', 'All'],
+        [],
+        ['Date', 'INV#', 'Name', 'Due', 'Sale', 'Discount', 'Tax', 'Total', 'Balance', 'Status', 'By', 'Remark'],
+      ];
+
+      sales.forEach((row: any) => {
+        const txDateIso = String(row.transaction_date || row.created_at || '');
+        const createdIso = String(row.created_at || row.transaction_date || '');
+        const total = Number(row.grand_total ?? row.subtotal_amount ?? 0);
+        const isUnpaid = String(row.status || '').toLowerCase() === 'pending';
+        const customerName = customersById[String(row.customer_id || '')] || String(row.customer_name || '').trim() || extractCustomerFromNotes(row.notes) || '-';
+
+        detailedRows.push([
+          asDateLabel(txDateIso),
+          String(row.invoice || '-'),
+          customerName,
+          asDateLabel(addDays(createdIso, 14)),
+          total,
+          0,
+          0,
+          total,
+          isUnpaid ? total : 0,
+          isUnpaid ? 'Unpaid' : 'Paid',
+          usersById[String(row.user_id || '')] || '-',
+          String(row.notes || '').replace(/\[Customer:.*?\]/i, '').trim(),
+        ]);
+      });
+
+      const detailedSheet = XLSX.utils.aoa_to_sheet(detailedRows);
+      detailedSheet['!cols'] = [
+        { wch: 12 },
+        { wch: 18 },
+        { wch: 34 },
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 16 },
+        { wch: 24 },
+      ];
+
+      XLSX.utils.book_append_sheet(workbook, detailedSheet, 'Sale Invoice');
+
+      const fileName = `SalesReport_${month}_Kinabatangan_Legacy.xlsx`;
+      const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
+      return new NextResponse(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+        },
+      });
+    }
 
     // ============================================================================
     // Sheet 1: SUMMARY

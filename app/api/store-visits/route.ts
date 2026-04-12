@@ -9,7 +9,58 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal server error';
 }
 
+function isCustomerFkError(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  return message.includes('store_visits_customer_id_fkey') || message.includes('foreign key');
+}
+
 type StoreVisitRow = Record<string, any>;
+
+async function resolveCanonicalCustomerId(customerId: string, branch?: string | null): Promise<string | null> {
+  if (!customerId || !supabaseAdmin) return null;
+
+  const canonicalRead = await supabaseAdmin
+    .from('customers')
+    .select('id')
+    .eq('id', customerId)
+    .maybeSingle();
+
+  if (!canonicalRead.error && canonicalRead.data?.id) {
+    return String(canonicalRead.data.id);
+  }
+
+  const customersTable = getCustomersTableByBranch(branch || undefined);
+  const branchCustomerRead = await supabaseAdmin
+    .from(customersTable)
+    .select('id, name, address, branch')
+    .eq('id', customerId)
+    .maybeSingle();
+
+  if (branchCustomerRead.error || !branchCustomerRead.data?.id) {
+    return null;
+  }
+
+  const branchCustomer = branchCustomerRead.data;
+  const payload = {
+    id: String(branchCustomer.id),
+    name: String(branchCustomer.name || 'Unknown Store'),
+    address: branchCustomer.address || null,
+    branch: branchCustomer.branch || branch || null,
+  };
+
+  const canonicalUpsert = await supabaseAdmin
+    .from('customers')
+    .upsert(payload, { onConflict: 'id' })
+    .select('id')
+    .maybeSingle();
+
+  if (canonicalUpsert.error) {
+    console.error('[API store-visits] Failed to sync canonical customer:', canonicalUpsert.error);
+    return null;
+  }
+
+  return String(canonicalUpsert.data?.id || payload.id);
+}
 
 async function attachCustomerToVisit(visit: StoreVisitRow | null) {
   if (!visit?.customer_id || !supabaseAdmin) return visit;
@@ -138,9 +189,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const resolvedCustomerId = await resolveCanonicalCustomerId(customer_id, currentUser.branch);
+    if (!resolvedCustomerId) {
+      return NextResponse.json(
+        { error: 'Store record not synced. Please refresh store list or contact admin.' },
+        { status: 400 }
+      );
+    }
+
     const visitData = {
       merchandiser_id: currentUser.id,
-      customer_id,
+      customer_id: resolvedCustomerId,
       branch: currentUser.branch,
       check_in_time: new Date().toISOString(),
       gps_lat: gps_lat || null,
@@ -151,11 +210,22 @@ export async function POST(request: NextRequest) {
       status: 'in-progress',
     };
 
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('store_visits')
       .insert(visitData)
       .select('*')
       .single();
+
+    if (error && isCustomerFkError(error)) {
+      const retriedCustomerId = await resolveCanonicalCustomerId(customer_id, currentUser.branch);
+      if (retriedCustomerId) {
+        ({ data, error } = await supabaseAdmin
+          .from('store_visits')
+          .insert({ ...visitData, customer_id: retriedCustomerId })
+          .select('*')
+          .single());
+      }
+    }
 
     if (error) {
       console.error('[API store-visits POST] Error:', error);

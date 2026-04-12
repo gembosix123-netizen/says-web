@@ -565,7 +565,9 @@ export async function POST(request: NextRequest) {
 
   // ── Fetch products from products table for code-based grouping ──
   type ProductRecord = { id: string; name: string; code: string | null };
-  const { data: productRecords } = await supabaseAdmin.from('products').select('id,name,code');
+  let productsQuery = supabaseAdmin.from('products').select('id,name,code');
+  if (branch) productsQuery = productsQuery.eq('branch', branch);
+  const { data: productRecords } = await productsQuery;
   const productCodeByName: Record<string, string> = {};
   for (const p of (productRecords || []) as ProductRecord[]) {
     if (p.name) productCodeByName[p.name] = p.code || '';

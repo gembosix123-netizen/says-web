@@ -51,6 +51,7 @@ export default function WeeklyReportsPage() {
   const [data, setData] = useState<WeeklyData | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingMonth, setExportingMonth] = useState(false);
   const [error, setError] = useState('');
   const [userRole, setUserRole] = useState('');
@@ -103,6 +104,24 @@ export default function WeeklyReportsPage() {
       alert('Gagal jana laporan Excel.');
     }
     setExporting(false);
+  }
+
+  async function handleExportPdf() {
+    setExportingPdf(true);
+    const params = new URLSearchParams({ date: selectedDate, branch });
+    const res = await fetch(`/api/reports/weekly/pdf?${params.toString()}`);
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `WeeklyReport_${data?.weekLabel || selectedDate}_${branch || 'All'}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      alert('Gagal jana laporan PDF.');
+    }
+    setExportingPdf(false);
   }
 
   // Export full-month Excel (WEEK 1 / WEEK 1 (TRANSFER) / WEEK 1 (CREDIT) … format)
@@ -169,6 +188,11 @@ export default function WeeklyReportsPage() {
             className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm font-semibold disabled:opacity-50">
             <Download className="h-4 w-4" />
             {exporting ? 'Jana...' : 'Excel (Minggu)'}
+          </button>
+          <button onClick={handleExportPdf} disabled={exportingPdf || loading || !data}
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm font-semibold disabled:opacity-50">
+            <Download className="h-4 w-4" />
+            {exportingPdf ? 'Jana...' : 'PDF (Minggu)'}
           </button>
         </div>
       </div>

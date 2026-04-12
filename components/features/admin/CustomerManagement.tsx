@@ -239,43 +239,45 @@ export default function CustomerManagement() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCustomers.map(customer => (
-            <div key={customer.id} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800/60 transition-all">
-              <div className="flex justify-between items-start">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-white truncate">{customer.name}</h3>
-                  <p className="text-xs text-slate-400 flex items-center gap-1 mt-1"><MapPin size={12} /> {customer.area ? `${customer.area} — ` : ''}{customer.address || t('no_address')}</p>
-                  <p className="text-xs text-slate-500 mt-1">{t('user_branch')}: {customer.branch || customer.town || 'N/A'}</p>
-                  <p className="text-xs text-slate-500 mt-1">Tel: {customer.phone}</p>
-                  {/* Ownership badge */}
-                  {customer.assigned_to ? (
-                    <span className="inline-flex items-center gap-1 mt-2 text-xs bg-blue-900/40 text-blue-300 border border-blue-800/50 rounded-full px-2 py-0.5">
-                      <UserCheck size={11} /> {customer.assigned_to_name || customer.assigned_to}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 mt-2 text-xs bg-slate-700/50 text-slate-400 border border-slate-600/50 rounded-full px-2 py-0.5">
-                      <Store size={11} /> Company Pool
-                    </span>
-                  )}
-                </div>
-                {/* Action buttons */}
-                <div className="flex flex-col gap-1 ml-2 shrink-0">
-                  <button onClick={() => handleEdit(customer)} className="p-1.5 text-blue-400 hover:bg-blue-900/20 rounded-lg" title="Edit"><Edit size={14} /></button>
-                  {customer.assigned_to ? (
-                    <>
-                      <button onClick={() => openOwnershipModal(customer, 'handover')} className="p-1.5 text-amber-400 hover:bg-amber-900/20 rounded-lg" title="Handover"><ArrowRightLeft size={14} /></button>
-                      <button onClick={() => openOwnershipModal(customer, 'release')} className="p-1.5 text-slate-400 hover:bg-slate-700/30 rounded-lg" title="Release"><UserX size={14} /></button>
-                    </>
-                  ) : (
-                    <button onClick={() => openOwnershipModal(customer, 'assign')} className="p-1.5 text-green-400 hover:bg-green-900/20 rounded-lg" title="Assign"><UserCheck size={14} /></button>
-                  )}
-                  <button onClick={() => setDeleteTarget(customer)} className="p-1.5 text-red-400 hover:bg-red-900/20 rounded-lg" title="Padam"><Trash2 size={14} /></button>
+        <div className="max-h-[70vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredCustomers.map(customer => (
+              <div key={customer.id} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800/60 transition-all">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-white truncate">{customer.name}</h3>
+                    <p className="text-xs text-slate-400 flex items-center gap-1 mt-1"><MapPin size={12} /> {customer.area ? `${customer.area} — ` : ''}{customer.address || t('no_address')}</p>
+                    <p className="text-xs text-slate-500 mt-1">{t('user_branch')}: {customer.branch || customer.town || 'N/A'}</p>
+                    <p className="text-xs text-slate-500 mt-1">Tel: {customer.phone}</p>
+                    {/* Ownership badge */}
+                    {customer.assigned_to ? (
+                      <span className="inline-flex items-center gap-1 mt-2 text-xs bg-blue-900/40 text-blue-300 border border-blue-800/50 rounded-full px-2 py-0.5">
+                        <UserCheck size={11} /> {customer.assigned_to_name || customer.assigned_to}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 mt-2 text-xs bg-slate-700/50 text-slate-400 border border-slate-600/50 rounded-full px-2 py-0.5">
+                        <Store size={11} /> Company Pool
+                      </span>
+                    )}
+                  </div>
+                  {/* Action buttons */}
+                  <div className="flex flex-col gap-1 ml-2 shrink-0">
+                    <button onClick={() => handleEdit(customer)} className="p-1.5 text-blue-400 hover:bg-blue-900/20 rounded-lg" title="Edit"><Edit size={14} /></button>
+                    {customer.assigned_to ? (
+                      <>
+                        <button onClick={() => openOwnershipModal(customer, 'handover')} className="p-1.5 text-amber-400 hover:bg-amber-900/20 rounded-lg" title="Handover"><ArrowRightLeft size={14} /></button>
+                        <button onClick={() => openOwnershipModal(customer, 'release')} className="p-1.5 text-slate-400 hover:bg-slate-700/30 rounded-lg" title="Release"><UserX size={14} /></button>
+                      </>
+                    ) : (
+                      <button onClick={() => openOwnershipModal(customer, 'assign')} className="p-1.5 text-green-400 hover:bg-green-900/20 rounded-lg" title="Assign"><UserCheck size={14} /></button>
+                    )}
+                    <button onClick={() => setDeleteTarget(customer)} className="p-1.5 text-red-400 hover:bg-red-900/20 rounded-lg" title="Padam"><Trash2 size={14} /></button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-          {filteredCustomers.length === 0 && <div className="col-span-3 text-center py-12 text-slate-500">Tiada kedai dijumpai</div>}
+            ))}
+            {filteredCustomers.length === 0 && <div className="col-span-3 text-center py-12 text-slate-500">Tiada kedai dijumpai</div>}
+          </div>
         </div>
       </div>
 
