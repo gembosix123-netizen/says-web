@@ -70,7 +70,7 @@ const resolveCustomerTables = (
     return ['customers_kb', 'customers_kk'];
   }
 
-  return [getCustomersTableByBranch(branch)];
+  return [getCustomersTableByBranch(normalized)];
 };
 
 const fetchCustomersFromTable = async ({
