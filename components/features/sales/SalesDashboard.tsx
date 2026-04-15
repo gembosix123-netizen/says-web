@@ -5,6 +5,7 @@ import { useSales } from '@/context/SalesContext';
 import { Search, Plus, Store, CheckCircle, Loader2, ClipboardList, BadgeCheck } from 'lucide-react';
 import { User } from '@/types';
 import CommissionWidget from './CommissionWidget';
+import { useToast } from '@/components/ui/Toast';
 import { signInAnonymously } from 'firebase/auth';
 import { collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
@@ -26,7 +27,8 @@ type StoreItem = {
 };
 
 export default function SalesDashboard() {
-  const { customers, visitedCustomers, setSelectedCustomer, setStep, setLatestAudit, orders, setCart } = useSales();
+  const { customers, visitedCustomers, setSelectedCustomer, setStep, setLatestAudit, orders, setCart, userBranch } = useSales();
+  const { addToast } = useToast();
   const [search, setSearch] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [user, setUser] = useState<{ id?: string } | null>(null);
@@ -224,22 +226,31 @@ export default function SalesDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: `c${Date.now()}`,
-          name: newShop.name,
-          address: newShop.address,
-          phone: newShop.phone,
-          createdAt: new Date().toISOString()
+          name: newShop.name.trim(),
+          address: newShop.address.trim() || undefined,
+          phone: newShop.phone.trim() || undefined,
+          branch: userBranch || 'Kota Kinabalu',
+          type: 'retail',
+          status: 'active',
+          isActive: true,
         })
       });
-      
+
+      const data = await response.json().catch(() => ({}));
+
       if (response.ok) {
+        addToast('Kedai berjaya didaftarkan', 'success');
         setShowRegisterModal(false);
         setNewShop({ name: '', address: '', phone: '' });
         // Segar semula senarai pelanggan
         window.location.reload();
+      } else {
+        const message = data?.error || data?.details?.[0] || 'Gagal mendaftarkan kedai';
+        addToast(message, 'error');
       }
     } catch (error) {
       console.error('Failed to register shop:', error);
+      addToast('Ralat sambungan. Cuba semula.', 'error');
     }
   };
 

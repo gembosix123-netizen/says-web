@@ -20,7 +20,7 @@
  */
 
 import * as admin from 'firebase-admin';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import * as fs from 'fs';
 import * as path from 'path';
 

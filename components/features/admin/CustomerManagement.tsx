@@ -1,29 +1,31 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Store, Plus, Save, Trash2, Search, Edit, MapPin } from 'lucide-react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { createCustomerSchema, type CreateCustomerInput } from '@/lib/validations';
+import { useToast } from '@/components/ui/Toast';
 
 interface Customer {
   id: string;
   name: string;
   phone: string;
   address: string;
+  branch?: string;
   location?: string;
 }
 
+const BRANCHES = ['Kota Kinabalu', 'Kinabatangan', 'HQ'];
+
 export default function CustomerManagement() {
+  const { addToast } = useToast();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filter, setFilter] = useState('');
   const [isEditing, setIsEditing] = useState<Customer | null>(null);
-  const [form, setForm] = useState({ name: '', phone: '', address: '' });
+  const [form, setForm] = useState({ name: '', phone: '', address: '', branch: 'Kota Kinabalu' });
 
   const fetchCustomers = async () => {
     try {
       const res = await fetch('/api/customers');
       const data = await res.json();
-      setCustomers(data);
+      setCustomers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to fetch customers', error);
     }
@@ -37,44 +39,72 @@ export default function CustomerManagement() {
     e.preventDefault();
     const url = '/api/customers';
     const method = isEditing ? 'PUT' : 'POST';
-    const body = isEditing 
-        ? { ...form, id: isEditing.id }
-        : { ...form, id: `c${Date.now()}` };
+
+    const body = isEditing
+      ? {
+          id: isEditing.id,
+          name: form.name.trim(),
+          phone: form.phone.trim() || undefined,
+          address: form.address.trim() || undefined,
+          branch: form.branch,
+        }
+      : {
+          name: form.name.trim(),
+          phone: form.phone.trim() || undefined,
+          address: form.address.trim() || undefined,
+          branch: form.branch,
+          type: 'retail',
+          status: 'active',
+          isActive: true,
+        };
 
     try {
-        const res = await fetch(url, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
 
-        if (res.ok) {
-            alert(isEditing ? 'Shop updated' : 'Shop created');
-            setIsEditing(null);
-            setForm({ name: '', phone: '', address: '' });
-            fetchCustomers();
-        } else {
-            alert('Failed to save shop');
-        }
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok) {
+        addToast(isEditing ? 'Pelanggan dikemaskini' : 'Pelanggan ditambah', 'success');
+        setIsEditing(null);
+        setForm({ name: '', phone: '', address: '', branch: 'Kota Kinabalu' });
+        fetchCustomers();
+      } else {
+        const message = data?.error || data?.details?.[0] || 'Gagal menyimpan';
+        addToast(message, 'error');
+      }
     } catch (error) {
-        console.error(error);
-        alert('Error saving shop');
+      console.error(error);
+      addToast('Ralat sambungan. Cuba semula.', 'error');
     }
   };
 
   const handleDelete = async (id: string) => {
-      if (!confirm('Delete this shop?')) return;
-      try {
-          await fetch(`/api/customers?id=${id}`, { method: 'DELETE' });
-          fetchCustomers();
-      } catch (error) {
-          console.error(error);
+    if (!confirm('Padam pelanggan ini?')) return;
+    try {
+      const res = await fetch(`/api/customers?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        addToast('Pelanggan dipadam', 'success');
+        fetchCustomers();
+      } else {
+        addToast('Gagal memadam', 'error');
       }
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const handleEdit = (customer: Customer) => {
-      setIsEditing(customer);
-      setForm({ name: customer.name, phone: customer.phone, address: customer.address || '' });
+    setIsEditing(customer);
+    setForm({
+      name: customer.name,
+      phone: customer.phone || '',
+      address: customer.address || '',
+      branch: customer.branch || 'Kota Kinabalu',
+    });
   };
 
   const filteredCustomers = customers.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()));
@@ -90,7 +120,7 @@ export default function CustomerManagement() {
           {isEditing ? 'Edit Shop' : 'Add New Shop'}
         </h2>
         
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <input
             placeholder="Shop Name"
             value={form.name}
@@ -103,7 +133,6 @@ export default function CustomerManagement() {
             value={form.phone}
             onChange={e => setForm({ ...form, phone: e.target.value })}
             className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
-            required
           />
           <input
             placeholder="Address"
@@ -111,6 +140,13 @@ export default function CustomerManagement() {
             onChange={e => setForm({ ...form, address: e.target.value })}
             className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
           />
+          <select
+            value={form.branch}
+            onChange={e => setForm({ ...form, branch: e.target.value })}
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg"
+          >
+            {BRANCHES.map(b => <option key={b}>{b}</option>)}
+          </select>
           <div className="flex gap-2">
             <button type="submit" className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2">
                 <Save size={18} /> {isEditing ? 'Update' : 'Save'}

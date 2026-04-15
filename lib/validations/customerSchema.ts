@@ -66,8 +66,9 @@ export const createCustomerSchema = z.object({
     .or(z.literal('')),
   branch: z
     .string()
-    .min(1, 'Cawangan wajib diisi')
-    .trim(),
+    .trim()
+    .optional()
+    .nullable(),
   type: z
     .enum(CUSTOMER_TYPES)
     .default('retail'),

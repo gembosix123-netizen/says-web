@@ -91,22 +91,11 @@ export async function POST(request: NextRequest) {
     const { data: newCustomer, error: createError } = await supabaseAdmin
       .from('customers')
       .insert({
+        id: `c${Date.now()}`,
         name: validatedData.name,
         phone: validatedData.phone || '',
-        email: validatedData.email || '',
         address: validatedData.address || '',
-        city: validatedData.city || '',
-        state: validatedData.state || '',
-        postal_code: validatedData.postalCode || '',
-        branch: validatedData.branch,
-        type: validatedData.type,
-        status: validatedData.status,
-        total_purchases: 0,
-        total_spent: 0,
-        credit_limit: validatedData.creditLimit,
-        credits: validatedData.credits,
-        notes: validatedData.notes || '',
-        is_active: validatedData.isActive,
+        is_active: validatedData.isActive ?? true,
         created_at: new Date().toISOString(),
       })
       .select()
@@ -114,7 +103,7 @@ export async function POST(request: NextRequest) {
 
     if (createError) {
       console.error('Error creating customer:', createError);
-      return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 });
+      return NextResponse.json({ error: createError.message || 'Failed to create customer' }, { status: 500 });
     }
 
     return NextResponse.json(

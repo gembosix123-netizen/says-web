@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { rateLimiters, getClientIp } from '@/lib/rateLimit';
 import { loginSchema } from '@/lib/validations';
