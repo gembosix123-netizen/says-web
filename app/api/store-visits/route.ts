@@ -1,6 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
+function normalizeAllowedStoreIds(rawAllowedStores: unknown): string[] {
+  if (!Array.isArray(rawAllowedStores)) return [];
+
+  return rawAllowedStores
+    .map((item) => {
+      if (typeof item === 'string' || typeof item === 'number') {
+        return String(item);
+      }
+
+      if (item && typeof item === 'object') {
+        const maybeId =
+          (item as { id?: unknown }).id ??
+          (item as { customer_id?: unknown }).customer_id ??
+          (item as { value?: unknown }).value;
+
+        if (typeof maybeId === 'string' || typeof maybeId === 'number') {
+          return String(maybeId);
+        }
+      }
+
+      return null;
+    })
+    .filter((id): id is string => Boolean(id));
+}
+
 // Get current user from session cookie
 async function getCurrentUser(request: Request) {
   try {
@@ -94,10 +119,30 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { customer_id, gps_lat, gps_long, staff_name, staff_contact, visit_type } = body;
+    const normalizedCustomerId = typeof customer_id === 'string' ? customer_id.trim() : String(customer_id || '').trim();
 
     // Validate required fields
-    if (!customer_id) {
+    if (!normalizedCustomerId) {
       return NextResponse.json({ error: 'customer_id is required' }, { status: 400 });
+    }
+
+    // Validate selected customer exists and is active before creating visit.
+    const { data: customer, error: customerError } = await supabaseAdmin
+      .from('customers')
+      .select('id, branch, is_active')
+      .eq('id', normalizedCustomerId)
+      .maybeSingle();
+
+    if (customerError) {
+      console.error('[API store-visits POST] Customer lookup error:', customerError);
+      return NextResponse.json({ error: 'Failed to validate store record' }, { status: 500 });
+    }
+
+    if (!customer || customer.is_active === false) {
+      return NextResponse.json(
+        { error: 'Store record not synced. Please refresh store list or contact admin.' },
+        { status: 409 }
+      );
     }
 
     // For merchandisers, check if they're allowed to visit this store
@@ -108,15 +153,15 @@ export async function POST(request: NextRequest) {
         .eq('id', currentUser.id)
         .single();
 
-      const allowedStores = userData?.allowed_stores || [];
-      if (allowedStores.length > 0 && !allowedStores.includes(customer_id)) {
+      const allowedStores = normalizeAllowedStoreIds(userData?.allowed_stores);
+      if (allowedStores.length > 0 && !allowedStores.includes(normalizedCustomerId)) {
         return NextResponse.json({ error: 'You are not allowed to visit this store' }, { status: 403 });
       }
     }
 
     const visitData = {
       merchandiser_id: currentUser.id,
-      customer_id,
+      customer_id: normalizedCustomerId,
       branch: currentUser.branch,
       check_in_time: new Date().toISOString(),
       gps_lat: gps_lat || null,
@@ -137,6 +182,13 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
+      if (error.code === '23503') {
+        return NextResponse.json(
+          { error: 'Store record not synced. Please refresh store list or contact admin.' },
+          { status: 409 }
+        );
+      }
+
       console.error('[API store-visits POST] Error:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
