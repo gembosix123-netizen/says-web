@@ -154,7 +154,7 @@ export default function CustomerManagement() {
             {isEditing && (
                 <button 
                     type="button" 
-                    onClick={() => { setIsEditing(null); setForm({ name: '', phone: '', address: '' }); }}
+                onClick={() => { setIsEditing(null); setForm({ name: '', phone: '', address: '', branch: 'Kota Kinabalu' }); }}
                     className="px-4 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700"
                 >
                     Cancel

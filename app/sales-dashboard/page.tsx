@@ -250,5 +250,6 @@ export default function SalesDashboardPage() {
         </Card>
       </div>
     </div>
+    </div>
   );
 }
