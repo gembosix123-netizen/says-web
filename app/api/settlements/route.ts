@@ -5,11 +5,15 @@ import { Settlement } from '@/types';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date');
+  const userId = searchParams.get('userId');
   
   let settlements = await db.settlements.getAll();
   
   if (date) {
     settlements = settlements.filter(s => s.date === date);
+  }
+  if (userId) {
+    settlements = settlements.filter(s => s.userId === userId);
   }
   
   return NextResponse.json(settlements);
@@ -18,7 +22,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const data = await request.json();
-    const { userId, userName, totalCash, totalCredit, totalSales, vanStock } = data;
+    const { userId, userName, totalCash, totalCredit, totalSales, vanStock, branch } = data;
 
     if (!userId) {
         return NextResponse.json({ error: 'User ID required' }, { status: 400 });
@@ -41,7 +45,9 @@ export async function POST(request: Request) {
         totalCredit,
         totalSales,
         vanStock,
-        status: 'Pending'
+        status: 'Submitted',
+        branch: branch || undefined,
+        submittedAt: new Date().toISOString()
     };
 
     await db.settlements.save(newSettlement);
@@ -54,25 +60,5 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-    try {
-        const data = await request.json();
-        const { id, status, verifiedBy } = data;
-
-        const settlement = await db.settlements.getById(id);
-        if (!settlement) {
-            return NextResponse.json({ error: 'Settlement not found' }, { status: 404 });
-        }
-
-        const updated = {
-            ...settlement,
-            status,
-            verifiedBy,
-            verifiedAt: new Date().toISOString()
-        };
-
-        await db.settlements.save(updated);
-        return NextResponse.json({ success: true, settlement: updated });
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to verify settlement' }, { status: 500 });
-    }
+    return NextResponse.json({ error: 'Manual verification removed. Settlement is stored as history automatically.' }, { status: 405 });
 }

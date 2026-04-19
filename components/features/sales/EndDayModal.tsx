@@ -11,6 +11,7 @@ export default function EndDayModal({ isOpen, onClose, userId, userName }: { isO
   const { t } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [vanStock, setVanStock] = useState<VanInventory | null>(null);
+  const [userBranch, setUserBranch] = useState<string>('');
 
   // Filter today's transactions for this user
   const today = new Date().toISOString().split('T')[0];
@@ -32,6 +33,17 @@ export default function EndDayModal({ isOpen, onClose, userId, userName }: { isO
       }
   }, [isOpen, userId]);
 
+  useEffect(() => {
+      try {
+          const raw = localStorage.getItem('user');
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          setUserBranch(parsed.branch || '');
+      } catch (error) {
+          console.error('Failed to read user branch:', error);
+      }
+  }, []);
+
   const handleSettlement = async () => {
       if (!confirm(t('confirm_end_day') || 'Are you sure you want to end your shift? This will submit your report for verification.')) return;
 
@@ -46,6 +58,7 @@ export default function EndDayModal({ isOpen, onClose, userId, userName }: { isO
                   totalCash,
                   totalCredit,
                   totalSales,
+                  branch: userBranch || undefined,
                   vanStock: vanStock ? Object.entries(vanStock.items).map(([id, qty]) => ({ productId: id, quantity: qty })) : []
               })
           });

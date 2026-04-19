@@ -31,8 +31,13 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
-
-      const responseData = await res.json();
+      const rawText = await res.text();
+      let responseData: any = {};
+      try {
+        responseData = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        responseData = { error: 'Server returned invalid response format' };
+      }
 
       if (res.ok) {
         // Store user info (but not sensitive tokens if using httpOnly cookies)
@@ -50,7 +55,7 @@ export default function Login() {
             router.push('/');
         }
       } else {
-        setError(responseData.error || 'Invalid credentials');
+        setError(responseData.error || `Login failed (HTTP ${res.status})`);
       }
     } catch (err) {
       console.error(err);

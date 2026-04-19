@@ -45,10 +45,20 @@ export async function GET(request: NextRequest) {
     }
 
     // Get all customers
-    const { data: customers, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('customers')
       .select('*')
       .eq('is_active', true);
+
+    if (branch) {
+      query = query.eq('branch', branch);
+    }
+
+    if (type) {
+      query = query.eq('type', type);
+    }
+
+    const { data: customers, error } = await query;
 
     if (error) throw error;
     return NextResponse.json(customers || []);

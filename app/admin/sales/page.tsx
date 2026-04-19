@@ -9,14 +9,20 @@ type BranchFilter = 'all' | 'Kota Kinabalu' | 'Kinabatangan';
 export default function AdminSalesPage() {
   const [sales, setSales] = useState<Transaction[]>([]);
   const [branch, setBranch] = useState<BranchFilter>('all');
+  const [date, setDate] = useState<string>('');
+  const [salesmanId, setSalesmanId] = useState<string>('all');
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const query = branch === 'all' ? '' : `?branch=${encodeURIComponent(branch)}`;
-      const res = await fetch(`/api/sales${query}`);
+      const params = new URLSearchParams();
+      if (branch !== 'all') params.set('branch', branch);
+      if (date) params.set('date', date);
+      if (salesmanId !== 'all') params.set('salesman_id', salesmanId);
+      const query = params.toString();
+      const res = await fetch(`/api/sales${query ? `?${query}` : ''}`);
       const data = await res.json();
       setSales(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -25,7 +31,7 @@ export default function AdminSalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [branch, addToast]);
+  }, [branch, date, salesmanId, addToast]);
 
   useEffect(() => {
     load();
@@ -42,16 +48,56 @@ export default function AdminSalesPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-white">Admin — Sales Management</h1>
+      <h1 className="text-2xl font-bold text-white">Admin — Daily Sales User Report</h1>
+
+      <div className="p-4 rounded bg-slate-900 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Filter by Branch</label>
+          <select value={branch} onChange={(e) => setBranch(e.target.value as BranchFilter)} className="w-full p-2 bg-slate-800 text-white rounded">
+            <option value="all">All Branches</option>
+            <option value="Kota Kinabalu">Kota Kinabalu</option>
+            <option value="Kinabatangan">Kinabatangan</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Filter by User</label>
+          <select value={salesmanId} onChange={(e) => setSalesmanId(e.target.value)} className="w-full p-2 bg-slate-800 text-white rounded">
+            <option value="all">All Users</option>
+            {Array.from(new Set(sales.filter((item) => item.salesmanId).map((item) => `${item.salesmanId}::${item.salesmanName || item.salesmanId}`))).map((entry) => {
+              const [id, name] = entry.split('::');
+              return (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Filter by Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full p-2 bg-slate-800 text-white rounded"
+          />
+        </div>
+        <button onClick={load} className="px-3 py-2 bg-slate-700 rounded h-10">Refresh</button>
+      </div>
 
       <div className="p-4 rounded bg-slate-900 flex gap-4 items-center">
         <label className="text-white">Filter by Branch:</label>
-        <select value={branch} onChange={(e) => setBranch(e.target.value as BranchFilter)} className="p-2 bg-slate-800 text-white rounded">
-          <option value="all">All Branches</option>
-          <option value="Kota Kinabalu">Kota Kinabalu</option>
-          <option value="Kinabatangan">Kinabatangan</option>
-        </select>
-        <button onClick={load} className="ml-auto px-3 py-2 bg-slate-700 rounded">Refresh</button>
+        <span className="text-slate-300">{branch === 'all' ? 'All Branches' : branch}</span>
+        <span className="text-slate-500">|</span>
+        <label className="text-white">Date:</label>
+        <span className="text-slate-300">{date || 'All Dates'}</span>
+        <span className="text-slate-500">|</span>
+        <label className="text-white">User:</label>
+        <span className="text-slate-300">
+          {salesmanId === 'all'
+            ? 'All Users'
+            : (sales.find((item) => item.salesmanId === salesmanId)?.salesmanName || salesmanId)}
+        </span>
       </div>
 
       <div className="p-4 rounded bg-slate-900">
@@ -69,6 +115,7 @@ export default function AdminSalesPage() {
                   <th className="text-left px-2 py-2">Amount</th>
                   <th className="text-left px-2 py-2">Customer</th>
                   <th className="text-left px-2 py-2">Branch</th>
+                  <th className="text-left px-2 py-2">Sales User</th>
                   <th className="text-left px-2 py-2">Date</th>
                   <th className="text-left px-2 py-2">Actions</th>
                 </tr>
@@ -80,6 +127,7 @@ export default function AdminSalesPage() {
                     <td className="px-2 py-2 text-white">RM {Number(s.total || 0).toFixed(2)}</td>
                     <td className="px-2 py-2 text-slate-300">{s.customer?.name || '-'}</td>
                     <td className="px-2 py-2 text-slate-300">{s.branch}</td>
+                    <td className="px-2 py-2 text-slate-300">{s.salesmanName || s.salesmanId || '-'}</td>
                     <td className="px-2 py-2 text-slate-300">{new Date(s.createdAt || '').toLocaleDateString()}</td>
                     <td className="px-2 py-2">
                       <button

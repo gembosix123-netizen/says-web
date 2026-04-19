@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { Settlement } from '@/types';
 
 interface DailyStats {
   totalSales: number;
@@ -36,11 +37,45 @@ export default function DailyReportPage() {
   const router = useRouter();
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [stats, setStats] = useState<DailyStats | null>(null);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [currentUserName, setCurrentUserName] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchDailyStats();
   }, [date]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return;
+      const user = JSON.parse(raw);
+      setCurrentUserId(user.id || '');
+      setCurrentUserName(user.name || user.username || '');
+    } catch (error) {
+      console.error('Failed to read user profile:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserId || !date) return;
+    fetchSettlementHistory();
+  }, [currentUserId, date]);
+
+  const fetchSettlementHistory = async () => {
+    try {
+      const params = new URLSearchParams();
+      params.set('date', date);
+      params.set('userId', currentUserId);
+      const response = await fetch(`/api/settlements?${params.toString()}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      setSettlements(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to fetch settlement history:', error);
+    }
+  };
 
   const fetchDailyStats = async () => {
     setLoading(true);
@@ -149,6 +184,8 @@ export default function DailyReportPage() {
 
   // Get max revenue for chart scaling
   const maxHourRevenue = stats ? Math.max(...stats.salesByHour.map(h => h.revenue), 1) : 1;
+  const totalSubmittedCash = settlements.reduce((sum, item) => sum + (item.totalCash || 0), 0);
+  const totalSubmittedCredit = settlements.reduce((sum, item) => sum + (item.totalCredit || 0), 0);
 
   return (
     <div className="min-h-screen bg-slate-950 p-6">
@@ -319,6 +356,74 @@ export default function DailyReportPage() {
                   jumlah hasil <span className="text-emerald-400 font-bold">{formatCurrency(stats.totalRevenue)}</span>. 
                   Purata setiap transaksi adalah <span className="text-purple-400 font-bold">{formatCurrency(stats.avgTransaction)}</span>.
                 </p>
+              </div>
+            </Card>
+
+            <Card className="p-6 border-cyan-500/20 bg-cyan-500/5">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Daily End Report (Sales User)</h3>
+                  <p className="text-sm text-white/60">
+                    User: {currentUserName || 'N/A'} | Tarikh: {date}
+                  </p>
+                </div>
+                <Button variant="secondary" size="sm" onClick={() => window.print()}>
+                  Print / PDF
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <div className="p-3 rounded-lg border border-white/10 bg-slate-900/50">
+                  <p className="text-xs text-white/60">Rekod Expenses/Settlement</p>
+                  <p className="text-xl font-bold text-white">{settlements.length}</p>
+                </div>
+                <div className="p-3 rounded-lg border border-white/10 bg-slate-900/50">
+                  <p className="text-xs text-white/60">Cash Submitted</p>
+                  <p className="text-xl font-bold text-emerald-400">{formatCurrency(totalSubmittedCash)}</p>
+                </div>
+                <div className="p-3 rounded-lg border border-white/10 bg-slate-900/50">
+                  <p className="text-xs text-white/60">Credit Submitted</p>
+                  <p className="text-xl font-bold text-blue-400">{formatCurrency(totalSubmittedCredit)}</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-white/10">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-900/80 border-b border-white/10">
+                    <tr>
+                      <th className="text-left px-3 py-2 text-white/70">Description</th>
+                      <th className="text-left px-3 py-2 text-white/70">Status</th>
+                      <th className="text-right px-3 py-2 text-white/70">Amount (RM)</th>
+                      <th className="text-left px-3 py-2 text-white/70">Submitted At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settlements.length === 0 ? (
+                      <tr>
+                        <td className="px-3 py-4 text-white/50" colSpan={4}>
+                          Tiada rekod settlement/expenses pada tarikh ini.
+                        </td>
+                      </tr>
+                    ) : (
+                      settlements.map((item) => (
+                        <tr key={item.id} className="border-b border-white/5">
+                          <td className="px-3 py-2 text-white">End day expenses submission</td>
+                          <td className="px-3 py-2">
+                            <span className="px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-300">
+                              {item.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right text-white">
+                            {formatCurrency((item.totalCash || 0) + (item.totalCredit || 0))}
+                          </td>
+                          <td className="px-3 py-2 text-white/70">
+                            {new Date(item.submittedAt || item.date).toLocaleString('ms-MY')}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </Card>
           </>

@@ -4,13 +4,15 @@ import { Settlement } from '@/types';
 import { useLanguage } from '@/context/LanguageContext';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
-import { CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronUp } from '@/components/Icons';
+import { Clock, ChevronDown, ChevronUp } from '@/components/Icons';
 
 export default function SettlementDashboard() {
   const { t } = useLanguage();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [dateFilter, setDateFilter] = useState('');
+  const [userFilter, setUserFilter] = useState('all');
 
   const fetchSettlements = async () => {
     setLoading(true);
@@ -29,47 +31,68 @@ export default function SettlementDashboard() {
     fetchSettlements();
   }, []);
 
-  const handleVerify = async (id: string) => {
-      if (!confirm('Confirm verify cash collected?')) return;
-      
-      try {
-          const res = await fetch('/api/settlements', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id, status: 'Verified', verifiedBy: 'Admin' })
-          });
-          
-          if (res.ok) {
-              fetchSettlements();
-          }
-      } catch (e) {
-          console.error(e);
-          alert('Failed to verify');
-      }
-  };
+  const uniqueUsers = Array.from(new Set(settlements.map((s) => `${s.userId}::${s.userName}`)))
+    .map((entry) => {
+      const [id, name] = entry.split('::');
+      return { id, name };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const filteredSettlements = settlements.filter((s) => {
+    const dateMatch = dateFilter ? s.date === dateFilter : true;
+    const userMatch = userFilter === 'all' ? true : s.userId === userFilter;
+    return dateMatch && userMatch;
+  });
 
   return (
     <div className="space-y-6">
         <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <CheckCircle className="text-green-500" />
-                Settlement Verification
+                <Clock className="text-blue-400" />
+                Expenses History
             </h2>
             <Button onClick={fetchSettlements} variant="outline" className="text-slate-400 border-slate-700">
                 Refresh
             </Button>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 bg-slate-900/40 border border-slate-800 rounded-xl">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Filter User</label>
+            <select
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
+            >
+              <option value="all">All Users</option>
+              {uniqueUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Filter Date</label>
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
+            />
+          </div>
+        </div>
+
         <div className="space-y-4">
-            {settlements.map((s) => (
+            {filteredSettlements.map((s) => (
                 <div key={s.id} className="bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-xl overflow-hidden">
                     <div 
                         className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition-colors"
                         onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
                     >
                         <div className="flex items-center gap-4">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${s.status === 'Verified' ? 'bg-green-900/20 text-green-500' : 'bg-yellow-900/20 text-yellow-500'}`}>
-                                {s.status === 'Verified' ? <CheckCircle size={20} /> : <Clock size={20} />}
+                            <div className="w-10 h-10 rounded-full flex items-center justify-center bg-blue-900/20 text-blue-400">
+                                <Clock size={20} />
                             </div>
                             <div>
                                 <h3 className="font-bold text-white">{s.userName}</h3>
@@ -83,7 +106,7 @@ export default function SettlementDashboard() {
                             </div>
                              <div>
                                 <p className="text-xs text-slate-500">Status</p>
-                                <span className={`text-xs font-bold px-2 py-1 rounded ${s.status === 'Verified' ? 'bg-green-900/20 text-green-500' : 'bg-yellow-900/20 text-yellow-500'}`}>
+                                <span className="text-xs font-bold px-2 py-1 rounded bg-blue-900/20 text-blue-300">
                                     {s.status}
                                 </span>
                             </div>
@@ -108,28 +131,15 @@ export default function SettlementDashboard() {
                                 </div>
                             </div>
 
-                            {s.status === 'Pending' && (
-                                <div className="flex justify-end pt-2">
-                                    <Button 
-                                        onClick={() => handleVerify(s.id)}
-                                        className="bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-900/20"
-                                    >
-                                        <CheckCircle size={18} className="mr-2" /> Verify Cash Collection
-                                    </Button>
-                                </div>
-                            )}
-                            
-                            {s.status === 'Verified' && (
-                                <p className="text-xs text-slate-500 text-right italic">
-                                    Verified by {s.verifiedBy} at {new Date(s.verifiedAt!).toLocaleString()}
-                                </p>
-                            )}
+                            <p className="text-xs text-slate-500 text-right italic">
+                              Submitted at {new Date(s.submittedAt || s.date).toLocaleString()}
+                            </p>
                         </div>
                     )}
                 </div>
             ))}
             
-            {settlements.length === 0 && (
+            {filteredSettlements.length === 0 && (
                 <div className="text-center py-12 text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800">
                     <p>No settlement reports found.</p>
                 </div>

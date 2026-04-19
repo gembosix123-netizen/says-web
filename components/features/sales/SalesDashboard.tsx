@@ -40,6 +40,7 @@ export default function SalesDashboard() {
   const [storesLoading, setStoresLoading] = useState(true);
   const [syncError, setSyncError] = useState('');
   const [updating, setUpdating] = useState<{ id: string; field: 'paymentStatus' | 'deliveryStatus' } | null>(null);
+  const [areaFilter, setAreaFilter] = useState<string>('all');
 
   useEffect(() => {
     // Ambil pengguna semasa
@@ -206,7 +207,28 @@ export default function SalesDashboard() {
     }
   };
 
-  const filteredCustomers = customers.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
+  const getCustomerArea = (customer: any) => {
+    if (customer.city) return String(customer.city);
+    if (customer.state) return String(customer.state);
+    if (customer.branch) return String(customer.branch);
+    if (customer.address && String(customer.address).includes(',')) {
+      const chunks = String(customer.address).split(',').map((part) => part.trim()).filter(Boolean);
+      if (chunks.length > 1) return chunks[chunks.length - 2] || chunks[chunks.length - 1];
+    }
+    return 'Lain-lain';
+  };
+
+  const areaOptions = useMemo(() => {
+    return Array.from(new Set(customers.map((c: any) => getCustomerArea(c))))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+
+  const filteredCustomers = customers.filter((c: any) => {
+    const searchMatch = c.name.toLowerCase().includes(search.toLowerCase());
+    const areaMatch = areaFilter === 'all' ? true : getCustomerArea(c) === areaFilter;
+    return searchMatch && areaMatch;
+  });
 
   const handleShopSelect = (customer: any) => {
     setSelectedCustomer(customer);
@@ -271,6 +293,20 @@ export default function SalesDashboard() {
               className="w-full bg-white/5 backdrop-blur-md border border-white/10 rounded-xl pl-10 h-12 text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500/50 focus:border-transparent outline-none transition-all"
             />
           </div>
+          <div>
+            <select
+              value={areaFilter}
+              onChange={(e) => setAreaFilter(e.target.value)}
+              className="w-full bg-white/5 backdrop-blur-md border border-white/10 rounded-xl h-12 px-4 text-white focus:ring-2 focus:ring-blue-500/50 focus:border-transparent outline-none transition-all"
+            >
+              <option value="all">Semua Area</option>
+              {areaOptions.map((area) => (
+                <option key={area} value={area}>
+                  {area}
+                </option>
+              ))}
+            </select>
+          </div>
           
           <button 
             className="w-full py-3 bg-white/5 border border-dashed border-white/20 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 hover:border-white/40 flex items-center justify-center gap-2 transition-all"
@@ -300,6 +336,7 @@ export default function SalesDashboard() {
                         <div>
                             <h3 className="font-bold text-white text-lg group-hover:text-blue-400 transition-colors">{customer.name}</h3>
                             <p className="text-sm text-slate-400 truncate">{customer.address || 'Tiada alamat'}</p>
+                            <p className="text-xs text-cyan-300 mt-1">Area: {getCustomerArea(customer)}</p>
                         </div>
                     </div>
                   </button>

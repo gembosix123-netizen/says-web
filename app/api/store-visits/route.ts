@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to validate store record' }, { status: 500 });
     }
 
-    if (!customer || customer.is_active === false) {
+    if (!customer) {
       return NextResponse.json(
         { error: 'Store record not synced. Please refresh store list or contact admin.' },
         { status: 409 }
@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
     const visitData = {
       merchandiser_id: currentUser.id,
       customer_id: normalizedCustomerId,
-      branch: currentUser.branch,
+      branch: customer.branch || currentUser.branch,
       check_in_time: new Date().toISOString(),
       gps_lat: gps_lat || null,
       gps_long: gps_long || null,

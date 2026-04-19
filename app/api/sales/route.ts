@@ -38,6 +38,8 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     let branch = searchParams.get('branch');
+    const date = searchParams.get('date');
+    const salesmanIdFilter = searchParams.get('salesman_id');
 
     // Branch access control
     // If Admin, only allow their own branch
@@ -80,7 +82,7 @@ export async function GET(request: NextRequest) {
       salesAll = [];
     }
 
-    const transactions = salesAll.map((sale) => ({
+    let transactions = salesAll.map((sale) => ({
       id: sale.id,
       invoice: sale.invoice,
       total: parseFloat(sale.total_amount ?? sale.amount ?? 0),
@@ -92,6 +94,21 @@ export async function GET(request: NextRequest) {
       salesmanId: sale.salesman_id || null,
       payment: { method: sale.payment_method || 'cash', amount: parseFloat(sale.total_amount ?? sale.amount ?? 0) }
     }));
+
+    if (currentUser.role === 'Sales') {
+      transactions = transactions.filter((sale) => sale.salesmanId === currentUser.id);
+    }
+
+    if (salesmanIdFilter) {
+      transactions = transactions.filter((sale) => sale.salesmanId === salesmanIdFilter);
+    }
+
+    if (date) {
+      transactions = transactions.filter((sale) => {
+        if (!sale.createdAt) return false;
+        return String(sale.createdAt).slice(0, 10) === date;
+      });
+    }
 
     return NextResponse.json(transactions);
   } catch (error) {

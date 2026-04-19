@@ -95,6 +95,7 @@ export interface Transaction {
   exchangeItems?: { productId: string; quantity: number; reason: string }[];
   assignedShopId?: string;
   salesmanId?: string;
+  salesmanName?: string;
   createdAt?: string;
   updatedAt?: string;
   branch?: string;
@@ -128,9 +129,9 @@ export interface Settlement {
   totalCredit: number;
   totalSales: number;
   vanStock: { productId: string; quantity: number }[];
-  status: 'Pending' | 'Verified';
-  verifiedBy?: string;
-  verifiedAt?: string;
+  status: 'Submitted' | 'Processed';
+  branch?: string;
+  submittedAt?: string;
 }
 
 export interface ApiResponse<T> {

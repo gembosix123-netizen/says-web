@@ -88,7 +88,7 @@ export function SalesProvider({ children, initialRole, initialBranch }: { childr
     setLoading(true);
     try {
       const [custRes, prodRes, ordRes, transRes] = await Promise.all([
-        fetch('/api/customers'),
+        fetch(userBranch ? `/api/customers?branch=${encodeURIComponent(userBranch)}` : '/api/customers'),
         fetch('/api/products'),
         fetch('/api/orders'),
         fetch('/api/sales')
@@ -127,7 +127,7 @@ export function SalesProvider({ children, initialRole, initialBranch }: { childr
           .catch(console.error);
     }, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [userBranch]);
 
   const refreshTransactions = () => {
       fetch('/api/sales')
