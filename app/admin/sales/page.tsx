@@ -9,6 +9,8 @@ type BranchFilter = 'all' | 'Kota Kinabalu' | 'Kinabatangan';
 export default function AdminSalesPage() {
   const [sales, setSales] = useState<Transaction[]>([]);
   const [branch, setBranch] = useState<BranchFilter>('all');
+  const [date, setDate] = useState('');
+  const [salesmanId, setSalesmanId] = useState('all');
   const [deleteReason, setDeleteReason] = useState('');
   const [deleteReferenceNo, setDeleteReferenceNo] = useState('');
   const [loading, setLoading] = useState(false);

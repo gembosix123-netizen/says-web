@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { createUserSchema } from '@/lib/validations';
 import { buildAuditChanges, logAuditEvent } from '@/lib/audit';
 import { normalizeRole } from '@/lib/roles';

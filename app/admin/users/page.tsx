@@ -3,7 +3,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useLanguage } from '@/context/LanguageContext';
-import { Plus, Trash2, Key, AlertCircle } from 'lucide-react';
+import WorkflowControlPanel from '@/components/features/admin/WorkflowControlPanel';
+import { Plus, Trash2, Key, AlertCircle, Users, ShieldCheck, UserPlus } from 'lucide-react';
 
 type User = { id: string; username: string; role: string; name: string; branch?: string; created_at?: string };
 

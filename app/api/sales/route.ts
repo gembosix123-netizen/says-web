@@ -202,6 +202,11 @@ export async function GET(request: NextRequest) {
     let branch: string | null = searchParams.get('branch');
     const startDate: string | null = searchParams.get('startDate');
     const endDate: string | null = searchParams.get('endDate');
+    const date: string | null = searchParams.get('date');
+    const salesmanIdFilter =
+      role === 'Sales'
+        ? null
+        : searchParams.get('salesmanId') || searchParams.get('userId');
 
     if (!supabaseAdmin) {
       // Fallback to local db so analytics pages still render when Supabase is temporarily unavailable
@@ -361,7 +366,7 @@ export async function GET(request: NextRequest) {
       }, {});
     }
 
-    const transactions = salesAll.map((sale) => {
+    let transactions = salesAll.map((sale) => {
       const items = (itemsBySaleId[sale.id] && itemsBySaleId[sale.id].length > 0)
         ? itemsBySaleId[sale.id]
         : normalizeItemsFromSaleRow(sale as Record<string, unknown>);

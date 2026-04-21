@@ -54,10 +54,9 @@ export interface Product {
   unit: string;
   stock: number;
   current_stock?: number;
-  branch?: string;
   sku?: string;
   code?: string;
-  branch?: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
+  branch?: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ' | string;
 }
 
 export interface Customer {

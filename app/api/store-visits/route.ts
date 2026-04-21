@@ -14,6 +14,27 @@ function isCustomerFkError(error: unknown): boolean {
   return message.includes('store_visits_customer_id_fkey') || message.includes('foreign key');
 }
 
+/** Supabase/json may return uuid[] JSON, JSON string, or comma-separated ids */
+function normalizeAllowedStoreIds(raw: unknown): string[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    return raw.map((id) => String(id).trim()).filter(Boolean);
+  }
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) return [];
+    try {
+      const parsed = JSON.parse(s) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((id) => String(id).trim()).filter(Boolean);
+      }
+    } catch {
+      return s.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
 type StoreVisitRow = Record<string, any>;
 
 async function resolveCanonicalCustomerId(customerId: string, branch?: string | null): Promise<string | null> {

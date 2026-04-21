@@ -197,14 +197,6 @@ export async function GET(request: NextRequest) {
     products = activeQuery.data;
     error = activeQuery.error;
 
-    if (session.role !== 'Main Admin') {
-      query = query.eq('branch', session.branch);
-    } else if (branchParam && branchParam !== 'all') {
-      query = query.eq('branch', branchParam);
-    }
-
-    const { data: products, error } = await query;
-
     if (error) {
       let activeCamelQueryBuilder = supabaseAdmin
         .from('products')
@@ -290,9 +282,6 @@ export async function POST(request: NextRequest) {
     }
 
     const validatedData = validation.data;
-    const branchToSet = session.role === 'Main Admin'
-      ? body.branch || session.branch
-      : session.branch;
 
     // Create product with schema fallback (supports `current_stock`/`stock` and `code`/`sku`).
     const createPayloadVariants = [
@@ -429,10 +418,6 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    if (session.role !== 'Admin' && session.role !== 'Main Admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
-
     const needsMainAdminPassword =
       body.name !== undefined ||
       body.sku !== undefined ||
@@ -444,7 +429,7 @@ export async function PUT(request: NextRequest) {
       body.is_active !== undefined;
 
     if (needsMainAdminPassword) {
-      if (session.role !== 'Main Admin') {
+      if (role !== 'Main Admin') {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       }
 
@@ -455,7 +440,7 @@ export async function PUT(request: NextRequest) {
       const { data: user, error: userError } = await supabaseAdmin
         .from('users')
         .select('password')
-        .eq('id', session.id)
+        .eq('id', currentUser.id)
         .single();
 
       if (userError || !user || !user.password) {

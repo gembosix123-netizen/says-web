@@ -44,7 +44,6 @@ export default function CustomerManagement() {
   const [userBranch, setUserBranch] = useState('');
   const [userRole, setUserRole] = useState('');
   const [form, setForm] = useState({ name: '', phone: '', address: '', area: '', branch: '' });
-  const { addToast } = useToast();
   const { t } = useLanguage();
 
   const branchOptions = userRole === 'Main Admin' ? ALL_BRANCH_OPTIONS : userBranch ? [userBranch] : ALL_BRANCH_OPTIONS;

@@ -36,6 +36,7 @@ export default function AdminProductsPage() {
   const [stockInQty, setStockInQty] = useState('');
   const [stockInNotes, setStockInNotes] = useState('');
   const [stockInSaving, setStockInSaving] = useState(false);
+  const [, setUserRole] = useState('');
   const { addToast } = useToast();
 
   const load = useCallback(async () => {
@@ -283,23 +284,6 @@ export default function AdminProductsPage() {
           + Cipta Produk
         </button>
       </div>
-      {isEditing && (
-        <div className="p-4 rounded bg-slate-900">
-          <h3 className="text-white mb-2">Edit Product</h3>
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-            <input placeholder="Nama Produk" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="p-2 bg-slate-800 text-white rounded" />
-            <input placeholder="SKU / Kod" value={editForm.sku} onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })} className="p-2 bg-slate-800 text-white rounded" />
-            <input placeholder="Harga (RM)" type="number" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: parseFloat(e.target.value || '0') })} className="p-2 bg-slate-800 text-white rounded" />
-            <input placeholder="Unit (cth: pkt, kg)" value={editForm.unit} onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })} className="p-2 bg-slate-800 text-white rounded" />
-            <input placeholder="Current Stock" type="number" value={editForm.current_stock} onChange={(e) => setEditForm({ ...editForm, current_stock: parseInt(e.target.value || '0', 10) })} className="p-2 bg-slate-800 text-white rounded" />
-            <input placeholder="Main Admin Password" type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="p-2 bg-slate-800 text-white rounded" />
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button onClick={saveEdit} className="px-3 py-2 bg-blue-600 rounded text-white">Save</button>
-            <button onClick={cancelEdit} className="px-3 py-2 bg-slate-700 rounded text-white">Cancel</button>
-          </div>
-        </div>
-      )}
 
       {/* Products Table */}
       <div className="p-5 rounded-xl bg-slate-900 border border-slate-700 space-y-3">

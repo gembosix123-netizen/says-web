@@ -81,7 +81,6 @@ export class DB<T extends { id: string }> {
           { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as unknown as T,
           { id: "u3", username: "allan", password: "Allan123", role : "Sales", name: "Allan"} as unknown as T
         ];
-        initialData = defaultUsers as unknown as T[];
       }
 
       if (initialData.length > 0) {
@@ -149,7 +148,21 @@ export class DB<T extends { id: string }> {
   }
 }
 
-import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory, Settlement, CommissionPayout, Store, MonthlyReportHistory } from '@/types';
+import {
+  Customer,
+  Product,
+  User,
+  Order,
+  Transaction,
+  StockAudit,
+  VanInventory,
+  Settlement,
+  CommissionPayout,
+  CommissionPolicy,
+  DailyReport,
+  Store,
+  MonthlyReportHistory,
+} from '@/types';
 
 // We need to export instances. 
 // Note: methods are now async, so we need to update usage in API routes.
@@ -164,5 +177,7 @@ export const db = {
   vanInventories: new DB<VanInventory>('van_inventories.json'),
   settlements: new DB<Settlement>('settlements.json'),
   payouts: new DB<CommissionPayout>('payouts.json'),
+  commissionPolicies: new DB<CommissionPolicy>('commission_policies.json'),
+  dailyReports: new DB<DailyReport>('daily_reports.json'),
   monthlyReportHistory: new DB<MonthlyReportHistory>('monthly_report_history.json'),
 };
