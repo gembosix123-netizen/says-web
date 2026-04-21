@@ -37,9 +37,12 @@ export default function StockAuditList() {
                 fetch('/api/customers'),
                 fetch('/api/products')
             ]);
-            setAudits(await auditRes.json());
-            setCustomers(await custRes.json());
-            setProducts(await prodRes.json());
+            const auditsData = await auditRes.json().catch(() => []);
+            const customersData = await custRes.json().catch(() => []);
+            const productsData = await prodRes.json().catch(() => []);
+            setAudits(Array.isArray(auditsData) ? auditsData : []);
+            setCustomers(Array.isArray(customersData) ? customersData : []);
+            setProducts(Array.isArray(productsData) ? productsData : []);
         } catch (e) {
             console.error("Failed to fetch data", e);
         } finally {

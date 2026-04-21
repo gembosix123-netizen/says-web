@@ -2,7 +2,7 @@ export default function ThemeScript() {
   const themeScript = `
     (function() {
       try {
-        const theme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        const theme = localStorage.getItem('theme') || 'dark';
         if (theme === 'light') {
           document.documentElement.classList.remove('dark');
         } else {

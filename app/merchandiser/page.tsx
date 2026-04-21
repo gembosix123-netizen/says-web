@@ -11,21 +11,53 @@ export default function MerchandiserPage() {
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    // Get session from cookie
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    
-    if (sessionCookie) {
+    let mounted = true;
+
+    const fetchSession = async () => {
       try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
-        setSessionData(data);
+        const response = await fetch('/api/auth/me', { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+
+        if (mounted && response.ok && payload) {
+          setSessionData({
+            id: payload.id,
+            role: payload.role,
+            branch: payload.branch,
+            name: payload.name || payload.username
+          });
+          return;
+        }
       } catch (e) {
-        console.error('Failed to parse session:', e);
+        console.error('Failed to fetch authenticated session:', e);
       }
-    }
-    setLoading(false);
+
+      const localUser = localStorage.getItem('user');
+      if (!mounted || !localUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(localUser);
+        setSessionData(parsed);
+      } catch (e) {
+        console.error('Failed to parse local user data:', e);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchSession().finally(() => {
+      if (mounted) {
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   if (loading) {

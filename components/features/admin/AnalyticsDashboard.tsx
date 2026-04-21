@@ -1,8 +1,9 @@
 'use client';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Transaction, Product, User, StockAudit, Customer } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { useLanguage } from '@/context/LanguageContext';
+import DateRangePicker, { DateRange } from '@/components/ui/DateRangePicker';
 
 interface AnalyticsDashboardProps {
   transactions: Transaction[];
@@ -10,79 +11,207 @@ interface AnalyticsDashboardProps {
   salesUsers: User[];
   stockAudits: StockAudit[];
   customers: Customer[];
+    branchScope?: string;
 }
 
-export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
-  const { t } = useLanguage();
-  const [selectedBranch, setSelectedBranch] = useState('all');
-  const [datePreset, setDatePreset] = useState<'today' | '7days' | '30days' | 'thisMonth' | 'allTime' | 'custom'>('allTime');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
+interface LowStockAlert {
+    productId: string;
+    productName: string;
+    physicalStock: number;
+    customerName: string;
+    auditDate: string;
+}
 
-  // Agent mapping for role-based access
-  const agentMapping: { [key: string]: string } = {
-    "u2": "Kota Kinabalu",
-    "u3": "Kinabatangan"
-  };
+interface ExchangeReturn {
+  id: string;
+  product_name: string;
+  quantity: number;
+  type: 'exchange' | 'return' | 'disposal';
+  reason: string;
+  reason_details?: string;
+  status: string;
+  created_at: string;
+}
+
+const AGENT_BRANCH_MAP: Record<string, string> = {
+    u2: 'Kota Kinabalu',
+    u3: 'Kinabatangan'
+};
+
+export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers, branchScope = 'all' }: AnalyticsDashboardProps) {
+    const { t } = useLanguage();
+    const [selectedBranch, setSelectedBranch] = useState('all');
+    const [dateRange, setDateRange] = useState<DateRange>({ start: '', end: '' });
+    const [exchangeReturns, setExchangeReturns] = useState<ExchangeReturn[]>([]);
+    const [liveTransactions, setLiveTransactions] = useState<Transaction[]>(transactions || []);
+    const [liveStockAudits, setLiveStockAudits] = useState<StockAudit[]>(stockAudits || []);
+
+    const formatDateKey = (value: string | Date) => {
+        const dateValue = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(dateValue.getTime())) return '';
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).format(dateValue);
+    };
+
+    const getTransactionDateKey = (transaction: Transaction) => {
+        const transactionRecord = transaction as Transaction & {
+            created_at?: string;
+            transactionDate?: string;
+        };
+
+        // Prioritise transactionDate (= transaction_date in DB, i.e. the real business date).
+        // Fall back to createdAt / created_at only when no business date is recorded.
+        // This ensures backdated imports (created_at = import date, transaction_date = real date)
+        // are grouped under their actual month, not under the import month.
+        const rawDate = transactionRecord.transactionDate || transactionRecord.createdAt || transactionRecord.created_at || '';
+        if (!rawDate) return '';
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+            return rawDate;
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}T/.test(rawDate)) {
+            return rawDate.slice(0, 10);
+        }
+
+        return formatDateKey(rawDate);
+    };
+
+    const getEffectiveBranch = () => {
+        if (selectedBranch !== 'all') return selectedBranch;
+        return 'all';
+    };
+
+  useEffect(() => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const firstDay = `${yyyy}-${mm}-01`;
+    const today = `${yyyy}-${mm}-${dd}`;
+    setDateRange({ start: firstDay, end: today });
+  }, []);
+
+    useEffect(() => {
+        setLiveTransactions(transactions || []);
+    }, [transactions]);
+
+    useEffect(() => {
+        setLiveStockAudits(stockAudits || []);
+    }, [stockAudits]);
+
+    useEffect(() => {
+        let isCancelled = false;
+
+        const fetchRealtimeData = async () => {
+            try {
+                const branchParam = branchScope !== 'all' ? branchScope : getEffectiveBranch();
+                const salesParams = new URLSearchParams();
+
+                if (branchParam !== 'all') {
+                    salesParams.set('branch', branchParam);
+                }
+
+                const [salesResponse, auditsResponse] = await Promise.all([
+                    fetch(`/api/sales?${salesParams.toString()}`, { cache: 'no-store' }),
+                    fetch('/api/stock-audits', { cache: 'no-store' }),
+                ]);
+
+                if (!isCancelled && salesResponse.ok) {
+                    const salesData = await salesResponse.json();
+                    if (Array.isArray(salesData)) {
+                        setLiveTransactions(salesData as Transaction[]);
+                    }
+                }
+
+                if (!isCancelled && auditsResponse.ok) {
+                    const auditData = await auditsResponse.json();
+                    if (Array.isArray(auditData)) {
+                        setLiveStockAudits(auditData as StockAudit[]);
+                    }
+                }
+            } catch (error) {
+                console.error('Realtime refresh failed:', error);
+            }
+        };
+
+    fetchRealtimeData();
+    const timer = window.setInterval(fetchRealtimeData, 30000);
+
+        return () => {
+            isCancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [branchScope, selectedBranch]);
+
+  // Fetch exchange/return data
+  useEffect(() => {
+    const fetchExchangeReturns = async () => {
+      try {
+        const params = new URLSearchParams();
+                const effectiveBranch = branchScope !== 'all' ? branchScope : getEffectiveBranch();
+
+                if (effectiveBranch !== 'all') {
+                    params.set('branch', effectiveBranch);
+                }
+
+                if (dateRange.start) {
+                    params.set('startDate', dateRange.start);
+                }
+
+                if (dateRange.end) {
+                    params.set('endDate', dateRange.end);
+        }
+
+        const response = await fetch(`/api/exchange-returns?${params.toString()}`);
+        if (response.ok) {
+          const data = await response.json();
+          setExchangeReturns(data || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch exchange/returns:', error);
+      }
+    };
+    fetchExchangeReturns();
+    }, [selectedBranch, dateRange, branchScope]);
 
   // Get unique branches from transactions
   const branches = useMemo(() => {
     const uniqueBranches = new Set<string>();
-    transactions?.forEach(t => {
+        liveTransactions?.forEach(t => {
       if (t.branch) uniqueBranches.add(t.branch);
     });
     return Array.from(uniqueBranches).sort();
-  }, [transactions]);
+    }, [liveTransactions]);
 
   // Filter transactions based on selected branch + date range
   const filteredTransactions = useMemo(() => {
-    const byBranch = selectedBranch === 'all'
-      ? transactions || []
-      : (transactions || []).filter(t => t.branch === selectedBranch);
+    if (selectedBranch === 'all') {
+            return liveTransactions || [];
+    }
+        return (liveTransactions || []).filter(t => t.branch === selectedBranch);
+    }, [liveTransactions, selectedBranch]);
 
-    if (datePreset === 'allTime') return byBranch;
+    const monthlyTransactions = useMemo(() => {
+        if (!dateRange.start && !dateRange.end) return filteredTransactions;
+        return filteredTransactions.filter((transaction) => {
+            const d = getTransactionDateKey(transaction);
+            if (dateRange.start && d < dateRange.start) return false;
+            if (dateRange.end   && d > dateRange.end)   return false;
+            return true;
+        });
+    }, [filteredTransactions, dateRange]);
 
-    const now = new Date();
-    const nowTs = now.getTime();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const startOf7Days = startOfToday - (6 * 24 * 60 * 60 * 1000);
-    const startOf30Days = startOfToday - (29 * 24 * 60 * 60 * 1000);
-
-    return byBranch.filter((transaction) => {
-      if (!transaction.createdAt) return false;
-      const ts = new Date(transaction.createdAt).getTime();
-      if (Number.isNaN(ts)) return false;
-
-      if (datePreset === 'today') {
-        return ts >= startOfToday && ts <= nowTs;
-      }
-      if (datePreset === '7days') {
-        return ts >= startOf7Days && ts <= nowTs;
-      }
-      if (datePreset === '30days') {
-        return ts >= startOf30Days && ts <= nowTs;
-      }
-      if (datePreset === 'thisMonth') {
-        return ts >= startOfMonth && ts <= nowTs;
-      }
-
-      if (datePreset === 'custom') {
-        if (!customStartDate || !customEndDate) return true;
-        const start = new Date(`${customStartDate}T00:00:00`).getTime();
-        const end = new Date(`${customEndDate}T23:59:59`).getTime();
-        if (Number.isNaN(start) || Number.isNaN(end)) return true;
-        return ts >= start && ts <= end;
-      }
-
-      return true;
-    });
-  }, [transactions, selectedBranch, datePreset, customStartDate, customEndDate]);
+    const filteredSalesUsers = useMemo(() => {
+        if (selectedBranch === 'all') {
+            return salesUsers;
+        }
+        return salesUsers.filter((user) => user.branch === selectedBranch);
+    }, [salesUsers, selectedBranch]);
 
   // Top 5 Products
   const topProducts = useMemo(() => {
     const productSales: Record<string, number> = {};
-    filteredTransactions?.forEach(t => {
+        monthlyTransactions.forEach(t => {
       t.items?.forEach(item => {
         productSales[item.id] = (productSales[item.id] || 0) + Number(item.quantity || 0);
       });
@@ -95,183 +224,220 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
       .filter(item => item.product)
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 5);
-  }, [filteredTransactions, products]);
+    }, [monthlyTransactions, products]);
 
   // Top Sales Agent with location mapping
-  const topAgents = useMemo(() => {
+    const topAgents = useMemo(() => {
     const agentSales: Record<string, number> = {};
-    filteredTransactions?.forEach(t => {
+        monthlyTransactions.forEach(t => {
       if (t.salesmanId) {
-          agentSales[t.salesmanId] = (agentSales[t.salesmanId] || 0) + Number(t.total || 0);
+                agentSales[t.salesmanId] = (agentSales[t.salesmanId] || 0) + Number(t.total || 0);
       }
     });
+
     return Object.entries(agentSales)
       .map(([id, total]) => ({
-        user: salesUsers.find(u => u.id === id),
+                user: filteredSalesUsers.find(u => u.id === id),
         total: Number(total) || 0,
-        location: agentMapping[id] || 'Unknown'
+                location: AGENT_BRANCH_MAP[id] || 'Unknown'
       }))
       .filter(item => item.user)
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
-  }, [filteredTransactions, salesUsers]);
+    }, [monthlyTransactions, filteredSalesUsers]);
 
-  // Keep these references to preserve existing prop contract while this section is hidden.
-  void stockAudits;
-  void customers;
+    const monthlySummary = useMemo(() => {
+        const totalRevenue = monthlyTransactions.reduce((acc, transaction) => acc + Number(transaction.total || 0), 0);
+        const totalTransactions = monthlyTransactions.length;
+        const averageOrderValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+        const activeAgents = new Set(monthlyTransactions.map((transaction) => transaction.salesmanId).filter(Boolean)).size;
+
+        return {
+            totalRevenue,
+            totalTransactions,
+            averageOrderValue,
+            activeAgents,
+        };
+    }, [monthlyTransactions]);
+
+  // Stock Alerts (Latest audit for each product < 10)
+  const lowStockAlerts = useMemo(() => {
+     const alerts: LowStockAlert[] = [];
+         const isScopedDashboard = branchScope !== 'all';
+         const branchFilteredCustomers = selectedBranch === 'all'
+             ? customers
+             : customers.filter((customer) => customer.branch === selectedBranch);
+         const customerIndex = new Map(branchFilteredCustomers.map((customer) => [customer.id, customer]));
+
+         liveStockAudits?.forEach(audit => {
+                 const customer = customerIndex.get(audit.customerId) || customers.find(c => c.id === audit.customerId);
+
+                 if (isScopedDashboard && !customer) {
+                     return;
+                 }
+
+                 if (selectedBranch !== 'all' && customer?.branch && customer.branch !== selectedBranch) {
+                     return;
+                 }
+
+         audit.items?.forEach(item => {
+             if (item.physicalStock < 10) {
+                 // Determine customer/location name with better fallbacks
+                 let customerName = 'Unknown';
+                 if (customer?.name) {
+                   customerName = customer.name;
+                 } else if (audit.customerId) {
+                   // Use customer ID as fallback if no match found
+                   customerName = `Customer ${audit.customerId.slice(0, 8)}`;
+                 }
+                 
+                 alerts.push({
+                     productId: item.productId,
+                     productName: item.productName,
+                     physicalStock: item.physicalStock,
+                     customerName: customerName,
+                     auditDate: audit.createdAt,
+                 });
+             }
+         });
+     });
+     return alerts.sort((a, b) => new Date(b.auditDate).getTime() - new Date(a.auditDate).getTime());
+  }, [liveStockAudits, customers, selectedBranch, branchScope]);
 
   // Sales Trend (Last 7 days)
   const salesTrend = useMemo(() => {
       const days = 7;
+      const rangeEnd = dateRange.end || formatDateKey(new Date());
+      const endDate = new Date(`${rangeEnd}T12:00:00+08:00`);
       const data = new Array(days).fill(0).map((_, i) => {
-          const d = new Date();
+          const d = new Date(endDate);
           d.setDate(d.getDate() - (days - 1 - i));
-          return { date: d.toISOString().split('T')[0], total: 0 };
+          return { date: formatDateKey(d), total: 0 };
       });
       
-      filteredTransactions?.forEach(t => {
-          if (t.createdAt) {
-              const date = t.createdAt.split('T')[0];
-              const dayData = data.find(d => d.date === date);
-              if (dayData) {
-                  dayData.total += Number(t.total || 0);
-              }
+      monthlyTransactions.forEach(t => {
+          const date = getTransactionDateKey(t);
+          if (date) {
+            const dayData = data.find(d => d.date === date);
+            if (dayData) {
+                dayData.total += Number(t.total || 0);
+            }
           }
       });
       return data;
-  }, [filteredTransactions]);
+  }, [monthlyTransactions, dateRange]);
 
   const maxSales = Math.max(...salesTrend.map(d => d.total), 1);
 
-  // Exchange/Return Tracking
+  // Exchange/Return Tracking - Use real data from API
   const exchangeReport = useMemo(() => {
-    const report: { productName: string; quantity: number; reason: string }[] = [];
-    filteredTransactions?.forEach(t => {
-      if (t.exchangeItems) {
-        t.exchangeItems.forEach(item => {
-            const product = products.find(p => p.id === item.productId);
-            report.push({
-                productName: product?.name || 'Unknown',
-                quantity: item.quantity,
-                reason: item.reason
-            });
-        });
-      }
-    });
-    return report;
-  }, [filteredTransactions, products]);
+    return exchangeReturns.map(item => ({
+      productName: item.product_name,
+      quantity: item.quantity,
+      reason: item.reason,
+      type: item.type,
+      status: item.status,
+      createdAt: item.created_at
+    }));
+  }, [exchangeReturns]);
 
   return (
     <div className="space-y-6">
-        {/* Main filter row */}
-        <div className="bg-slate-900/50 backdrop-blur-sm p-4 rounded-lg border border-slate-800 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-slate-300">Tapis Mengikut Cawangan:</label>
-            <select
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
-              className="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
-            >
-              <option value="all">Semua Cawangan</option>
-              {branches.map(branch => (
-                <option key={branch} value={branch}>{branch}</option>
-              ))}
-            </select>
-          </div>
+        {/* Branch Filter */}
+                <div className="soft-panel p-4 rounded-lg flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mr-3">{t('filter_by_branch')}:</label>
+                        <select
+                            value={selectedBranch}
+                            onChange={(e) => setSelectedBranch(e.target.value)}
+                            className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-800 dark:text-white dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="all">{t('all_branches')}</option>
+                            {branches.map(branch => (
+                                <option key={branch} value={branch}>{branch}</option>
+                            ))}
+                        </select>
+                    </div>
 
-          <div className="flex items-center gap-2 ml-auto flex-wrap">
-            <span className="text-sm text-slate-300">Date Range:</span>
-            {[
-              { key: 'today', label: 'Today' },
-              { key: '7days', label: 'Last 7 Days' },
-              { key: '30days', label: 'Last 30 Days' },
-              { key: 'thisMonth', label: 'This Month' },
-              { key: 'allTime', label: 'All Time' },
-              { key: 'custom', label: 'Custom' },
-            ].map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setDatePreset(item.key as 'today' | '7days' | '30days' | 'thisMonth' | 'allTime' | 'custom')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                  datePreset === item.key
-                    ? 'bg-blue-600 text-white border-blue-500'
-                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-            {datePreset === 'custom' && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="bg-slate-800 text-white border border-slate-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
-                />
-                <input
-                  type="date"
-                  value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="bg-slate-800 text-white border border-slate-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            )}
-          </div>
+                    <div>
+                        <DateRangePicker value={dateRange} onChange={setDateRange} lightMode />
+                    </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Master Sales Report (Summary) */}
-            <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800 md:col-span-2">
-                <h3 className="text-lg font-bold mb-4 text-white">Master Sales Report</h3>
+            <div className="soft-panel p-6 md:col-span-2">
+                <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-baseline md:justify-between">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t('master_sales_report')}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{t('showing_data_for')} {dateRange.start && dateRange.end ? `${dateRange.start} → ${dateRange.end}` : t('all_time')}</p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="bg-slate-800 p-4 rounded-xl">
-                        <p className="text-slate-400 text-sm">Total Revenue</p>
-                        <p className="text-2xl font-bold text-green-400">{formatCurrency(filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0))}</p>
+                    <div className="soft-card soft-card-green p-4 rounded-xl">
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('total_revenue')}</p>
+                        <p className="text-2xl font-bold text-emerald-600 dark:text-green-400">{formatCurrency(monthlySummary.totalRevenue)}</p>
                     </div>
-                    <div className="bg-slate-800 p-4 rounded-xl">
-                        <p className="text-slate-400 text-sm">Total Transactions</p>
-                        <p className="text-2xl font-bold text-blue-400">{filteredTransactions.length}</p>
+                    <div className="soft-card soft-card-blue p-4 rounded-xl">
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('total_transactions_label')}</p>
+                        <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{monthlySummary.totalTransactions}</p>
                     </div>
-                    <div className="bg-slate-800 p-4 rounded-xl">
-                        <p className="text-slate-400 text-sm">Avg. Order Value</p>
-                        <p className="text-2xl font-bold text-purple-400">
-                            {formatCurrency(filteredTransactions.length > 0 ? filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0) / filteredTransactions.length : 0)}
+                    <div className="soft-card soft-card-rose p-4 rounded-xl">
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('avg_order_value')}</p>
+                        <p className="text-2xl font-bold text-violet-600 dark:text-purple-400">
+                            {formatCurrency(monthlySummary.averageOrderValue)}
                         </p>
                     </div>
-                    <div className="bg-slate-800 p-4 rounded-xl">
-                        <p className="text-slate-400 text-sm">Active Agents</p>
-                        <p className="text-2xl font-bold text-orange-400">{new Set(filteredTransactions.map(t => t.salesmanId)).size}</p>
+                    <div className="soft-card p-4 rounded-xl">
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">{t('active_agents')}</p>
+                        <p className="text-2xl font-bold text-amber-600 dark:text-orange-400">{monthlySummary.activeAgents}</p>
                     </div>
                 </div>
             </div>
 
             {/* Exchange/Return Tracking */}
-            <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-orange-900/30 md:col-span-2">
-                <h3 className="text-lg font-bold mb-4 text-orange-500 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-orange-500"/>
-                    Exchange & Return Tracking (Disposal)
+            <div className="soft-panel p-6 border-orange-200 dark:border-orange-900/30 md:col-span-2">
+                <h3 className="text-lg font-bold mb-4 text-amber-600 dark:text-orange-500 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 dark:bg-orange-500"/>
+                    {t('exchange_return_tracking')}
                 </h3>
                 <div className="overflow-x-auto max-h-64">
-                    <table className="w-full text-left">
-                        <thead className="sticky top-0 bg-slate-900">
-                            <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
-                                <th className="pb-3 pl-2">Product</th>
-                                <th className="pb-3">Qty</th>
-                                <th className="pb-3">Reason</th>
+                    <table className="w-full text-left text-sm">
+                        <thead className="sticky top-0 soft-table-head">
+                            <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
+                                <th className="pb-3 pl-2">{t('product')}</th>
+                                <th className="pb-3">{t('type_label')}</th>
+                                <th className="pb-3">{t('qty')}</th>
+                                <th className="pb-3">{t('reason')}</th>
+                                <th className="pb-3">{t('status')}</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800">
-                            {exchangeReport.map((item, idx) => (
-                                <tr key={idx} className="group hover:bg-slate-800/50 transition-colors">
-                                    <td className="py-3 pl-2 font-medium text-slate-300">{item.productName}</td>
-                                    <td className="py-3 font-bold text-orange-400">{item.quantity}</td>
-                                    <td className="py-3 text-slate-400 text-sm">{item.reason}</td>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                            {exchangeReport.map((item: any, idx) => (
+                                <tr key={idx} className="group hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                                    <td className="py-3 pl-2 font-medium text-slate-700 dark:text-slate-300">{item.productName}</td>
+                                    <td className="py-3">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                            item.type === 'exchange' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                            item.type === 'return' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                        }`}>
+                                            {item.type}
+                                        </span>
+                                    </td>
+                                    <td className="py-3 font-bold text-amber-600 dark:text-orange-400">{item.quantity}</td>
+                                    <td className="py-3 text-slate-500 dark:text-slate-400 text-sm">{item.reason}</td>
+                                    <td className="py-3">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                            item.status === 'approved' || item.status === 'completed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                            item.status === 'rejected' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                            'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                        }`}>
+                                            {item.status}
+                                        </span>
+                                    </td>
                                 </tr>
                             ))}
                             {exchangeReport.length === 0 && (
-                                <tr><td colSpan={3} className="py-8 text-center text-slate-600 italic">No returns recorded</td></tr>
+                                <tr><td colSpan={5} className="py-8 text-center text-slate-500 italic">{t('no_returns')}</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -279,51 +445,54 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
             </div>
 
             {/* Top Products */}
-            <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
-                <h3 className="text-lg font-bold mb-4 text-white">{t('top_products')}</h3>
+            <div className="soft-panel p-6">
+                <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">{t('top_products')}</h3>
                 <div className="space-y-3">
                     {topProducts.map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 transition-colors">
+                        <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                             <div className="flex items-center gap-3">
-                                <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">
+                                <span className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 flex items-center justify-center text-xs font-bold">
                                     {idx + 1}
                                 </span>
-                                <span className="text-slate-200 font-medium">{item.product?.name}</span>
+                                <span className="text-slate-800 dark:text-slate-200 font-medium">{item.product?.name}</span>
                             </div>
                             <span className="bg-blue-900/30 text-blue-300 border border-blue-500/30 px-3 py-1 rounded-lg text-sm font-bold">
-                                {item.qty} sold
+                                {item.qty} {t('sold')}
                             </span>
                         </div>
                     ))}
-                    {topProducts.length === 0 && <p className="text-slate-500 italic">No sales data</p>}
+                    {topProducts.length === 0 && <p className="text-slate-500 italic">{t('no_sales_data')}</p>}
                 </div>
             </div>
 
             {/* Top Agents */}
-            <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
-                <h3 className="text-lg font-bold mb-4 text-white">{t('top_agents')}</h3>
+            <div className="soft-panel p-6">
+                <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-baseline md:justify-between">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t('top_agents')}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{t('ranking_for')} {dateRange.start && dateRange.end ? `${dateRange.start} → ${dateRange.end}` : t('all_time')}</p>
+                </div>
                 <div className="space-y-3">
                     {topAgents.map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 transition-colors">
+                        <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                             <div className="flex items-center gap-3">
-                                <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">
+                                <span className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 flex items-center justify-center text-xs font-bold">
                                     {idx + 1}
                                 </span>
-                                <span className="text-slate-200 font-medium">{item.user?.name}</span>
+                                <span className="text-slate-800 dark:text-slate-200 font-medium">{item.user?.name}</span>
                             </div>
-                            <span className="text-emerald-400 font-bold font-mono bg-emerald-900/20 px-2 py-1 rounded">
+                                <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono bg-emerald-100 dark:bg-emerald-900/20 px-2 py-1 rounded">
                                 {formatCurrency(item.total)}
                             </span>
                         </div>
                     ))}
-                     {topAgents.length === 0 && <p className="text-slate-500 italic">No data</p>}
+                     {topAgents.length === 0 && <p className="text-slate-500 italic">{t('no_data')}</p>}
                 </div>
             </div>
         </div>
 
         {/* Sales Trend Graph */}
-        <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-slate-800">
-            <h3 className="text-lg font-bold mb-4 text-white">{t('sales_trend')} (Last 7 Days)</h3>
+        <div className="bg-white/90 dark:bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800">
+            <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">{t('sales_trend')} ({t('last_7_days')})</h3>
             <div className="flex items-end space-x-2 h-48 pt-4">
                 {salesTrend.map((day, idx) => (
                     <div key={idx} className="flex-1 flex flex-col items-center group relative h-full justify-end">
@@ -334,7 +503,7 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                          <p className="text-xs text-slate-500 mt-3 font-mono">{day.date.split('-')[2]}</p>
                          
                          {/* Tooltip */}
-                         <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs p-2 rounded border border-slate-700 shadow-xl pointer-events-none z-10 whitespace-nowrap">
+                         <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-xs p-2 rounded border border-slate-700 shadow-xl pointer-events-none z-10 whitespace-nowrap">
                              <div className="font-bold">{day.date}</div>
                              <div className="text-emerald-400">{formatCurrency(day.total)}</div>
                          </div>
@@ -343,6 +512,42 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
             </div>
         </div>
 
+        {/* Low Stock Alerts */}
+        <div className="bg-white/90 dark:bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-sm dark:shadow-xl border border-red-200 dark:border-red-900/30">
+            <h3 className="text-lg font-bold mb-4 text-red-500 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
+                {t('low_stock_alerts')}
+            </h3>
+             <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                    <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
+                            <th className="pb-3 pl-2">{t('product')}</th>
+                            <th className="pb-3">{t('current_stock')}</th>
+                            <th className="pb-3">{t('customer_loc')}</th>
+                            <th className="pb-3 text-right pr-2">{t('date')}</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {lowStockAlerts.slice(0, 10).map((alert, idx) => ( // Limit to 10
+                            <tr key={idx} className="group hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                                <td className="py-3 pl-2 font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">{alert.productName}</td>
+                                <td className="py-3">
+                                    <span className="inline-flex items-center px-2 py-1 rounded bg-red-950/50 border border-red-900/50 text-red-500 text-xs font-bold">
+                                        {alert.physicalStock} units
+                                    </span>
+                                </td>
+                                <td className="py-3 text-slate-500 dark:text-slate-400 text-sm">{alert.customerName}</td> 
+                                <td className="py-3 text-slate-500 text-xs text-right pr-2 font-mono">{new Date(alert.auditDate).toLocaleDateString()}</td>
+                            </tr>
+                        ))}
+                         {lowStockAlerts.length === 0 && (
+                            <tr><td colSpan={4} className="py-8 text-center text-slate-600 italic">{t('no_low_stock')}</td></tr>
+                        )}
+                    </tbody>
+                </table>
+             </div>
+        </div>
     </div>
   );
 }

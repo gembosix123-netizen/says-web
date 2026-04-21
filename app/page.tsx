@@ -13,18 +13,18 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Check if already logged in
+    // Check if already logged in - run only once on mount
     const user = localStorage.getItem('user');
     if (user) {
-        try {
-            const userData = JSON.parse(user);
-            if (userData.role === 'Main Admin') router.push('/admin/founder');
-            else if (userData.role === 'Admin') router.push('/admin');
-            else router.push('/dashboard');
-        } catch (e) {
-            // Invalid JSON in localStorage, clear it
-            localStorage.removeItem('user');
-        }
+      try {
+        const userData = JSON.parse(user);
+        if (userData.role === 'Main Admin') router.push('/admin/founder');
+        else if (userData.role === 'Admin') router.push('/admin');
+        else router.push('/dashboard');
+      } catch {
+        // Invalid JSON in localStorage, clear it
+        localStorage.removeItem('user');
+      }
     }
   }, [router]);
 
@@ -104,6 +104,8 @@ export default function LoginPage() {
                   type="text" 
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  suppressHydrationWarning
                   className="w-full pl-12 h-12 bg-slate-950/50 border border-slate-700/50 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                   placeholder="Enter username"
                   required
@@ -119,6 +121,8 @@ export default function LoginPage() {
                   type="password" 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  suppressHydrationWarning
                   className="w-full pl-12 h-12 bg-slate-950/50 border border-slate-700/50 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                   placeholder="Enter password"
                   required
@@ -144,7 +148,7 @@ export default function LoginPage() {
 
         <div className="mt-8 pt-6 border-t border-slate-800/50 text-center">
           <p className="text-xs text-slate-500">
-            Demo: <span className="text-slate-400 font-mono bg-slate-800/50 px-1 rounded">sales1</span> / <span className="text-slate-400 font-mono bg-slate-800/50 px-1 rounded">password</span>
+            Demo: <span className="text-slate-400 font-mono bg-slate-800/50 px-1 rounded">founder</span> / <span className="text-slate-400 font-mono bg-slate-800/50 px-1 rounded">Founder2024!</span>
           </p>
         </div>
       </div>

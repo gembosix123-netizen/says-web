@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Plus, Save, Trash2, Users, Store, Globe } from 'lucide-react';
+import { Plus, Save, Trash2, Users, Store } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createUserSchema, type CreateUserInput } from '@/lib/validations';
@@ -27,6 +27,8 @@ export default function UserManagement({ enableCreation = true }: UserManagement
   const [users, setUsers] = useState<UserType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReferenceNo, setDeleteReferenceNo] = useState('');
 
   const {
     register,
@@ -60,10 +62,11 @@ export default function UserManagement({ enableCreation = true }: UserManagement
   const fetchCustomers = async () => {
       try {
           const res = await fetch('/api/customers');
-          const data = await res.json();
-          setCustomers(data);
+          const data = await res.json().catch(() => []);
+          setCustomers(Array.isArray(data) ? data : []);
       } catch (error) {
           console.error('Failed to fetch customers', error);
+          setCustomers([]);
       }
   };
 
@@ -96,9 +99,17 @@ export default function UserManagement({ enableCreation = true }: UserManagement
 
   const handleDelete = async (id: string) => {
       if (!confirm('Are you sure you want to delete this user?')) return;
+      if (!deleteReason.trim()) {
+        alert('Reason is required to delete user');
+        return;
+      }
       
       try {
-          const res = await fetch(`/api/users?id=${id}`, { method: 'DELETE' });
+        const params = new URLSearchParams({ id, reason: deleteReason.trim() });
+        if (deleteReferenceNo.trim()) {
+        params.set('referenceNo', deleteReferenceNo.trim());
+        }
+        const res = await fetch(`/api/users?${params.toString()}`, { method: 'DELETE' });
           if (res.ok) {
               fetchUsers();
           } else {
@@ -216,6 +227,29 @@ export default function UserManagement({ enableCreation = true }: UserManagement
         {loading ? (
              <div className="text-center text-slate-500 py-8">Loading users...</div>
         ) : (
+            <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Delete Reason (Required)</label>
+                <input
+                  value={deleteReason}
+                  onChange={(event) => setDeleteReason(event.target.value)}
+                  placeholder="Example: Duplicate/invalid account"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Reference No (Optional)</label>
+                <input
+                  value={deleteReferenceNo}
+                  onChange={(event) => setDeleteReferenceNo(event.target.value)}
+                  placeholder="Example: HR-2026-004"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+            </div>
+        )}
+
+        {!loading && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {users.map((user) => (
                 <div key={user.id} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800/60 transition-all group">

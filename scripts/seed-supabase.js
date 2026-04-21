@@ -51,17 +51,20 @@ async function seedSupabase() {
     )
 
     for (const user of usersData) {
+      // Remove id field to let Supabase auto-generate UUID
+      // Remove fields that don't exist in schema (assignedShopId)
+      // Convert commissionRate to commission_rate (snake_case)
+      const { id, assignedShopId, commissionRate, ...userData } = user;
+      
+      const userPayload = {
+        ...userData,
+        commission_rate: commissionRate || 0
+      };
+
       const { error } = await supabase
         .from('users')
-        .upsert({
-          id: user.id,
-          username: user.username,
-          password: user.password,
-          name: user.name,
-          role: user.role,
-          branch: user.branch,
-        }, { onConflict: 'id' })
-      
+        .upsert(userPayload, { onConflict: 'username' })
+        
       if (error) {
         console.error(`  ❌ ${user.username}: ${error.message}`)
       } else {
@@ -70,15 +73,19 @@ async function seedSupabase() {
     }
     console.log(`✅ Seeded ${usersData.length} users\n`)
 
-    // 3. Seed Customers
+    // 3. Seed Customers (split by branch)
     console.log('🏪 Seeding customers...')
     const customersData = JSON.parse(
       fs.readFileSync(path.join(__dirname, '../data/customers.json'), 'utf8')
     )
 
     for (const customer of customersData) {
+      // Determine which branch table to use based on customer branch field or default to KB
+      const branch = customer.branch || 'Kota Kinabalu'
+      const tableName = (branch === 'Kinabatangan' || branch === 'KK') ? 'customers_kk' : 'customers_kb'
+
       const { error } = await supabase
-        .from('customers')
+        .from(tableName)
         .upsert({
           id: customer.id,
           name: customer.name,
@@ -92,7 +99,7 @@ async function seedSupabase() {
       if (error) {
         console.error(`  ❌ ${customer.name}: ${error.message}`)
       } else {
-        console.log(`  ✓ ${customer.name}`)
+        console.log(`  ✓ ${customer.name} (${tableName})`)
       }
     }
     console.log(`✅ Seeded ${customersData.length} customers\n`)

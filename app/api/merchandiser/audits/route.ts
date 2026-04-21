@@ -1,24 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { canAccessStoreVisits } from '@/lib/permissions';
+import { getSessionUserFromRequest } from '@/lib/session';
 
-// Get current user from session cookie
-async function getCurrentUser(request: Request) {
-  try {
-    const session = (request as any).cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch (e) {
-    return null;
-  }
+interface AuditItemInput {
+  product_id: string;
+  product_name: string;
+  balance_stock?: number;
+  expired_stock?: number;
+  damaged_stock?: number;
+  condition_notes?: string;
+  photo_url?: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Internal server error';
 }
 
 // GET - Get audit items for a specific visit
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessStoreVisits(role)) {
+      return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -44,11 +54,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Permission check
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       if (visit.merchandiser_id !== currentUser.id) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       if (visit.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
@@ -67,22 +77,24 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(data || []);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API merchandiser/audits GET] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
 // POST - Create audit items for a visit
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+
     // Only Merchandiser, Sales, and Admin can create audits
-    if (currentUser.role !== 'Merchandiser' && currentUser.role !== 'Sales' && currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+    if (!canAccessStoreVisits(role)) {
       return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
@@ -113,11 +125,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Permission check
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       if (visit.merchandiser_id !== currentUser.id) {
         return NextResponse.json({ error: 'Forbidden - you can only add audits to your own visits' }, { status: 403 });
       }
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       if (visit.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
@@ -125,7 +137,7 @@ export async function POST(request: NextRequest) {
     // Main Admin can add to any visit
 
     // Prepare audit items for insertion
-    const auditItems = items.map((item: any) => ({
+    const auditItems = (items as AuditItemInput[]).map((item) => ({
       visit_id,
       product_id: item.product_id,
       product_name: item.product_name,
@@ -148,8 +160,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, count: data?.length || 0, data }, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API merchandiser/audits POST] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

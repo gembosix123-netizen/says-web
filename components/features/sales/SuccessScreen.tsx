@@ -24,19 +24,30 @@ export default function SuccessScreen() {
       await new Promise((resolve, reject) => {
         logoImg.onload = resolve;
         logoImg.onerror = reject;
-        logoImg.src = '/unnamed.png';
+        logoImg.src = '/logo_print.png';
       });
       
       // Create canvas to get base64
       const canvas = document.createElement('canvas');
-      canvas.width = logoImg.width;
-      canvas.height = logoImg.height;
+      canvas.width = logoImg.naturalWidth;
+      canvas.height = logoImg.naturalHeight;
       const ctx = canvas.getContext('2d');
       ctx?.drawImage(logoImg, 0, 0);
       const logoBase64 = canvas.toDataURL('image/png');
-      
-      // Add logo to PDF (x, y, width, height)
-      doc.addImage(logoBase64, 'PNG', 14, 10, 25, 25);
+
+      const maxLogoWidth = 30;
+      const maxLogoHeight = 22;
+      const aspectRatio = logoImg.naturalWidth / logoImg.naturalHeight;
+      let logoWidth = maxLogoWidth;
+      let logoHeight = logoWidth / aspectRatio;
+
+      if (logoHeight > maxLogoHeight) {
+        logoHeight = maxLogoHeight;
+        logoWidth = logoHeight * aspectRatio;
+      }
+
+      // Add logo to PDF while preserving original image proportion
+      doc.addImage(logoBase64, 'PNG', 14, 10, logoWidth, logoHeight);
     } catch (error) {
       console.log('Logo not loaded, continuing without it');
     }

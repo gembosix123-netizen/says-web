@@ -10,13 +10,7 @@ CREATE TABLE users (
     role VARCHAR(20) CHECK (role IN ('admin', 'salesman', 'driver')) DEFAULT 'salesman',
     password_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_active BOOLEAN DEFAULT TRUE
-);
-
--- 2. CUSTOMERS (Stores)
-CREATE TABLE customers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE787
     address TEXT,
     phone VARCHAR(20),
     gps_lat DECIMAL(10, 8),
@@ -34,6 +28,7 @@ CREATE TABLE products (
     price DECIMAL(10, 2) NOT NULL, -- Current Selling Price
     unit VARCHAR(20) DEFAULT 'pkt', -- e.g., pkt, kg, pcs
     current_stock INTEGER DEFAULT 0,
+    branch VARCHAR(50) NOT NULL DEFAULT 'HQ',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

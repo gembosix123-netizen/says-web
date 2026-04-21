@@ -1,39 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { canViewDayEnd } from '@/lib/permissions';
+import { getSessionUserFromRequest } from '@/lib/session';
 
-async function getCurrentUser(request: Request) {
-  try {
-    const session = (request as any).cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch (e) {
-    return null;
-  }
+interface SaleItemRecord {
+  name?: string;
+  quantity?: number;
+  unit_price?: number;
+}
+
+interface SaleRecord {
+  amount?: number | string;
+  total_amount?: number | string;
+  payment_method?: string;
+  salesman_name?: string;
+  commission_rate?: number;
+  items?: SaleItemRecord[] | null;
+  created_at?: string;
+}
+
+interface SalesmanPerformance {
+  name: string;
+  transactions: number;
+  revenue: number;
+  commission: number;
+  commissionRate: number;
+}
+
+interface HourlySummary {
+  hour: string;
+  transactions: number;
+  revenue: number;
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+    if (!canViewDayEnd(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
-    let branch = searchParams.get('branch') || currentUser.branch;
+    // Admin can only calculate for their own branch; Main Admin may pass a specific branch
+    const branch = role === 'Admin'
+      ? (currentUser.branch ?? '')
+      : (searchParams.get('branch') || currentUser.branch);
 
-    // Determine sales table
-    const salesTable = branch === 'Kinabatangan' ? 'sales_kinabatangan' : 'sales_kota_kinabalu';
+    // All sales data lives in sales_transactions — filter by branch
+    const salesTable = 'sales_transactions';
 
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    // Fetch all transactions for the day
+    // Fetch all transactions for the day (branch-scoped)
     const { data: sales, error } = await supabaseAdmin
       .from(salesTable)
       .select('*')
+      .eq('branch', branch)
       .gte('created_at', `${date}T00:00:00Z`)
       .lte('created_at', `${date}T23:59:59Z`);
 
@@ -42,11 +73,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch sales data' }, { status: 500 });
     }
 
+    const salesData = (sales || []) as SaleRecord[];
+
     // Calculate day end summary
     const summary = {
       date,
       branch,
-      totalTransactions: sales?.length || 0,
+      totalTransactions: salesData.length,
       totalRevenue: 0,
       paymentBreakdown: {
         cash: 0,
@@ -54,17 +87,17 @@ export async function GET(request: NextRequest) {
         transfer: 0,
         other: 0,
       },
-      salesmanPerformance: {} as Record<string, any>,
+      salesmanPerformance: {} as Record<string, SalesmanPerformance>,
       topProducts: [] as Array<{ name: string; quantity: number; revenue: number }>,
-      hourlyBreakdown: {} as Record<string, any>,
-      discrepancies: [] as Array<any>,
+      hourlyBreakdown: [] as HourlySummary[],
+      discrepancies: [] as Array<unknown>,
     };
 
     const productMap: Record<string, { quantity: number; revenue: number }> = {};
-    const hourlyMap: Record<string, any> = {};
+    const hourlyMap: Record<string, HourlySummary> = {};
 
-    sales?.forEach((sale: any) => {
-      const amount = parseFloat(sale.amount || sale.total_amount || 0);
+    salesData.forEach((sale) => {
+      const amount = Number(sale.amount ?? sale.total_amount ?? 0);
       const paymentMethod = (sale.payment_method || 'cash').toLowerCase();
 
       // Total revenue
@@ -94,7 +127,7 @@ export async function GET(request: NextRequest) {
 
       // Product tracking
       if (sale.items && Array.isArray(sale.items)) {
-        sale.items.forEach((item: any) => {
+        sale.items.forEach((item) => {
           const productName = item.name || 'Unknown';
           if (!productMap[productName]) {
             productMap[productName] = { quantity: 0, revenue: 0 };
@@ -105,7 +138,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Hourly breakdown
-      const hour = new Date(sale.created_at).getHours();
+      const hour = new Date(sale.created_at || '').getHours();
       const hourKey = `${hour.toString().padStart(2, '0')}:00`;
       if (!hourlyMap[hourKey]) {
         hourlyMap[hourKey] = { hour: hourKey, transactions: 0, revenue: 0 };
@@ -121,7 +154,7 @@ export async function GET(request: NextRequest) {
       .slice(0, 10);
 
     // Hourly breakdown sorted
-    summary.hourlyBreakdown = Object.values(hourlyMap).sort((a: any, b: any) => {
+    summary.hourlyBreakdown = Object.values(hourlyMap).sort((a, b) => {
       return parseInt(a.hour) - parseInt(b.hour);
     });
 

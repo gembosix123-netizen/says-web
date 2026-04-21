@@ -57,6 +57,7 @@ export interface Product {
   branch?: string;
   sku?: string;
   code?: string;
+  branch?: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
 }
 
 export interface Customer {
@@ -103,6 +104,7 @@ export interface PaymentData {
   returnAmount?: number;
   exchangeAmount?: number;
   focAmount?: number;
+  amount?: number;
 }
 
 export interface Transaction {
@@ -120,10 +122,20 @@ export interface Transaction {
   exchangeItems?: { productId: string; quantity: number; reason: string }[];
   assignedShopId?: string;
   salesmanId?: string;
-  salesmanName?: string;
+  salesmanName?: string | null;
   createdAt?: string;
   updatedAt?: string;
   branch?: string;
+  invoice?: string;
+  receiptNo?: string | null;
+  billingRefNo?: string | null;
+  transferRefNo?: string | null;
+  qrTxnRefNo?: string | null;
+  paymentReferenceNo?: string | null;
+  receiptUrl?: string | null;
+  proofPhotoUrl?: string | null;
+  proofPhotoUrls?: string[] | null;
+  paymentStatus?: 'paid' | 'pending' | 'partial' | 'cancelled';
 }
 
 export interface StockAudit {
@@ -239,6 +251,47 @@ export interface DailyReport {
   weeklySubmittedAt?: string;
   monthlySubmittedAt?: string;
   updatedAt: string;
+}
+
+export interface MonthlyReportDailyEntry {
+  date: string;
+  amount: number;
+  transactions: number;
+  branch: string;
+}
+
+export interface MonthlyReportBranchSummary {
+  branch: string;
+  totalRevenue: number;
+  transactionCount: number;
+  avgTransaction: number;
+  topProduct: string;
+}
+
+export interface MonthlyReportTopProduct {
+  name: string;
+  quantity: number;
+}
+
+export interface MonthlyReportSnapshot {
+  month: string;
+  totalRevenue: number;
+  totalTransactions: number;
+  dailyData: MonthlyReportDailyEntry[];
+  branchSummaries: MonthlyReportBranchSummary[];
+  topProducts: MonthlyReportTopProduct[];
+}
+
+export interface MonthlyReportHistory {
+  id: string;
+  month: string;
+  branch: string;
+  status: 'draft' | 'closed';
+  submittedAt: string;
+  submittedBy: string;
+  submittedById?: string;
+  notes?: string;
+  snapshot: MonthlyReportSnapshot;
 }
 
 export interface ApiResponse<T> {

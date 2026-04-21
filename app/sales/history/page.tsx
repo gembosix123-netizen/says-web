@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { 
@@ -11,10 +11,11 @@ import {
   Download,
   Filter,
   ShoppingCart,
-  DollarSign
+  DollarSign,
+  Package
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import ExchangeReturnModal from '@/components/features/admin/ExchangeReturnModal';
 
 interface Sale {
   id: string;
@@ -23,8 +24,17 @@ interface Sale {
   total_amount: number;
   payment_method: string;
   status: string;
-  items: any[];
+  items: SaleItem[];
   created_at: string;
+}
+
+interface SaleItem {
+  id?: string;
+  product_id?: string;
+  name?: string;
+  product_name?: string;
+  quantity?: number;
+  subtotal?: number;
 }
 
 export default function SalesHistoryPage() {
@@ -34,42 +44,68 @@ export default function SalesHistoryPage() {
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [exchangeModalOpen, setExchangeModalOpen] = useState(false);
+  const [exchangeSale, setExchangeSale] = useState<Sale | null>(null);
 
-  useEffect(() => {
-    fetchSales();
-  }, [dateFilter]);
-
-  const fetchSales = async () => {
+  const fetchSales = useCallback(async () => {
     try {
-      let query = supabase
-        .from('sales')
-        .select(`
-          *,
-          customers (name)
-        `)
-        .order('created_at', { ascending: false });
+      const response = await fetch('/api/sales');
+      const payload = await response.json().catch(() => []);
 
-      // Apply date filter
-      const today = new Date();
-      if (dateFilter === 'today') {
-        const startOfDay = new Date(today.setHours(0, 0, 0, 0)).toISOString();
-        query = query.gte('created_at', startOfDay);
-      } else if (dateFilter === 'week') {
-        const weekAgo = new Date(today.setDate(today.getDate() - 7)).toISOString();
-        query = query.gte('created_at', weekAgo);
-      } else if (dateFilter === 'month') {
-        const monthAgo = new Date(today.setMonth(today.getMonth() - 1)).toISOString();
-        query = query.gte('created_at', monthAgo);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Gagal mendapatkan data jualan');
       }
 
-      const { data, error } = await query.limit(100);
+      const salesData = Array.isArray(payload) ? payload : [];
 
-      if (error) throw error;
+      const formattedSales = salesData
+        .map((sale) => {
+          const createdAt = sale.created_at || sale.createdAt;
+          const total = Number(sale.total_amount ?? sale.total ?? sale.payment?.amount ?? 0);
+          const status = String(sale.status || 'completed').toLowerCase();
 
-      const formattedSales = data?.map(sale => ({
-        ...sale,
-        customer_name: sale.customers?.name || 'Pelanggan Tidak Diketahui'
-      })) || [];
+          return {
+            id: sale.id,
+            customer_id: sale.customer_id || sale.customer?.id || '',
+            customer_name: sale.customer_name || sale.customer?.name || 'Pelanggan Tidak Diketahui',
+            total_amount: Number.isFinite(total) ? total : 0,
+            payment_method: sale.payment_method || sale.payment?.method || 'cash',
+            status,
+            items: Array.isArray(sale.items)
+              ? sale.items.map((item: { id?: string; product_id?: string; productId?: string; name?: string; product_name?: string; quantity?: number | string; subtotal?: number | string }) => ({
+                  id: item?.id || item?.product_id || item?.productId,
+                  product_id: item?.product_id || item?.productId || item?.id,
+                  name: item?.name || item?.product_name,
+                  product_name: item?.product_name || item?.name,
+                  quantity: Number(item?.quantity || 0),
+                  subtotal: Number(item?.subtotal || 0),
+                }))
+              : [],
+            created_at: createdAt || new Date().toISOString(),
+          };
+        })
+        .filter((sale) => {
+          const createdTime = new Date(sale.created_at).getTime();
+          if (Number.isNaN(createdTime)) return false;
+
+          const now = new Date();
+          if (dateFilter === 'today') {
+            const startOfDay = new Date(now);
+            startOfDay.setHours(0, 0, 0, 0);
+            return createdTime >= startOfDay.getTime();
+          }
+          if (dateFilter === 'week') {
+            const weekAgo = new Date(now);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            return createdTime >= weekAgo.getTime();
+          }
+          if (dateFilter === 'month') {
+            const monthAgo = new Date(now);
+            monthAgo.setMonth(monthAgo.getMonth() - 1);
+            return createdTime >= monthAgo.getTime();
+          }
+          return true;
+        });
 
       setSales(formattedSales);
     } catch (err) {
@@ -77,7 +113,11 @@ export default function SalesHistoryPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateFilter]);
+
+  useEffect(() => {
+    fetchSales();
+  }, [fetchSales]);
 
   const filteredSales = sales.filter(sale =>
     sale.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -99,9 +139,35 @@ export default function SalesHistoryPage() {
     const labels: Record<string, string> = {
       cash: 'Tunai',
       card: 'Kad',
-      transfer: 'Transfer'
+      transfer: 'Transfer',
+      bill_to_bill: 'Kredit (Bill-to-Bill)',
+      bank_transfer: 'Pindahan Bank',
+      qr_code: 'QR Code',
     };
     return labels[method] || method;
+  };
+
+  const handleExport = () => {
+    if (filteredSales.length === 0) return;
+    const headers = ['ID', 'Pelanggan', 'Jumlah (RM)', 'Kaedah Bayaran', 'Status', 'Tarikh'];
+    const rows = filteredSales.map(sale => [
+      sale.id,
+      sale.customer_name,
+      sale.total_amount.toFixed(2),
+      getPaymentLabel(sale.payment_method),
+      sale.status,
+      formatDate(sale.created_at),
+    ]);
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sejarah-jualan-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const formatDate = (dateString: string) => {
@@ -133,9 +199,9 @@ export default function SalesHistoryPage() {
               <p className="text-white/60">Lihat semua transaksi jualan</p>
             </div>
           </div>
-          <Button variant="secondary" size="sm">
+          <Button variant="secondary" size="sm" onClick={handleExport}>
             <Download size={16} className="mr-2" />
-            Export
+            Export CSV
           </Button>
         </div>
 
@@ -275,13 +341,31 @@ export default function SalesHistoryPage() {
                         <span className="text-white/60 text-sm">{formatDate(sale.created_at)}</span>
                       </td>
                       <td className="p-4 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedSale(sale)}
-                        >
-                          <Eye size={16} />
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedSale(sale)}
+                            title="Lihat Detail"
+                            className="inline-flex items-center gap-1"
+                          >
+                            <Eye size={14} />
+                            <span>Lihat</span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setExchangeSale(sale);
+                              setExchangeModalOpen(true);
+                            }}
+                            title="Return/Exchange"
+                            className="inline-flex items-center gap-1 text-orange-300 hover:text-orange-200"
+                          >
+                            <Package size={14} />
+                            <span>Return/Exchange</span>
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -333,10 +417,10 @@ export default function SalesHistoryPage() {
                 <div>
                   <p className="text-white/60 text-sm mb-2">Item</p>
                   <div className="bg-slate-800 rounded-lg p-3 space-y-2">
-                    {selectedSale.items?.map((item: any, idx: number) => (
+                    {selectedSale.items?.map((item, idx) => (
                       <div key={idx} className="flex justify-between text-sm">
-                        <span className="text-white">{item.product_name} x{item.quantity}</span>
-                        <span className="text-white/60">RM {item.subtotal?.toFixed(2)}</span>
+                        <span className="text-white">{item.product_name || item.name || 'Item'} x{item.quantity || 0}</span>
+                        <span className="text-white/60">RM {(item.subtotal || 0).toFixed(2)}</span>
                       </div>
                     )) || <p className="text-white/40">Tiada item</p>}
                   </div>
@@ -359,6 +443,31 @@ export default function SalesHistoryPage() {
               </Button>
             </Card>
           </div>
+        )}
+
+        {/* Return / Exchange Modal for Sales */}
+        {exchangeSale && (
+          <ExchangeReturnModal
+            isOpen={exchangeModalOpen}
+            onClose={() => {
+              setExchangeModalOpen(false);
+              setExchangeSale(null);
+            }}
+            onSuccess={() => {
+              setExchangeModalOpen(false);
+              setExchangeSale(null);
+            }}
+            saleData={{
+              id: exchangeSale.id,
+              invoice: exchangeSale.id,
+              items: (exchangeSale.items || []).map((item) => ({
+                id: item.product_id || item.id || item.name || 'unknown_item',
+                name: item.name || item.product_name,
+                product_name: item.product_name || item.name,
+                quantity: Number(item.quantity || 0),
+              })),
+            }}
+          />
         )}
       </div>
     </div>

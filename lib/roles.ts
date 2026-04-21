@@ -1,21 +1,11 @@
-import { Role } from '@/types';
+export type NormalizedRole = 'Main Admin' | 'Admin' | 'Sales' | 'Merchandiser' | '';
 
-const ROLE_MAP: Record<string, Role> = {
-  'main admin': 'Super Admin',
-  'super admin': 'Super Admin',
-  founder: 'Super Admin',
-  admin: 'Admin',
-  sales: 'Sales',
-  merchandiser: 'Merchandiser',
-};
-
-export function normalizeRole(role?: string | null): string {
-  if (!role) return '';
-
-  const normalized = String(role)
-    .trim()
-    .replace(/[_-]/g, ' ')
-    .toLowerCase();
-
-  return ROLE_MAP[normalized] ?? role.trim();
+export function normalizeRole(role: string | null | undefined): NormalizedRole {
+  const value = String(role || '').trim().toLowerCase();
+  if (!value) return '';
+  if (value === 'main admin' || value === 'founder' || value === 'owner' || value === 'super admin') return 'Main Admin';
+  if (value === 'admin') return 'Admin';
+  if (value === 'sales' || value === 'salesman' || value === 'sale') return 'Sales';
+  if (value === 'merchandiser') return 'Merchandiser';
+  return '';
 }

@@ -55,17 +55,46 @@ export function canPerformAudit(role: UserRole): boolean {
 }
 
 /**
- * Get the appropriate sales table name based on branch
+ * Get the appropriate sales table name based on branch.
+ * @deprecated All sales data is now stored in the single 'sales_transactions'
+ * table with a branch column. Use sales_transactions with .eq('branch', ...).
+ * This function is kept only for backward-compat with any callers not yet updated.
  */
-export function getSalesTableByBranch(branch: Branch): 'sales_kota_kinabalu' | 'sales_kinabatangan' {
-  switch (branch) {
-    case 'Kota Kinabalu':
-      return 'sales_kota_kinabalu';
-    case 'Kinabatangan':
-      return 'sales_kinabatangan';
-    default:
-      throw new Error(`Invalid branch: ${branch}`);
+export function getSalesTableByBranch(_branch: Branch): 'sales_transactions' {
+  return 'sales_transactions';
+}
+
+/**
+ * Get the appropriate customers table name based on branch
+ * - Kinabatangan / KB -> customers_kb
+ * - Kota Kinabalu / KK -> customers_kk
+ */
+export function getCustomersTableByBranch(branch?: string): 'customers_kb' | 'customers_kk' {
+  const normalized = (branch || '').trim().toLowerCase();
+
+  if (!normalized) {
+    return 'customers_kb';
   }
+
+  // KB admin/branch must write to customers_kb.
+  if (normalized === 'kinabatangan' || normalized === 'kb') {
+    return 'customers_kb';
+  }
+
+  // KK admin/branch must write to customers_kk.
+  if (normalized === 'kota kinabalu' || normalized === 'kk') {
+    return 'customers_kk';
+  }
+
+  // Tolerate variant spellings/labels from legacy data.
+  if (normalized.includes('kinabatangan')) {
+    return 'customers_kb';
+  }
+  if (normalized.includes('kota kinabalu')) {
+    return 'customers_kk';
+  }
+
+  return 'customers_kb';
 }
 
 export function getCustomersTableByBranch(branch?: Branch): 'customers_kk' | 'customers_kb' {

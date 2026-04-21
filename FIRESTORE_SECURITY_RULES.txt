@@ -1,18 +1,22 @@
 /**
  * SAYS 2.0 - FIRESTORE SECURITY RULES
  * ====================================
- * 
+ *
  * Role-Based Access Control (RBAC) implementation
- * 
+ *
  * HOW TO DEPLOY:
  * 1. Go to Firebase Console → Firestore → Rules tab
  * 2. Replace entire rules with content below
  * 3. Click "Publish"
- * 
+ *
  * ROLES:
- * - Main Admin: Full access to all data
- * - Admin: Access to their branch data only
- * - Sales: Limited access (own transactions, branch customers)
+ * - Main Admin : Full access to all branches
+ * - Admin      : Branch-scoped access (Kota Kinabalu / Kinabatangan)
+ * - Sales      : Own transactions + branch customers/products
+ * - Merchandiser: Own store visits + branch customers (read)
+ * - Auditor    : Read-only access to audits, stockAudits, transactions
+ *
+ * BRANCHES: Kota Kinabalu | Kinabatangan | HQ
  */
 
 rules_version = '2';
@@ -27,12 +31,16 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return userData().role;
     }
 
     function getUserBranch() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branch;
+      return userData().branch;
     }
 
     function isMainAdmin() {
@@ -47,7 +55,19 @@ service cloud.firestore {
       return isAuthenticated() && getUserRole() == 'Sales';
     }
 
-    function userOwnsDocument(documentBranch) {
+    function isMerchandiser() {
+      return isAuthenticated() && getUserRole() == 'Merchandiser';
+    }
+
+    function isAuditor() {
+      return isAuthenticated() && getUserRole() == 'Auditor';
+    }
+
+    function isFieldStaff() {
+      return isAuthenticated() && getUserRole() in ['Sales', 'Merchandiser'];
+    }
+
+    function sameBranch(documentBranch) {
       return isMainAdmin() || getUserBranch() == documentBranch;
     }
 
@@ -55,21 +75,33 @@ service cloud.firestore {
       return request.auth.uid == userId;
     }
 
+    function isOwnDocument(docUserId) {
+      return request.auth.uid == docUserId;
+    }
+
     // ========================================
     // USERS COLLECTION
     // ========================================
     match /users/{userId} {
-      // READ: Main Admin can read all, Users can read themselves
-      allow read: if isMainAdmin() || isOwnUser(userId);
+      // READ: Main Admin sees all; Admin sees own branch; Users see themselves
+      allow read: if isMainAdmin() ||
+                     isOwnUser(userId) ||
+                     (isAdmin() && resource.data.branch == getUserBranch());
 
-      // CREATE: Main Admin only
-      allow create: if isMainAdmin();
+      // CREATE: Main Admin and Admin (Admin can only create in own branch)
+      allow create: if isMainAdmin() ||
+                       (isAdmin() && request.resource.data.branch == getUserBranch());
 
-      // UPDATE: Main Admin can update all, Users can update limited fields
-      allow update: if isMainAdmin() || 
-                       (isOwnUser(userId) && 
+      // UPDATE: Main Admin full access; Admin can update non-privilege fields in branch;
+      //         Users can update own non-sensitive fields only
+      allow update: if isMainAdmin() ||
+                       (isAdmin() &&
+                        resource.data.branch == getUserBranch() &&
                         !request.resource.data.diff(resource.data).affectedKeys()
-                          .hasAny(['role', 'permissions', 'salary', 'passwordHash']));
+                          .hasAny(['role', 'passwordHash'])) ||
+                       (isOwnUser(userId) &&
+                        !request.resource.data.diff(resource.data).affectedKeys()
+                          .hasAny(['role', 'permissions', 'salary', 'branch', 'passwordHash']));
 
       // DELETE: Main Admin only
       allow delete: if isMainAdmin();
@@ -79,7 +111,7 @@ service cloud.firestore {
     // PRODUCTS COLLECTION
     // ========================================
     match /products/{productId} {
-      // READ: All authenticated users
+      // READ: All authenticated users (Sales, Merchandiser need product list)
       allow read: if isAuthenticated();
 
       // CREATE/UPDATE: Admin and above
@@ -90,39 +122,76 @@ service cloud.firestore {
     }
 
     // ========================================
-    // INVENTORY COLLECTION
+    // INVENTORY / VAN INVENTORY COLLECTION
     // ========================================
     match /inventory/{inventoryId} {
-      // READ: Users can read their branch inventory, Main Admin sees all
-      allow read: if isAuthenticated() && 
-                     (isMainAdmin() || resource.data.branch == getUserBranch());
+      // READ: Own inventory for field staff; branch for Admin; all for Main Admin
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
+                      (isAdmin() && resource.data.branch == getUserBranch()) ||
+                      (isFieldStaff() && isOwnDocument(resource.data.userId)));
 
-      // CREATE/UPDATE: Admin and above on own branch
-      allow create, update: if isAdmin() && 
-                              userOwnsDocument(request.resource.data.branch);
+      // CREATE/UPDATE: Sales create own van inventory; Admin manages branch stock
+      allow create, update: if isAdmin() && sameBranch(request.resource.data.branch) ||
+                               (isFieldStaff() &&
+                                isOwnDocument(request.resource.data.userId) &&
+                                request.resource.data.branch == getUserBranch());
 
-      // DELETE: Main Admin only
-      allow delete: if isMainAdmin();
+      // DELETE: Admin and above
+      allow delete: if isAdmin();
+    }
+
+    // ========================================
+    // ORDERS COLLECTION
+    // ========================================
+    match /orders/{orderId} {
+      // READ: Field staff see own branch orders; Admin sees branch; Main Admin sees all
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
+                      (isAdmin() && resource.data.branch == getUserBranch()) ||
+                      (isFieldStaff() && resource.data.branch == getUserBranch()));
+
+      // CREATE: Sales and Admin on own branch
+      allow create: if (isSalesUser() || isAdmin()) &&
+                       sameBranch(request.resource.data.branch);
+
+      // UPDATE: Admin can manage orders; Sales can only update status on own orders
+      allow update: if isMainAdmin() ||
+                       (isAdmin() && resource.data.branch == getUserBranch()) ||
+                       (isSalesUser() &&
+                        isOwnDocument(resource.data.createdBy) &&
+                        request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['status', 'updatedAt']));
+
+      // DELETE: Admin and above
+      allow delete: if isAdmin();
     }
 
     // ========================================
     // TRANSACTIONS COLLECTION
     // ========================================
     match /transactions/{transactionId} {
-      // READ: Users see transactions from their branch, Main Admin sees all
-      allow read: if isAuthenticated() && 
-                     (isMainAdmin() || resource.data.branch == getUserBranch());
+      // READ: Own for Sales; branch for Admin; all for Main Admin; read-only for Auditor
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
+                      isAuditor() ||
+                      (isAdmin() && resource.data.branch == getUserBranch()) ||
+                      (isFieldStaff() && resource.data.branch == getUserBranch()));
 
-      // CREATE: Sales and Admin on own branch
-      allow create: if (isSalesUser() || isAdmin()) && 
-                      userOwnsDocument(request.resource.data.branch) &&
-                      request.resource.data.userId == request.auth.uid;
+      // CREATE: Sales and Admin on own branch; userId must match caller
+      allow create: if (isSalesUser() || isAdmin()) &&
+                       sameBranch(request.resource.data.branch) &&
+                       isOwnDocument(request.resource.data.userId);
 
-      // UPDATE: Limited updates only (cancel, complete), Main Admin has full access
+      // UPDATE: Admin can edit branch transactions; Sales can update status on own
       allow update: if isMainAdmin() ||
-                      (request.auth.uid == resource.data.userId && 
-                       resource.data.status == 'pending' &&
-                       request.resource.data.status in ['completed', 'cancelled']);
+                       (isAdmin() && resource.data.branch == getUserBranch()) ||
+                       (isSalesUser() &&
+                        isOwnDocument(resource.data.userId) &&
+                        resource.data.status == 'pending' &&
+                        request.resource.data.status in ['completed', 'cancelled'] &&
+                        request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['status', 'updatedAt']));
 
       // DELETE: Main Admin only
       allow delete: if isMainAdmin();
@@ -132,13 +201,16 @@ service cloud.firestore {
     // CUSTOMERS COLLECTION
     // ========================================
     match /customers/{customerId} {
-      // READ: Users see customers from their branch, Main Admin sees all
-      allow read: if isAuthenticated() && 
-                     (isMainAdmin() || resource.data.branch == getUserBranch());
+      // READ: All field staff in same branch; Admin; Main Admin; Auditor read-only
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
+                      isAuditor() ||
+                      (isAdmin() && resource.data.branch == getUserBranch()) ||
+                      (isFieldStaff() && resource.data.branch == getUserBranch()));
 
       // CREATE/UPDATE: Sales and Admin on own branch
-      allow create, update: if (isSalesUser() || isAdmin()) && 
-                              userOwnsDocument(request.resource.data.branch);
+      allow create, update: if (isSalesUser() || isAdmin()) &&
+                                sameBranch(request.resource.data.branch);
 
       // DELETE: Admin and above
       allow delete: if isAdmin();
@@ -148,46 +220,134 @@ service cloud.firestore {
     // COMMISSIONS COLLECTION
     // ========================================
     match /commissions/{commissionId} {
-      // READ: Sales user sees own, Admin sees branch, Main Admin sees all
-      allow read: if isAuthenticated() && 
-                     (isMainAdmin() || 
+      // READ: Sales see own; Admin sees branch; Main Admin sees all
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
                       (isAdmin() && resource.data.branch == getUserBranch()) ||
-                      (isSalesUser() && resource.data.userId == request.auth.uid));
+                      (isSalesUser() && isOwnDocument(resource.data.userId)));
 
       // CREATE: Admin triggers commission calculation
-      allow create: if isAdmin();
+      allow create: if isAdmin() && sameBranch(request.resource.data.branch);
 
-      // UPDATE: Only status updates by Admin
-      allow update: if isAdmin() && 
-                      request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['status', 'paymentDate', 'paidAt']);
+      // UPDATE: Admin can update status/payment fields only
+      allow update: if isAdmin() &&
+                       resource.data.branch == getUserBranch() &&
+                       request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['status', 'paymentDate', 'paidAt', 'updatedAt']);
 
       // DELETE: Main Admin only
       allow delete: if isMainAdmin();
     }
 
     // ========================================
-    // AUDITS COLLECTION
+    // EXPENSES COLLECTION
     // ========================================
-    match /audits/{auditId} {
-      // READ: Admin and above for their branch, Main Admin sees all
-      allow read: if (isAdmin() && resource.data.branch == getUserBranch()) || 
+    match /expenses/{expenseId} {
+      // READ: Admin sees branch expenses; Main Admin sees all; Sales sees own
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
+                      (isAdmin() && resource.data.branch == getUserBranch()) ||
+                      (isSalesUser() && isOwnDocument(resource.data.userId)));
+
+      // CREATE: Sales and Admin on own branch
+      allow create: if (isSalesUser() || isAdmin()) &&
+                       sameBranch(request.resource.data.branch) &&
+                       isOwnDocument(request.resource.data.userId);
+
+      // UPDATE/DELETE: Admin and above on own branch
+      allow update, delete: if isAdmin() && resource.data.branch == getUserBranch() ||
+                                isMainAdmin();
+    }
+
+    // ========================================
+    // DAY END / CLOSING COLLECTION
+    // ========================================
+    match /dayEnd/{dayEndId} {
+      // READ: Admin sees own branch; Main Admin sees all
+      allow read: if isAdmin() && resource.data.branch == getUserBranch() ||
                      isMainAdmin();
 
-      // CREATE: System only (via backend) - do not allow client writes
-      allow create: if false;
+      // CREATE/UPDATE: Admin closes own branch day; Main Admin can override
+      allow create, update: if isAdmin() && sameBranch(request.resource.data.branch);
 
-      // UPDATE/DELETE: Never allowed
-      allow update, delete: if false;
+      // DELETE: Main Admin only
+      allow delete: if isMainAdmin();
+    }
+
+    // ========================================
+    // STORE VISITS / MERCHANDISER ACTIVITY
+    // ========================================
+    match /storeVisits/{visitId} {
+      // READ: Merchandiser owns; Admin sees branch; Main Admin sees all
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
+                      (isAdmin() && resource.data.branch == getUserBranch()) ||
+                      (isMerchandiser() && isOwnDocument(resource.data.userId)));
+
+      // CREATE: Merchandiser on own branch
+      allow create: if (isMerchandiser() || isAdmin()) &&
+                       sameBranch(request.resource.data.branch) &&
+                       isOwnDocument(request.resource.data.userId);
+
+      // UPDATE: Own record by Merchandiser; Admin can manage
+      allow update: if isMainAdmin() ||
+                       (isAdmin() && resource.data.branch == getUserBranch()) ||
+                       (isMerchandiser() && isOwnDocument(resource.data.userId));
+
+      // DELETE: Admin and above
+      allow delete: if isAdmin();
+    }
+
+    // ========================================
+    // STOCK AUDITS COLLECTION
+    // ========================================
+    match /stockAudits/{auditId} {
+      // READ: Branch staff; Auditor read-only; Main Admin sees all
+      allow read: if isAuthenticated() &&
+                     (isMainAdmin() ||
+                      isAuditor() ||
+                      (isAdmin() && resource.data.branch == getUserBranch()) ||
+                      (isFieldStaff() && resource.data.branch == getUserBranch()));
+
+      // CREATE: Sales and Merchandiser create audits in own branch
+      allow create: if isFieldStaff() &&
+                       request.resource.data.branch == getUserBranch() ||
+                       isAdmin() && sameBranch(request.resource.data.branch);
+
+      // UPDATE: Own audit by creator; Admin can manage branch audits
+      allow update: if isMainAdmin() ||
+                       (isAdmin() && resource.data.branch == getUserBranch()) ||
+                       (isFieldStaff() &&
+                        isOwnDocument(resource.data.userId) &&
+                        resource.data.branch == getUserBranch());
+
+      // DELETE: Admin and above
+      allow delete: if isAdmin();
+    }
+
+    // ========================================
+    // AUDITS COLLECTION (system-generated)
+    // ========================================
+    match /audits/{auditId} {
+      // READ: Admin sees branch; Auditor sees all; Main Admin sees all
+      allow read: if isMainAdmin() ||
+                     isAuditor() ||
+                     (isAdmin() && resource.data.branch == getUserBranch());
+
+      // CREATE: Backend/Admin triggered only
+      allow create: if isAdmin() && sameBranch(request.resource.data.branch);
+
+      // UPDATE/DELETE: Main Admin only
+      allow update, delete: if isMainAdmin();
     }
 
     // ========================================
     // SETTLEMENTS COLLECTION
     // ========================================
     match /settlements/{settlementId} {
-      // READ: Admin sees own branch, Main Admin sees all
-      allow read: if (isAdmin() && resource.data.branch == getUserBranch()) || 
-                     isMainAdmin();
+      // READ: Admin sees own branch; Main Admin sees all
+      allow read: if isMainAdmin() ||
+                     (isAdmin() && resource.data.branch == getUserBranch());
 
       // CREATE/UPDATE: Main Admin only
       allow create, update: if isMainAdmin();
@@ -197,24 +357,8 @@ service cloud.firestore {
     }
 
     // ========================================
-    // STOCK AUDITS COLLECTION
+    // DEFAULT DENY (fail-secure)
     // ========================================
-    match /stockAudits/{auditId} {
-      // READ: Users from same branch, Main Admin sees all
-      allow read: if isAuthenticated() && 
-                     (isMainAdmin() || resource.data.branch == getUserBranch());
-
-      // CREATE/UPDATE: Admin and above on own branch
-      allow create, update: if isAdmin() || isSalesUser();
-
-      // DELETE: Admin and above
-      allow delete: if isAdmin();
-    }
-
-    // ========================================
-    // DEFAULT DENY
-    // ========================================
-    // Deny all other access (fail-secure)
     match /{document=**} {
       allow read, write: if false;
     }

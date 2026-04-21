@@ -16,28 +16,38 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const type = searchParams.get('type');
-    const status = searchParams.get('status');
+    const type = searchParams.get('type'); // exchange | return | disposal
+    const status = searchParams.get('status'); // pending | approved | rejected | completed
     const branch = searchParams.get('branch');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const role = normalizeRole(user.role);
 
-    let query = supabaseAdmin.from('exchange_returns').select('*').order('created_at', { ascending: false });
+    let query = supabaseAdmin
+      .from('exchange_returns')
+      .select('*')
+      .order('created_at', { ascending: false });
 
+    // Apply filters
     if (type) query = query.eq('type', type);
     if (status) query = query.eq('status', status);
-
+    
+    // Branch filtering - Admin can only see their branch
     if (role === 'Admin') {
       query = query.eq('branch', user.branch);
     } else if (branch && branch !== 'all') {
       query = query.eq('branch', branch);
     }
 
-    if (startDate) query = query.gte('created_at', `${startDate}T00:00:00Z`);
-    if (endDate) query = query.lte('created_at', `${endDate}T23:59:59Z`);
+    if (startDate) {
+      query = query.gte('created_at', `${startDate}T00:00:00Z`);
+    }
+    if (endDate) {
+      query = query.lte('created_at', `${endDate}T23:59:59Z`);
+    }
 
     const { data, error } = await query;
+
     if (error) {
       console.error('Error fetching exchange/returns:', error);
       return NextResponse.json({ error: 'Failed to fetch data' }, { status: 500 });
@@ -62,29 +72,41 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { sale_id, invoice, product_id, product_name, quantity, type, reason, reason_details, notes, proof_photo_urls } = body;
+    const { 
+      sale_id, 
+      invoice,
+      product_id, 
+      product_name, 
+      quantity, 
+      type, 
+      reason,
+      reason_details,
+      notes,
+      proof_photo_urls,
+    } = body;
 
+    // Validation
     if (!product_id || !product_name || !quantity || !type || !reason) {
-      return NextResponse.json(
-        { error: 'Missing required fields: product_id, product_name, quantity, type, reason' },
-        { status: 400 }
-      );
+      return NextResponse.json({ 
+        error: 'Missing required fields: product_id, product_name, quantity, type, reason' 
+      }, { status: 400 });
     }
 
+    // Hardblock: bukti gambar wajib untuk semua refund/return
     const proofUrls = Array.isArray(proof_photo_urls) ? proof_photo_urls.filter(Boolean) : [];
     if (proofUrls.length === 0) {
-      return NextResponse.json(
-        {
-          error: 'Gambar bukti wajib! Sila ambil gambar produk yang hendak di-return/exchange sebelum hantar.',
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        error: 'Gambar bukti wajib! Sila ambil gambar produk yang hendak di-return/exchange sebelum hantar.'
+      }, { status: 400 });
     }
 
     if (!['exchange', 'return', 'disposal'].includes(type)) {
-      return NextResponse.json({ error: 'Invalid type. Must be: exchange, return, or disposal' }, { status: 400 });
+      return NextResponse.json({ 
+        error: 'Invalid type. Must be: exchange, return, or disposal' 
+      }, { status: 400 });
     }
 
+    // Create exchange/return record
     const newRecord = {
       sale_id: sale_id || null,
       invoice: invoice || null,
@@ -103,28 +125,28 @@ export async function POST(request: NextRequest) {
       proof_photo_urls: proofUrls,
     };
 
-    const { data, error } = await supabaseAdmin.from('exchange_returns').insert(newRecord).select().single();
+    const { data, error } = await supabaseAdmin
+      .from('exchange_returns')
+      .insert(newRecord)
+      .select()
+      .single();
+
     if (error) {
       console.error('Error creating exchange/return:', error);
       return NextResponse.json({ error: 'Failed to create record' }, { status: 500 });
     }
 
+    // Log audit event
     await logAuditEvent({
       actor: user,
       module: 'exchange_returns',
       action: 'create',
       entityType: type,
+      entityId: data.id,
+      branch: user.branch,
       status: 'success',
-      sourceSystem: 'api',
-      metadata: {
-        entity_id: data.id,
-        branch: user.branch,
-        reference_no: invoice || null,
-        product_name,
-        quantity,
-        type,
-        reason,
-      },
+      referenceNo: invoice || undefined,
+      metadata: { product_name, quantity, type, reason }
     });
 
     return NextResponse.json(data, { status: 201 });
@@ -142,6 +164,8 @@ export async function PATCH(request: NextRequest) {
     }
 
     const role = normalizeRole(user.role);
+    
+    // Only Admin and Main Admin can approve/reject
     if (role !== 'Admin' && role !== 'Main Admin') {
       return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
@@ -158,12 +182,14 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (!['approved', 'rejected', 'completed'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid status. Must be: approved, rejected, or completed' }, { status: 400 });
+      return NextResponse.json({ 
+        error: 'Invalid status. Must be: approved, rejected, or completed' 
+      }, { status: 400 });
     }
 
-    const updateData: Record<string, unknown> = {
+    const updateData: any = {
       status,
-      notes: notes || null,
+      notes: notes || null
     };
 
     if (status === 'approved') {
@@ -186,20 +212,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update record' }, { status: 500 });
     }
 
+    // Log audit event
     await logAuditEvent({
       actor: user,
       module: 'exchange_returns',
       action: 'update',
       entityType: data.type,
+      entityId: id,
+      branch: user.branch,
       status: 'success',
-      sourceSystem: 'api',
-      metadata: {
-        entity_id: id,
-        branch: user.branch,
-        reference_no: data.invoice || null,
-        new_status: status,
-        product_name: data.product_name,
-      },
+      referenceNo: data.invoice || undefined,
+      metadata: { new_status: status, product_name: data.product_name }
     });
 
     return NextResponse.json(data);
@@ -208,4 +231,3 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

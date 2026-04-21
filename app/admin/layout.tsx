@@ -1,34 +1,22 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Activity, LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Wallet, Upload } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Upload, ReceiptText, Receipt, BarChart2 } from 'lucide-react';
 import clsx from 'clsx';
 import { useLanguage } from '@/context/LanguageContext';
 import ClientSwitchers from '@/components/ClientSwitchers';
 import SidebarHeader from '@/components/SidebarHeader';
-
-// Helper to read user from localStorage on client
-function getStoredUser() {
-  if (typeof window === 'undefined') return null;
-  try {
-    const user = localStorage.getItem('user');
-    return user ? JSON.parse(user) : null;
-  } catch {
-    return null;
-  }
-}
+import { normalizeRole } from '@/lib/roles';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  
-  // Initialize from localStorage using lazy initialization
-  const initialUser = useMemo(() => getStoredUser(), []);
-  const [userRole, setUserRole] = useState(initialUser?.role || '');
-  const [userBranch, setUserBranch] = useState(initialUser?.branch || '');
-  const [username, setUsername] = useState(initialUser?.name || initialUser?.username || '');
+
+  const [userRole, setUserRole] = useState('');
+  const [userBranch, setUserBranch] = useState('');
+  const [username, setUsername] = useState('');
   
   const pathname = usePathname();
   const router = useRouter();
@@ -37,9 +25,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     const getUserData = async () => {
       try {
+        const localUserRaw = localStorage.getItem('user');
+        if (localUserRaw) {
+          const localUser = JSON.parse(localUserRaw);
+          setUsername(localUser.name || localUser.username || 'User');
+          setUserRole(localUser.role || '');
+          setUserBranch(localUser.branch || '');
+        }
+      } catch (error) {
+        console.error('Failed to parse local user data:', error);
+      }
+
+      try {
         const response = await fetch('/api/auth/me');
         if (response.ok) {
           const userData = await response.json();
+          // Batch state updates to prevent cascading renders
           setUsername(userData.name || userData.username || 'User');
           setUserRole(userData.role);
           setUserBranch(userData.branch);
@@ -59,18 +60,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   // Filter nav items based on role and branch
   const getFilteredNavItems = () => {
-    // Default to 'Admin' if role is not yet loaded to prevent empty sidebar on first render
-    const activeRole = userRole || 'Admin';
+    const activeRole = normalizeRole(userRole) || 'Sales';
 
     const allItems = [
-      { to: '/admin', label: 'overview', icon: LayoutDashboard, roles: ['Main Admin', 'Admin', 'Sales'] },
+      { to: '/admin', label: 'overview', icon: LayoutDashboard, roles: ['Main Admin'] },
       { to: '/admin/global-monitor', label: 'global_monitor', icon: Globe, roles: ['Main Admin'] },
       { to: '/admin/kota-kinabalu', label: 'kota_kinabalu', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'], branches: ['HQ', 'Kota Kinabalu'] },
       { to: '/admin/kinabatangan', label: 'kinabatangan', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'], branches: ['HQ', 'Kinabatangan'] },
       { to: '/admin/reports', label: 'reports', icon: FileText, roles: ['Main Admin', 'Admin'] },
-      { to: '/admin/live-sales', label: 'live_sales', icon: Activity, roles: ['Main Admin', 'Admin', 'Sales'] },
-      { to: '/admin/expenses', label: 'expenses', icon: Wallet, roles: ['Main Admin', 'Admin'] },
+      { to: '/admin/audit-center', label: 'audit_center', icon: FileText, roles: ['Main Admin'] },
       { to: '/admin/commissions', label: 'commissions', icon: Banknote, roles: ['Main Admin', 'Admin', 'Sales'] },
+      { to: '/admin/live-sales', label: 'Live Sales', icon: ReceiptText, roles: ['Main Admin', 'Admin'] },
+      { to: '/admin/weekly-reports', label: 'Laporan Mingguan', icon: BarChart2, roles: ['Main Admin', 'Admin'] },
+      { to: '/admin/expenses', label: 'Expenses', icon: Receipt, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/loading', label: 'van_loading', icon: Truck, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/orders', label: 'orders', icon: ShoppingCart, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/products', label: 'products', icon: Package, roles: ['Main Admin', 'Admin'] },
@@ -78,6 +80,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       { to: '/admin/backdated-import', label: 'backdated_import', icon: Upload, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/users', label: 'user_management', icon: Users, roles: ['Main Admin'] },
       { to: '/admin/audits', label: 'audits', icon: Package, roles: ['Main Admin'] },
+      { to: '/admin/backdated-import', label: 'backdated_import', icon: Upload, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/database', label: 'database_nav', icon: Database, roles: ['Main Admin', 'Admin'] },
     ];
 
@@ -87,6 +90,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       
       // Check branch permission for branch-specific items
       if (item.branches && activeRole !== 'Main Admin') {
+        // Least-privilege: if branch hasn't loaded yet, hide branch-specific items first
+        if (!userBranch) return false;
         return item.branches.includes(userBranch) || userBranch === 'HQ';
       }
       
@@ -97,7 +102,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const navItems = getFilteredNavItems();
 
   return (
-    <div className="min-h-screen bg-black text-slate-100 flex overflow-hidden font-sans">
+    <div className="min-h-screen soft-page-bg text-slate-900 dark:text-slate-100 flex overflow-hidden font-sans">
       {/* Mobile Sidebar Backdrop */}
       {sidebarOpen && (
         <div 
@@ -109,12 +114,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Sidebar */}
       <aside 
         className={clsx(
-          "fixed lg:static inset-y-0 left-0 z-30 w-64 bg-slate-900 border-r border-slate-800 transform transition-transform duration-300 ease-in-out",
+          "fixed lg:static inset-y-0 left-0 z-30 w-64 bg-slate-50/85 border-r border-slate-200/70 dark:bg-slate-900 dark:border-slate-800 transform transition-transform duration-300 ease-in-out backdrop-blur-sm",
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
         <div className="h-full flex flex-col">
-          <SidebarHeader logoAlt="Admin HQ" className="bg-slate-900 border-white/10" />
+          <SidebarHeader logoAlt="Admin HQ" className="bg-slate-50/90 border-slate-200/70 dark:bg-slate-900 dark:border-white/10" />
 
           <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
             {navItems.map((item) => {
@@ -128,8 +133,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   className={clsx(
                     "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                     isActive 
-                      ? "bg-red-600 text-white shadow-lg shadow-red-900/20" 
-                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                      ? "bg-rose-500 text-white shadow-sm" 
+                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                   )}
                 >
                   <item.icon size={20} />
@@ -139,27 +144,27 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             })}
           </nav>
 
-          <div className="p-4 border-t border-slate-800 bg-slate-900/50">
+          <div className="p-4 border-t border-slate-200/70 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900/50">
              <div className="flex items-center gap-3 mb-4 px-2">
-                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center">
                     <span className="text-xs font-bold text-white">
-                      {userRole === 'Main Admin' ? 'MA' : userRole === 'Admin' ? 'AD' : 'SA'}
+                      {normalizeRole(userRole) === 'Main Admin' ? 'MA' : normalizeRole(userRole) === 'Admin' ? 'AD' : 'SA'}
                     </span>
                 </div>
                 <div className="flex-1 overflow-hidden">
-                    <p className="text-sm font-medium text-white truncate">
-                      {userRole === 'Main Admin' ? t('main_admin') : 
-                       userRole === 'Admin' ? `${t('admin_role')} - ${userBranch}` : 
+                    <p className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                      {normalizeRole(userRole) === 'Main Admin' ? t('main_admin') : 
+                       normalizeRole(userRole) === 'Admin' ? `${t('admin_role')} - ${userBranch}` : 
                        `${t('sales_role')} - ${userBranch}`}
                     </p>
                     <p className="text-xs text-slate-500 truncate">
-                      {userRole === 'Main Admin' ? 'HQ' : userBranch}
+                      {normalizeRole(userRole) === 'Main Admin' ? 'HQ' : userBranch}
                     </p>
                 </div>
              </div>
              <button 
                 onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-slate-700 rounded-lg text-red-400 hover:bg-red-900/20 hover:border-red-900/50 transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/20 hover:border-red-300 dark:hover:border-red-900/50 transition-colors"
             >
                 <LogOut size={16} />
                 {t('logout')}
@@ -169,33 +174,33 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-black relative">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden soft-page-bg relative">
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
              <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-blue-900/10 rounded-full blur-[100px]" />
              <div className="absolute top-[20%] right-[0%] w-[30%] h-[30%] bg-red-900/10 rounded-full blur-[100px]" />
         </div>
 
-        <header className="h-16 border-b border-slate-800 bg-black/50 backdrop-blur-md flex items-center justify-between px-4 lg:px-8 z-10">
+        <header className="h-16 border-b border-slate-200/70 bg-slate-50/70 dark:border-slate-800 dark:bg-black/50 backdrop-blur-md flex items-center justify-between px-4 lg:px-8 z-10">
             <div className="flex items-center gap-4">
                 <button 
                   onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="lg:hidden p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                  className="lg:hidden p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 rounded-lg transition-colors"
                 >
                   {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
                 </button>
-                <h2 className="text-lg font-semibold text-white ml-2 lg:ml-0">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white ml-2 lg:ml-0">
                   {t('admin_panel')}
                 </h2>
             </div>
             
             <div className="flex items-center gap-4">
                {username && (
-                 <div className="flex items-center gap-3 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700/50">
+                 <div className="flex items-center gap-3 px-3 py-2 bg-white/75 rounded-lg border border-slate-200 dark:bg-slate-800/50 dark:border-slate-700/50">
                     <div className="text-right">
-                      <p className="text-sm font-semibold text-white">{username}</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{username}</p>
                       <p className="text-xs text-slate-400">{userBranch || t('branch') + ' N/A'}</p>
                     </div>
-                    <div className="flex gap-1 pl-2 border-l border-slate-600">
+                    <div className="flex gap-1 pl-2 border-l border-slate-300 dark:border-slate-600">
                       <span className="px-2 py-1 text-xs font-medium rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">
                         {userRole || t('loading')}
                       </span>

@@ -125,10 +125,6 @@ function normalizeImportBranch(raw?: string): 'Kota Kinabalu' | 'Kinabatangan' |
   return null;
 }
 
-function isImportAdminRole(role: string): boolean {
-  return role === 'Main Admin' || role === 'Super Admin' || role === 'Admin';
-}
-
 function validateRow(row: ImportRow, rowIndex: number): RowError[] {
   const errors: RowError[] = [];
 
@@ -187,7 +183,7 @@ export async function POST(request: NextRequest) {
     }
 
     const role = normalizeRole(currentUser.role);
-    if (!isImportAdminRole(role)) {
+    if (role !== 'Main Admin' && role !== 'Admin') {
       return NextResponse.json({ error: 'Hanya Main Admin atau Admin boleh import data' }, { status: 403 });
     }
 
@@ -428,7 +424,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const role = normalizeRole(currentUser.role);
-  if (!isImportAdminRole(role)) {
+  if (role !== 'Main Admin' && role !== 'Admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
   if (!supabaseAdmin) {
@@ -436,7 +432,7 @@ export async function GET(request: NextRequest) {
   }
   
   // Main Admin sees all customers from both branches, Admin sees only their branch
-  if (role === 'Main Admin' || role === 'Super Admin') {
+  if (role === 'Main Admin') {
     // Fetch from both customer tables and combine
     const [{ data: kbCustomers }, { data: kkCustomers }] = await Promise.all([
       supabaseAdmin

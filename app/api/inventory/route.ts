@@ -20,9 +20,10 @@ import {
   updateInventoryItem,
   deleteInventoryItem,
   toApiResponse,
-  InventoryItem,
 } from '@/lib/firestore-service';
-import { loadInventorySchema, updateVanInventorySchema } from '@/lib/validations';
+import { loadInventorySchema } from '@/lib/validations';
+import { requireAuth } from '@/lib/auth-check';
+import { logAuditEvent } from '@/lib/audit';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -95,13 +96,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    // Check authentication - Admin role or higher can create inventory
+    const { user, error } = await requireAuth(request, 'Admin');
+    if (error) return error;
+
     const body = await request.json();
 
     // Validate inventory data with Zod
     const validation = loadInventorySchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
         { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
@@ -121,6 +125,22 @@ export async function POST(request: NextRequest) {
       lastCountDate: body.lastCountDate,
       status: body.quantity === 0 ? 'out-of-stock' : body.quantity < 10 ? 'low-stock' : 'in-stock',
       batchNumbers: body.batchNumbers || [],
+    });
+
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'inventory',
+      action: 'create_inventory_item',
+      entityType: 'inventory_item',
+      entityId: inventoryId,
+      branch: validatedData.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        productId: validatedData.items[0]?.productId || body.productId,
+        quantity: validatedData.items[0]?.quantity || body.quantity,
+      },
     });
 
     return NextResponse.json(
@@ -146,7 +166,10 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    // Check authentication - Admin role or higher can update inventory
+    const { user, error } = await requireAuth(request, 'Admin');
+    if (error) return error;
+
     const body = await request.json();
     const inventoryId = body.id || body.inventoryId;
 
@@ -169,6 +192,21 @@ export async function PUT(request: NextRequest) {
     // Update inventory item
     await updateInventoryItem(inventoryId, body);
 
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'inventory',
+      action: 'update_inventory_item',
+      entityType: 'inventory_item',
+      entityId: inventoryId,
+      branch: item.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        updatedFields: Object.keys(body || {}),
+      },
+    });
+
     return NextResponse.json(
       { message: 'Inventory item updated successfully' },
       { status: 200 }
@@ -189,13 +227,25 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    // Check authentication - Main Admin can delete inventory items
+    const { user, error } = await requireAuth(request, 'Main Admin');
+    if (error) return error;
+
     const searchParams = request.nextUrl.searchParams;
     const inventoryId = searchParams.get('id');
+    const reason = searchParams.get('reason');
+    const referenceNo = searchParams.get('referenceNo');
 
     if (!inventoryId) {
       return NextResponse.json(
         { error: 'Inventory ID is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!reason || !reason.trim()) {
+      return NextResponse.json(
+        { error: 'Reason is required for delete action' },
         { status: 400 }
       );
     }
@@ -211,6 +261,31 @@ export async function DELETE(request: NextRequest) {
 
     // Delete inventory item
     await deleteInventoryItem(inventoryId);
+
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'inventory',
+      action: 'delete_inventory_item',
+      entityType: 'inventory_item',
+      entityId: inventoryId,
+      branch: item.branch,
+      status: 'success',
+      reason,
+      referenceNo: referenceNo || undefined,
+      sourceSystem: 'firestore',
+      changes: [
+        {
+          field: 'deleted_inventory_item',
+          oldValue: {
+            id: item.inventoryId,
+            productId: item.productId,
+            quantity: item.quantity,
+          },
+          newValue: null,
+        },
+      ],
+    });
 
     return NextResponse.json(
       { message: 'Inventory item deleted successfully' },

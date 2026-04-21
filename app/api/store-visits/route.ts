@@ -1,49 +1,100 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { canAccessStoreVisits } from '@/lib/permissions';
+import { getCustomersTableByBranch } from '@/lib/branchPermissions';
 
-function normalizeAllowedStoreIds(rawAllowedStores: unknown): string[] {
-  if (!Array.isArray(rawAllowedStores)) return [];
-
-  return rawAllowedStores
-    .map((item) => {
-      if (typeof item === 'string' || typeof item === 'number') {
-        return String(item);
-      }
-
-      if (item && typeof item === 'object') {
-        const maybeId =
-          (item as { id?: unknown }).id ??
-          (item as { customer_id?: unknown }).customer_id ??
-          (item as { value?: unknown }).value;
-
-        if (typeof maybeId === 'string' || typeof maybeId === 'number') {
-          return String(maybeId);
-        }
-      }
-
-      return null;
-    })
-    .filter((id): id is string => Boolean(id));
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Internal server error';
 }
 
-// Get current user from session cookie
-async function getCurrentUser(request: Request) {
-  try {
-    const session = (request as any).cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch (e) {
+function isCustomerFkError(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  return message.includes('store_visits_customer_id_fkey') || message.includes('foreign key');
+}
+
+type StoreVisitRow = Record<string, any>;
+
+async function resolveCanonicalCustomerId(customerId: string, branch?: string | null): Promise<string | null> {
+  if (!customerId || !supabaseAdmin) return null;
+
+  const canonicalRead = await supabaseAdmin
+    .from('customers')
+    .select('id')
+    .eq('id', customerId)
+    .maybeSingle();
+
+  if (!canonicalRead.error && canonicalRead.data?.id) {
+    return String(canonicalRead.data.id);
+  }
+
+  const customersTable = getCustomersTableByBranch(branch || undefined);
+  const branchCustomerRead = await supabaseAdmin
+    .from(customersTable)
+    .select('id, name, address, branch')
+    .eq('id', customerId)
+    .maybeSingle();
+
+  if (branchCustomerRead.error || !branchCustomerRead.data?.id) {
     return null;
   }
+
+  const branchCustomer = branchCustomerRead.data;
+  const payload = {
+    id: String(branchCustomer.id),
+    name: String(branchCustomer.name || 'Unknown Store'),
+    address: branchCustomer.address || null,
+    branch: branchCustomer.branch || branch || null,
+  };
+
+  const canonicalUpsert = await supabaseAdmin
+    .from('customers')
+    .upsert(payload, { onConflict: 'id' })
+    .select('id')
+    .maybeSingle();
+
+  if (canonicalUpsert.error) {
+    console.error('[API store-visits] Failed to sync canonical customer:', canonicalUpsert.error);
+    return null;
+  }
+
+  return String(canonicalUpsert.data?.id || payload.id);
+}
+
+async function attachCustomerToVisit(visit: StoreVisitRow | null) {
+  if (!visit?.customer_id || !supabaseAdmin) return visit;
+
+  const customersTable = getCustomersTableByBranch(visit.branch);
+  const { data: customer } = await supabaseAdmin
+    .from(customersTable)
+    .select('id, name, address, branch, area')
+    .eq('id', visit.customer_id)
+    .maybeSingle();
+
+  return {
+    ...visit,
+    customer: customer || null,
+  };
+}
+
+async function attachCustomersToVisits(visits: StoreVisitRow[] | null) {
+  if (!Array.isArray(visits) || visits.length === 0) return [];
+
+  return Promise.all(visits.map((visit) => attachCustomerToVisit(visit)));
 }
 
 // GET - List store visits with filtering
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessStoreVisits(role)) {
+      return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -57,16 +108,13 @@ export async function GET(request: NextRequest) {
 
     let query = supabaseAdmin
       .from('store_visits')
-      .select(`
-        *,
-        customer:customers(id, name, address, branch)
-      `);
+      .select('*');
 
     // Role-based filtering
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       // Merchandiser/Sales sees only their own visits
       query = query.eq('merchandiser_id', currentUser.id);
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       // Admin sees visits in their branch only
       query = query.eq('branch', currentUser.branch);
     }
@@ -93,23 +141,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data || []);
-  } catch (error: any) {
+    return NextResponse.json(await attachCustomersToVisits(data || []));
+  } catch (error: unknown) {
     console.error('[API store-visits GET] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
 // POST - Create new store visit (check-in)
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Only Merchandiser, Sales, and Admin can create visits
-    if (currentUser.role !== 'Merchandiser' && currentUser.role !== 'Sales' && currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+    const role = normalizeRole(currentUser.role);
+
+    // Only allowed roles can create visits
+    if (!canAccessStoreVisits(role)) {
       return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
@@ -146,7 +196,7 @@ export async function POST(request: NextRequest) {
     }
 
     // For merchandisers, check if they're allowed to visit this store
-    if (currentUser.role === 'Merchandiser') {
+    if (role === 'Merchandiser') {
       const { data: userData } = await supabaseAdmin
         .from('users')
         .select('allowed_stores')
@@ -159,10 +209,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const resolvedCustomerId = await resolveCanonicalCustomerId(customer_id, currentUser.branch);
+    if (!resolvedCustomerId) {
+      return NextResponse.json(
+        { error: 'Store record not synced. Please refresh store list or contact admin.' },
+        { status: 400 }
+      );
+    }
+
     const visitData = {
       merchandiser_id: currentUser.id,
-      customer_id: normalizedCustomerId,
-      branch: customer.branch || currentUser.branch,
+      customer_id: resolvedCustomerId,
+      branch: currentUser.branch,
       check_in_time: new Date().toISOString(),
       gps_lat: gps_lat || null,
       gps_long: gps_long || null,
@@ -172,14 +230,22 @@ export async function POST(request: NextRequest) {
       status: 'in-progress',
     };
 
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('store_visits')
       .insert(visitData)
-      .select(`
-        *,
-        customer:customers(id, name, address, branch)
-      `)
+      .select('*')
       .single();
+
+    if (error && isCustomerFkError(error)) {
+      const retriedCustomerId = await resolveCanonicalCustomerId(customer_id, currentUser.branch);
+      if (retriedCustomerId) {
+        ({ data, error } = await supabaseAdmin
+          .from('store_visits')
+          .insert({ ...visitData, customer_id: retriedCustomerId })
+          .select('*')
+          .single());
+      }
+    }
 
     if (error) {
       if (error.code === '23503') {
@@ -193,19 +259,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data, { status: 201 });
-  } catch (error: any) {
+    return NextResponse.json(await attachCustomerToVisit(data), { status: 201 });
+  } catch (error: unknown) {
     console.error('[API store-visits POST] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
 // PUT - Update store visit (typically for check-out)
 export async function PUT(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const role = normalizeRole(currentUser.role);
+    if (!canAccessStoreVisits(role)) {
+      return NextResponse.json({ error: 'Forbidden - insufficient permissions' }, { status: 403 });
     }
 
     if (!supabaseAdmin) {
@@ -231,18 +302,18 @@ export async function PUT(request: NextRequest) {
     }
 
     // Permission check
-    if (currentUser.role === 'Merchandiser' || currentUser.role === 'Sales') {
+    if (role === 'Merchandiser' || role === 'Sales') {
       if (existingVisit.merchandiser_id !== currentUser.id) {
         return NextResponse.json({ error: 'Forbidden - you can only update your own visits' }, { status: 403 });
       }
-    } else if (currentUser.role === 'Admin') {
+    } else if (role === 'Admin') {
       if (existingVisit.branch !== currentUser.branch) {
         return NextResponse.json({ error: 'Forbidden - you can only update visits in your branch' }, { status: 403 });
       }
     }
     // Main Admin can update any visit
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     
     if (status) updateData.status = status;
     if (notes !== undefined) updateData.notes = notes;
@@ -258,10 +329,7 @@ export async function PUT(request: NextRequest) {
       .from('store_visits')
       .update(updateData)
       .eq('id', visit_id)
-      .select(`
-        *,
-        customer:customers(id, name, address, branch)
-      `)
+      .select('*')
       .single();
 
     if (error) {
@@ -269,9 +337,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data);
-  } catch (error: any) {
+    return NextResponse.json(await attachCustomerToVisit(data));
+  } catch (error: unknown) {
     console.error('[API store-visits PUT] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

@@ -1,26 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { canExportReports } from '@/lib/permissions';
 
-// Helper: Get current user from session
-async function getCurrentUser(request: Request) {
-  try {
-    const session = (request as any).cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch (e) {
-    return null;
-  }
+interface ReportBranchSummary {
+  branch: string;
+  totalRevenue: number;
+  transactionCount: number;
+  avgTransaction: number;
+}
+
+interface ReportProduct {
+  name: string;
+  quantity: number;
+}
+
+interface PdfReportData {
+  totalRevenue: number;
+  totalTransactions: number;
+  branchSummaries: ReportBranchSummary[];
+  topProducts: ReportProduct[];
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+    if (!canExportReports(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const body = await request.json();
-    const { month, branch, reportData } = body;
+    const { month, branch, reportData } = body as { month: string; branch: string; reportData: PdfReportData };
 
     if (!month || !reportData) {
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
@@ -183,7 +198,7 @@ export async function POST(request: NextRequest) {
                 </tr>
               </thead>
               <tbody>
-                ${reportData.branchSummaries.map((b: any) => `
+                ${reportData.branchSummaries.map((b) => `
                   <tr>
                     <td>${b.branch}</td>
                     <td class="text-right">${formatCurrency(b.totalRevenue)}</td>
@@ -207,7 +222,7 @@ export async function POST(request: NextRequest) {
                 </tr>
               </thead>
               <tbody>
-                ${reportData.topProducts.slice(0, 10).map((p: any) => `
+                ${reportData.topProducts.slice(0, 10).map((p) => `
                   <tr>
                     <td>${p.name}</td>
                     <td class="text-right">${p.quantity}</td>

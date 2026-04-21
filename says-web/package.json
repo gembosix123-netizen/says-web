@@ -1,0 +1,28 @@
+{
+  "name": "says-web",
+  "version": "1.0.0",
+  "description": "A clone of the SAYS Malaysia website.",
+  "main": "src/index.html",
+  "scripts": {
+    "start": "live-server src",
+    "build": "node scripts/build.js",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
+  },
+  "keywords": [
+    "says",
+    "malaysia",
+    "website",
+    "clone"
+  ],
+  "author": "gembosix123-netizen",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "cheerio": "^1.0.0",
+    "csso": "^5.0.5",
+    "esbuild": "^0.23.1",
+    "live-server": "^1.2.1",
+    "vitest": "^2.0.5"
+  }
+}

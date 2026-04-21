@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Payment methods and status
-const PAYMENT_METHODS = ['cash', 'credit', 'card', 'transfer', 'ewallet'] as const;
+const PAYMENT_METHODS = ['cash', 'bill_to_bill', 'bank_transfer', 'qr_code', 'card', 'ewallet', 'credit'] as const;
 const PAYMENT_STATUS = ['paid', 'pending', 'partial', 'cancelled'] as const;
 
 // Custom error messages in Bahasa Melayu
@@ -102,6 +102,31 @@ export const createSaleSchema = z.object({
     .trim()
     .optional()
     .nullable(),
+  // Payment reference numbers — required depends on payment_method (validated in API/frontend)
+  receipt_no: z
+    .string()
+    .max(100)
+    .trim()
+    .optional()
+    .nullable(),
+  billing_ref_no: z
+    .string()
+    .max(100)
+    .trim()
+    .optional()
+    .nullable(),
+  transfer_ref_no: z
+    .string()
+    .max(100)
+    .trim()
+    .optional()
+    .nullable(),
+  qr_txn_ref_no: z
+    .string()
+    .max(100)
+    .trim()
+    .optional()
+    .nullable(),
   receipt_url: z
     .string()
     .url('URL resit tidak sah')
@@ -114,6 +139,11 @@ export const createSaleSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal('')),
+  proof_photo_urls: z
+    .array(z.string().url('URL gambar tidak sah'))
+    .max(4, 'Maksimum 4 gambar bukti pembayaran')
+    .optional()
+    .nullable(),
   check_in_time: z
     .string()
     .datetime('Format tarikh tidak sah')
@@ -142,6 +172,16 @@ export const createSaleSchema = z.object({
   {
     message: 'Pelanggan diperlukan untuk pembayaran kredit',
     path: ['customer_id']
+  }
+).refine(
+  (data) => {
+    const hasSingleProof = Boolean(String(data.proof_photo_url || data.receipt_url || '').trim());
+    const hasMultipleProofs = Array.isArray(data.proof_photo_urls) && data.proof_photo_urls.length > 0;
+    return hasSingleProof || hasMultipleProofs;
+  },
+  {
+    message: 'Bukti gambar wajib untuk semua jenis pembayaran',
+    path: ['proof_photo_urls']
   }
 ).refine(
   (data) => {

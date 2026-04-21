@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest } from '@/lib/session';
 
-const TABLE_KOTA = 'sales_kota_kinabalu';
-const TABLE_KIN = 'sales_kinabatangan';
+const SALES_TABLE = 'sales_transactions';
 
-// Get current user from session cookie
-async function getCurrentUser(request: Request) {
-  try {
-    const session = (request as any).cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch (e) {
-    return null;
-  }
+interface SalesRecord {
+  salesman_id?: string;
+  total_amount?: number | string;
+  amount?: number | string;
+}
+
+interface CommissionPayoutRecord {
+  user_id: string;
+  amount: number | string;
 }
 
 interface CommissionSummary {
@@ -38,13 +38,15 @@ interface CommissionSummary {
  */
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+
     // Only Admin and Main Admin can view commissions
-    if (currentUser.role !== 'Admin' && currentUser.role !== 'Main Admin') {
+    if (role !== 'Admin' && role !== 'Main Admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
@@ -55,11 +57,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
-    let branch = searchParams.get('branch');
+    let branch: string | null = searchParams.get('branch');
 
     // Admin can only see their branch
-    if (currentUser.role === 'Admin') {
-      branch = currentUser.branch;
+    if (role === 'Admin') {
+      branch = currentUser.branch ?? null;
     }
 
     // Default to current month
@@ -84,34 +86,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });
     }
 
-    // Get all sales for the period
-    const fetchSales = async (table: string, branchFilter?: string) => {
-      let query = supabaseAdmin!
-        .from(table)
-        .select('*')
-        .gte('created_at', `${defaultStart}T00:00:00Z`)
-        .lte('created_at', `${defaultEnd}T23:59:59Z`);
+    // Get all sales for the period from the single authoritative table
+    let salesQuery = supabaseAdmin!
+      .from(SALES_TABLE)
+      .select('*')
+      .gte('created_at', `${defaultStart}T00:00:00Z`)
+      .lte('created_at', `${defaultEnd}T23:59:59Z`);
 
-      if (branchFilter && branchFilter !== 'all') {
-        query = query.eq('branch', branchFilter);
-      }
-
-      const { data } = await query;
-      return data || [];
-    };
-
-    let allSales: any[] = [];
-    if (!branch || branch === 'all') {
-      const [kk, kin] = await Promise.all([
-        fetchSales(TABLE_KOTA),
-        fetchSales(TABLE_KIN)
-      ]);
-      allSales = [...kk, ...kin];
-    } else if (branch === 'Kinabatangan' || branch.toLowerCase().includes('kina')) {
-      allSales = await fetchSales(TABLE_KIN, branch);
-    } else {
-      allSales = await fetchSales(TABLE_KOTA, branch);
+    if (branch && branch !== 'all') {
+      salesQuery = salesQuery.eq('branch', branch);
     }
+
+    const { data: allSalesData } = await salesQuery;
+    const allSales: SalesRecord[] = allSalesData || [];
 
     // Get commission payouts for the period
     const payoutsResult = await supabaseAdmin!
@@ -122,20 +109,20 @@ export async function GET(request: NextRequest) {
     const payouts = payoutsResult?.data || [];
 
     const payoutsByUser: Record<string, number> = {};
-    (payouts || []).forEach((p: any) => {
-      payoutsByUser[p.user_id] = (payoutsByUser[p.user_id] || 0) + parseFloat(p.amount || 0);
+    (payouts as CommissionPayoutRecord[]).forEach((p) => {
+      payoutsByUser[p.user_id] = (payoutsByUser[p.user_id] || 0) + Number(p.amount ?? 0);
     });
 
     // Calculate commission for each sales user
     const commissions: CommissionSummary[] = (salesUsers || []).map(user => {
       // Filter sales by this user
-      const userSales = allSales.filter(s => 
+      const userSales = allSales.filter((s) => 
         s.salesman_id === user.id || 
         s.salesman_id === user.username
       );
 
       const totalSales = userSales.reduce((sum, s) => 
-        sum + parseFloat(s.total_amount || s.amount || 0), 0
+        sum + Number(s.total_amount ?? s.amount ?? 0), 0
       );
 
       const commissionRate = user.commission_rate || 0.05; // Default 5%
@@ -189,13 +176,15 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const role = normalizeRole(currentUser.role);
+
     // Only Main Admin can pay commissions
-    if (currentUser.role !== 'Main Admin') {
+    if (role !== 'Main Admin') {
       return NextResponse.json({ error: 'Unauthorized - only Main Admin can process payouts' }, { status: 403 });
     }
 

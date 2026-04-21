@@ -1,303 +1,183 @@
 import { NextRequest, NextResponse } from 'next/server';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { getSessionUserFromRequest } from '@/lib/session';
+import { normalizeRole } from '@/lib/roles';
+import { canViewDayEnd } from '@/lib/permissions';
 
-async function getCurrentUser(request: Request) {
-  try {
-    const session = (request as any).cookies.get('session');
-    if (!session) return null;
-    const data = JSON.parse(session.value);
-    return data;
-  } catch (e) {
-    return null;
-  }
+interface SalesmanPerformanceEntry {
+  name: string;
+  transactions: number;
+  revenue: number;
+  commission: number;
 }
+
+interface TopProductEntry {
+  name: string;
+  quantity: number;
+  revenue: number;
+}
+
+interface DayEndSummary {
+  totalTransactions: number;
+  totalRevenue: number;
+  paymentBreakdown: {
+    cash: number;
+    card: number;
+    transfer: number;
+    other?: number;
+  };
+  salesmanPerformance?: Record<string, SalesmanPerformanceEntry>;
+  topProducts?: TopProductEntry[];
+}
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('en-MY', { style: 'currency', currency: 'MYR' }).format(value || 0);
+
+const formatDateTime = (value: Date) =>
+  new Intl.DateTimeFormat('en-MY', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    hour12: false,
+  }).format(value);
 
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { date, branch, summary, cashCount, reconciliationNotes } = body;
+    const role = normalizeRole(currentUser.role);
+    if (!canViewDayEnd(role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
-    if (!date || !summary) {
+    const body = await request.json();
+    const { date, branch, summary, cashCount, reconciliationNotes, closedBy, closedAt } = body as {
+      date: string;
+      branch: string;
+      summary: DayEndSummary;
+      cashCount?: number;
+      reconciliationNotes?: string;
+      closedBy?: string;
+      closedAt?: string;
+    };
+
+    if (!date || !branch || !summary) {
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
     }
 
-    const formatCurrency = (value: number) => `RM ${value.toFixed(2)}`;
-    const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('en-MY');
-    const formatTime = (dateStr: string) => new Date(dateStr).toLocaleTimeString('en-MY');
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const generatedAt = new Date();
+    const avgTransaction = summary.totalTransactions > 0
+      ? summary.totalRevenue / summary.totalTransactions
+      : 0;
+    const actualCashCount = cashCount || 0;
+    const discrepancy = actualCashCount - summary.paymentBreakdown.cash;
+    const otherAmount = summary.paymentBreakdown.other || 0;
+    const closedByText = closedBy || currentUser.name || currentUser.username || 'Admin';
+    const closedAtText = closedAt ? formatDateTime(new Date(closedAt)) : formatDateTime(generatedAt);
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Day End Report - ${date}</title>
-        <style>
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
-          body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: white;
-            color: #333;
-            line-height: 1.6;
-          }
-          .container {
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 40px 20px;
-          }
-          .header {
-            text-align: center;
-            border-bottom: 3px solid #1e40af;
-            padding-bottom: 20px;
-            margin-bottom: 30px;
-          }
-          .header h1 {
-            color: #1e40af;
-            font-size: 32px;
-            margin-bottom: 5px;
-          }
-          .header .date-info {
-            color: #666;
-            font-size: 14px;
-          }
-          .section {
-            margin-bottom: 30px;
-          }
-          .section-title {
-            font-size: 18px;
-            font-weight: bold;
-            color: #1e40af;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #e5e7eb;
-            padding-bottom: 10px;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
-          }
-          .summary-card {
-            background: #f3f4f6;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #1e40af;
-          }
-          .summary-card-label {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 5px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-          .summary-card-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #1e40af;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-          }
-          thead {
-            background: #f3f4f6;
-          }
-          th {
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            color: #1e40af;
-            border-bottom: 2px solid #d1d5db;
-          }
-          td {
-            padding: 10px 12px;
-            border-bottom: 1px solid #e5e7eb;
-          }
-          tr:nth-child(even) {
-            background: #f9fafb;
-          }
-          .text-right {
-            text-align: right;
-          }
-          .reconciliation-box {
-            background: #f3f4f6;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #10b981;
-            margin-bottom: 15px;
-          }
-          .reconciliation-item {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-          }
-          .footer {
-            text-align: center;
-            margin-top: 50px;
-            padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
-            font-size: 12px;
-            color: #999;
-          }
-          .signature-box {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 30px;
-            margin-top: 40px;
-          }
-          .signature-line {
-            border-top: 1px solid #333;
-            padding-top: 10px;
-            text-align: center;
-            font-size: 12px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>DAY END CLOSING REPORT</h1>
-            <div class="date-info">
-              <p><strong>${branch}</strong> Branch | ${formatDate(date)}</p>
-            </div>
-          </div>
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('DAY END CLOSING REPORT', 14, 16);
 
-          <div class="section">
-            <div class="section-title">Daily Summary</div>
-            <div class="summary-grid">
-              <div class="summary-card">
-                <div class="summary-card-label">Total Transactions</div>
-                <div class="summary-card-value">${summary.totalTransactions}</div>
-              </div>
-              <div class="summary-card">
-                <div class="summary-card-label">Total Revenue</div>
-                <div class="summary-card-value">${formatCurrency(summary.totalRevenue)}</div>
-              </div>
-            </div>
-          </div>
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Branch: ${branch}`, 14, 24);
+    doc.text(`Date: ${date}`, 14, 29);
+    doc.text(`Generated At: ${formatDateTime(generatedAt)}`, 14, 34);
+    doc.text(`Generated By: ${currentUser.name || currentUser.username || 'Admin'} (${currentUser.role || 'Admin'})`, 14, 39);
+    doc.text(`Closed By: ${closedByText}`, 14, 44);
+    doc.text(`Closed At: ${closedAtText}`, 14, 49);
 
-          <div class="section">
-            <div class="section-title">Payment Breakdown</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Payment Method</th>
-                  <th class="text-right">Amount</th>
-                  <th class="text-right">Percentage</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Cash</td>
-                  <td class="text-right">${formatCurrency(summary.paymentBreakdown.cash)}</td>
-                  <td class="text-right">${((summary.paymentBreakdown.cash / summary.totalRevenue) * 100).toFixed(1)}%</td>
-                </tr>
-                <tr>
-                  <td>Card</td>
-                  <td class="text-right">${formatCurrency(summary.paymentBreakdown.card)}</td>
-                  <td class="text-right">${((summary.paymentBreakdown.card / summary.totalRevenue) * 100).toFixed(1)}%</td>
-                </tr>
-                <tr>
-                  <td>Transfer</td>
-                  <td class="text-right">${formatCurrency(summary.paymentBreakdown.transfer)}</td>
-                  <td class="text-right">${((summary.paymentBreakdown.transfer / summary.totalRevenue) * 100).toFixed(1)}%</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('1. Summary Report', 14, 58);
 
-          <div class="section">
-            <div class="section-title">Cash Reconciliation</div>
-            <div class="reconciliation-box">
-              <div class="reconciliation-item">
-                <strong>System Cash Total:</strong>
-                <span>${formatCurrency(summary.paymentBreakdown.cash)}</span>
-              </div>
-              <div class="reconciliation-item">
-                <strong>Actual Cash Count:</strong>
-                <span>${formatCurrency(cashCount || 0)}</span>
-              </div>
-              <div class="reconciliation-item" style="font-weight: bold; border-top: 1px solid #d1d5db; padding-top: 8px; margin-top: 8px;">
-                <span>Discrepancy:</span>
-                <span>${formatCurrency((cashCount || 0) - summary.paymentBreakdown.cash)}</span>
-              </div>
-            </div>
-            ${reconciliationNotes ? `<p style="font-weight: 500;">Notes: ${reconciliationNotes}</p>` : ''}
-          </div>
+    autoTable(doc, {
+      startY: 62,
+      theme: 'grid',
+      head: [['Metric', 'Value']],
+      body: [
+        ['Total Transactions', String(summary.totalTransactions)],
+        ['Total Revenue', formatCurrency(summary.totalRevenue)],
+        ['Average Transaction', formatCurrency(avgTransaction)],
+        ['System Cash Total', formatCurrency(summary.paymentBreakdown.cash)],
+        ['Actual Cash Count', formatCurrency(actualCashCount)],
+        ['Cash Discrepancy', formatCurrency(discrepancy)],
+      ],
+      headStyles: { fillColor: [30, 64, 175] },
+    });
 
-          ${summary.salesmanPerformance && Object.keys(summary.salesmanPerformance).length > 0 ? `
-          <div class="section">
-            <div class="section-title">Salesman Performance</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Salesman</th>
-                  <th class="text-right">Transactions</th>
-                  <th class="text-right">Revenue</th>
-                  <th class="text-right">Commission</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${Object.values(summary.salesmanPerformance).map((sm: any) => `
-                  <tr>
-                    <td>${sm.name}</td>
-                    <td class="text-right">${sm.transactions}</td>
-                    <td class="text-right">${formatCurrency(sm.revenue)}</td>
-                    <td class="text-right">${formatCurrency(sm.commission)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-          ` : ''}
+    const tableEndY = (doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? 62;
+    doc.setFontSize(12);
+    doc.text('2. Details Report Harian', 14, tableEndY + 12);
 
-          ${summary.topProducts && summary.topProducts.length > 0 ? `
-          <div class="section">
-            <div class="section-title">Top 5 Products</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Product Name</th>
-                  <th class="text-right">Quantity</th>
-                  <th class="text-right">Revenue</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${summary.topProducts.slice(0, 5).map((p: any) => `
-                  <tr>
-                    <td>${p.name}</td>
-                    <td class="text-right">${p.quantity}</td>
-                    <td class="text-right">${formatCurrency(p.revenue)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-          ` : ''}
+    autoTable(doc, {
+      startY: tableEndY + 16,
+      theme: 'striped',
+      head: [['Payment Method', 'Amount', 'Percentage']],
+      body: [
+        ['Cash', formatCurrency(summary.paymentBreakdown.cash), `${summary.totalRevenue > 0 ? ((summary.paymentBreakdown.cash / summary.totalRevenue) * 100).toFixed(1) : '0.0'}%`],
+        ['Card', formatCurrency(summary.paymentBreakdown.card), `${summary.totalRevenue > 0 ? ((summary.paymentBreakdown.card / summary.totalRevenue) * 100).toFixed(1) : '0.0'}%`],
+        ['Transfer', formatCurrency(summary.paymentBreakdown.transfer), `${summary.totalRevenue > 0 ? ((summary.paymentBreakdown.transfer / summary.totalRevenue) * 100).toFixed(1) : '0.0'}%`],
+        ['Other', formatCurrency(otherAmount), `${summary.totalRevenue > 0 ? ((otherAmount / summary.totalRevenue) * 100).toFixed(1) : '0.0'}%`],
+      ],
+      headStyles: { fillColor: [30, 64, 175] },
+    });
 
-          <div class="footer">
-            <p>Generated on ${formatDate(new Date().toISOString())} at ${formatTime(new Date().toISOString())}</p>
-            <p style="margin-top: 10px;">This report is confidential. All transactions are now locked and cannot be modified.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    if (summary.topProducts && summary.topProducts.length > 0) {
+      const topY = (doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? tableEndY + 16;
+      doc.setFontSize(11);
+      doc.text('2.1 Top 5 Products', 14, topY + 10);
+      autoTable(doc, {
+        startY: topY + 13,
+        theme: 'grid',
+        head: [['Product', 'Quantity', 'Revenue']],
+        body: summary.topProducts.slice(0, 5).map((item) => [item.name, String(item.quantity), formatCurrency(item.revenue)]),
+        headStyles: { fillColor: [51, 65, 85] },
+      });
+    }
 
-    return new NextResponse(htmlContent, {
+    const notesY = (doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? 120;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('3. Reconciliation Notes', 14, notesY + 10);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const notes = reconciliationNotes?.trim() || 'No reconciliation notes provided.';
+    doc.text(doc.splitTextToSize(notes, pageWidth - 28), 14, notesY + 16);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('4. Sign-off', 14, 245);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('Prepared By', 14, 255);
+    doc.text('Verified By', 80, 255);
+    doc.text('Approved By', 145, 255);
+    doc.line(14, 270, 65, 270);
+    doc.line(80, 270, 131, 270);
+    doc.line(145, 270, 196, 270);
+    doc.setFontSize(8);
+    doc.text('This report is confidential and for authorized personnel only.', 14, 278);
+
+    const pages = doc.getNumberOfPages();
+    for (let page = 1; page <= pages; page++) {
+      doc.setPage(page);
+      doc.setFontSize(8);
+      doc.text(`Page ${page} of ${pages}`, pageWidth - 30, 289);
+    }
+
+    const pdfBytes = doc.output('arraybuffer');
+    return new NextResponse(pdfBytes, {
       status: 200,
       headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Content-Disposition': `attachment; filename="DayEndReport_${date}_${branch}.html"`,
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="DayEndReport_${date}_${branch}.pdf"`,
       },
     });
   } catch (error) {

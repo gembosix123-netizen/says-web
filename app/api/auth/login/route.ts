@@ -1,11 +1,24 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import bcrypt from 'bcryptjs';
+import { db } from '@/lib/db';
+import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { rateLimiters, getClientIp } from '@/lib/rateLimit';
 import { loginSchema } from '@/lib/validations';
+import { normalizeRole } from '@/lib/roles';
 
 const SALT_ROUNDS = 10;
+
+type AuthUser = {
+  id: string;
+  username?: string;
+  role?: string;
+  branch?: string;
+  name?: string;
+  full_name?: string;
+  password?: string;
+  password_hash?: string;
+};
 
 /**
  * Check if password hash is bcrypt format
@@ -32,8 +45,12 @@ async function verifyPasswordWithMigration(
   
   // If already bcrypt, verify normally
   if (isBcryptHash(storedHash)) {
-    const valid = await bcrypt.compare(password, storedHash);
-    return { valid, needsMigration: false };
+    try {
+      const valid = await bcrypt.compare(password, storedHash);
+      return { valid, needsMigration: false };
+    } catch {
+      return { valid: false, needsMigration: false };
+    }
   }
 
   // Legacy format detected - try SHA-256 comparison
@@ -57,24 +74,37 @@ async function verifyPasswordWithMigration(
 
 export async function POST(request: Request) {
   try {
-    // Rate limiting check
+    const body = await request.json();
+
+    // Validate input with Zod
+    const validation = loginSchema.safeParse(body);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((err: { message: string }) => err.message);
+      return NextResponse.json({ error: errors[0] || 'Invalid input' }, { status: 400 });
+    }
+
     const clientIp = getClientIp(request);
-    const rateLimitResult = await rateLimiters.login.check(clientIp, 'login');
-    
+    const username = validation.data.username.trim();
+    const password = validation.data.password;
+    const rateLimitKey = `${clientIp}:${username.toLowerCase()}`;
+
+    // Rate limit per IP + username so one user's failed attempts do not lock everyone on the same network.
+    const rateLimitResult = await rateLimiters.login.check(rateLimitKey, 'login');
+
     if (!rateLimitResult.success) {
       const resetTime = rateLimitResult.resetAt.toLocaleTimeString('ms-MY', {
         hour: '2-digit',
         minute: '2-digit',
       });
-      
+
       return NextResponse.json(
-        { 
-          error: rateLimitResult.blocked 
-            ? `Too many login attempts. Account temporarily locked. Try again at ${resetTime}` 
-            : `Too many attempts. Please try again in a few minutes.`,
+        {
+          error: rateLimitResult.blocked
+            ? `Too many login attempts. Account temporarily locked. Try again at ${resetTime}`
+            : 'Too many attempts. Please try again in a few minutes.',
           resetAt: rateLimitResult.resetAt.toISOString(),
         },
-        { 
+        {
           status: 429,
           headers: {
             'Retry-After': String(Math.ceil((rateLimitResult.resetAt.getTime() - Date.now()) / 1000)),
@@ -83,43 +113,68 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!supabaseAdmin) {
-      console.error('Supabase admin client not available');
-      return NextResponse.json({ error: 'Database connection not available' }, { status: 500 });
+
+    let users: Array<Record<string, unknown>> | null = null;
+    let error: { message?: string } | null = null;
+    let localFallbackError: unknown = null;
+
+    if (supabaseAdmin) {
+      const primaryQuery = await supabaseAdmin
+        .from('users')
+        .select('id, username, role, branch, password')
+        .ilike('username', username)
+        .limit(1);
+
+      users = primaryQuery.data as Array<Record<string, unknown>> | null;
+      error = primaryQuery.error as { message?: string } | null;
+
+      // Backward compatibility: some environments still use password_hash
+      if ((!users || users.length === 0) && !error) {
+        const legacyQuery = await supabaseAdmin
+          .from('users')
+          .select('id, username, role, branch, password_hash')
+          .ilike('username', username)
+          .limit(1);
+
+        users = legacyQuery.data as Array<Record<string, unknown>> | null;
+        error = legacyQuery.error as { message?: string } | null;
+      }
+    } else {
+      console.warn('[LOGIN] Supabase admin unavailable. Using local auth fallback.');
     }
 
-    const body = await request.json();
+    let user = users?.[0] as AuthUser | undefined;
 
-    // Validate input with Zod
-    const validation = loginSchema.safeParse(body);
-    if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => err.message);
-      return NextResponse.json({ error: errors[0] || 'Invalid input' }, { status: 400 });
-    }
-
-    const { username, password } = validation.data;
-
-    const { data: users, error } = await supabaseAdmin
-      .from('users')
-      .select('*')
-      .eq('username', username);
-
-    if (error) {
-      console.error('Supabase error:', error);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
-    }
-
-    const user = users?.[0];
-
-    // Use constant-time comparison to prevent timing attacks
     if (!user) {
-      // Still check a dummy password to prevent timing analysis
-      await bcrypt.compare(password, '$2b$10$abcdefghijklmnopqrstuv1234567890123456789012');
+      // Fallback to local JSON/Redis DB for environments where Supabase schema is incomplete
+      try {
+        const localUsers = await db.users.getAll();
+        user = localUsers.find((u) => (u.username || '').toLowerCase() === username.toLowerCase()) as AuthUser | undefined;
+      } catch (fallbackError) {
+        localFallbackError = fallbackError;
+        console.error('Local auth fallback error:', fallbackError);
+      }
+    }
+
+    if (!user && error && localFallbackError) {
+      console.error('Supabase error:', error);
+      return NextResponse.json({ error: 'Authentication service unavailable' }, { status: 500 });
+    }
+
+    if (!user) {
+      if (error) {
+        console.warn('[LOGIN] Supabase lookup failed, but no matching fallback user was found:', error);
+      }
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    const storedPassword = user.password || user.password_hash;
+    if (!storedPassword) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
     // Verify password with automatic migration from legacy formats
-    const verificationResult = await verifyPasswordWithMigration(password, user.password);
+    const verificationResult = await verifyPasswordWithMigration(password, storedPassword);
 
     if (!verificationResult.valid) {
       console.log('[LOGIN] Failed login attempt for user:', username);
@@ -127,7 +182,7 @@ export async function POST(request: Request) {
     }
 
     // If password needs migration, upgrade it now
-    if (verificationResult.needsMigration && verificationResult.newHash) {
+    if (verificationResult.needsMigration && verificationResult.newHash && supabaseAdmin) {
       console.log('[LOGIN] Auto-migrating password to bcrypt for user:', username);
       const { error: updateError } = await supabaseAdmin
         .from('users')
@@ -135,8 +190,18 @@ export async function POST(request: Request) {
         .eq('id', user.id);
 
       if (updateError) {
-        console.error('[LOGIN] Failed to migrate password:', updateError);
-        // Don't fail login - password will migrate next time
+        // Legacy fallback: try password_hash column if password column update fails
+        const { error: legacyUpdateError } = await supabaseAdmin
+          .from('users')
+          .update({ password_hash: verificationResult.newHash })
+          .eq('id', user.id);
+
+        if (legacyUpdateError) {
+          console.error('[LOGIN] Failed to migrate password:', legacyUpdateError);
+          // Don't fail login - password will migrate next time
+        } else {
+          console.log('[LOGIN] Password successfully migrated to legacy password_hash');
+        }
       } else {
         console.log('[LOGIN] Password successfully migrated to bcrypt');
       }
@@ -145,22 +210,26 @@ export async function POST(request: Request) {
     console.log('[LOGIN] Successful login for user:', username);
 
     // Reset rate limit on successful login
-    await rateLimiters.login.reset(clientIp, 'login');
+    await rateLimiters.login.reset(rateLimitKey, 'login');
+
+    const normalizedRole = normalizeRole(user.role) || 'Sales';
+    const displayName = user.name || user.full_name || user.username || 'User';
+    const branch = user.branch || 'HQ';
 
     // Create session cookie
     const response = NextResponse.json({ 
       success: true, 
-      role: user.role, 
-      name: user.name, 
+      role: normalizedRole,
+      name: displayName,
       id: user.id, 
-      branch: user.branch 
+      branch
     });
     
     const sessionData = JSON.stringify({ 
       id: user.id, 
-      role: user.role, 
-      name: user.name, 
-      branch: user.branch 
+      role: normalizedRole,
+      name: displayName,
+      branch
     });
     
     response.cookies.set('session', sessionData, {

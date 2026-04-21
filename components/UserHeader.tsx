@@ -11,17 +11,22 @@ export default function UserHeader() {
   const router = useRouter();
 
   useEffect(() => {
-    const user = localStorage.getItem('user');
-    if (user) {
+    const fetchUserInfo = async () => {
       try {
-        const userData = JSON.parse(user);
+        const response = await fetch('/api/auth/me', { cache: 'no-store' });
+        const userData = await response.json().catch(() => null);
+
+        if (!response.ok || !userData) return;
+
         setUsername(userData.name || userData.username || 'User');
         setRole(userData.role || '');
         setBranch(userData.branch || '');
       } catch (e) {
-        console.error('Failed to parse user:', e);
+        console.error('Failed to fetch user:', e);
       }
-    }
+    };
+
+    fetchUserInfo();
   }, []);
 
   const handleLogout = async () => {

@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import bcrypt from 'bcryptjs';
-import { createUserSchema, updateUserSchema } from '@/lib/validations';
-
-type SessionUser = {
-  id: string;
-  role: 'Main Admin' | 'Admin' | 'Sales' | string;
-  branch: string;
-  name?: string;
-};
+import bcrypt from 'bcrypt';
+import { createUserSchema } from '@/lib/validations';
+import { buildAuditChanges, logAuditEvent } from '@/lib/audit';
+import { normalizeRole } from '@/lib/roles';
+import { getSessionUserFromRequest, type SessionUser } from '@/lib/session';
+import { canManageUsers } from '@/lib/permissions';
 
 const ALLOWED_ROLES = ['Main Admin', 'Admin', 'Sales'] as const;
 const ALLOWED_BRANCHES = ['HQ', 'Kota Kinabalu', 'Kinabatangan'] as const;
@@ -16,43 +13,26 @@ const ALLOWED_BRANCHES = ['HQ', 'Kota Kinabalu', 'Kinabatangan'] as const;
 // Bcrypt salt rounds - higher is more secure but slower
 const SALT_ROUNDS = 10;
 
-function isColumnError(error: any): boolean {
-  const msg = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
-  return msg.includes('column') || msg.includes('schema cache');
-}
-
-function mapUser(row: any) {
+function mapUser(row: Record<string, unknown>) {
   return {
-    id: row.id,
-    username: row.username,
-    role: row.role,
-    name: row.name ?? row.full_name ?? '',
-    branch: row.branch,
-    commissionRate: row.commission_rate ?? row.commissionRate,
+    id: row.id as string,
+    username: row.username as string,
+    role: row.role as string,
+    name: row.name as string,
+    branch: row.branch as string,
+    commissionRate: (row.commission_rate as number | undefined) ?? 0,
     created_at: row.created_at,
   };
 }
 
-async function getCurrentUser(request: NextRequest): Promise<SessionUser | null> {
-  try {
-    const session = request.cookies.get('session');
-    if (!session?.value) return null;
-    const decoded = decodeURIComponent(session.value);
-    const data = JSON.parse(decoded);
-    if (!data?.id || !data?.role) return null;
-    return data as SessionUser;
-  } catch (error) {
-    console.error('Error getting current user:', error);
-    return null;
-  }
-}
-
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    const normalizedCurrentRole = normalizeRole(currentUser.role);
 
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
@@ -69,9 +49,9 @@ export async function GET(request: NextRequest) {
     if (branch) query = query.eq('branch', branch);
     if (role) query = query.eq('role', role);
 
-    if (currentUser.role === 'Admin') {
+    if (normalizedCurrentRole === 'Admin') {
       query = query.eq('branch', currentUser.branch);
-    } else if (currentUser.role === 'Sales') {
+    } else if (normalizedCurrentRole === 'Sales') {
       query = query.eq('id', currentUser.id);
     }
 
@@ -99,12 +79,22 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (currentUser.role !== 'Main Admin' && currentUser.role !== 'Admin') {
+    const actorRole = normalizeRole(currentUser.role);
+    if (!canManageUsers(actorRole)) {
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'user_management',
+        action: 'create_user',
+        entityType: 'user',
+        status: 'denied',
+        sourceSystem: 'supabase',
+      });
       return NextResponse.json({ error: 'Unauthorized - only admin can create users' }, { status: 403 });
     }
 
@@ -125,13 +115,13 @@ export async function POST(request: NextRequest) {
     // Validate input with Zod
     const validation = createUserSchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json({ error: 'Ralat pengesahan', details: errors }, { status: 400 });
     }
 
     const validatedData = validation.data;
 
-    if (currentUser.role === 'Admin' && validatedData.branch !== currentUser.branch) {
+    if (actorRole === 'Admin' && validatedData.branch !== currentUser.branch) {
       return NextResponse.json({ error: 'Admin can only create users in their own branch' }, { status: 403 });
     }
 
@@ -159,60 +149,54 @@ export async function POST(request: NextRequest) {
 
     // Hash password using bcrypt (async operation)
     const hashedPassword = await bcrypt.hash(validatedData.password, SALT_ROUNDS);
-    const commissionRate = validatedData.role === 'Sales' ? Number(validatedData.commissionRate ?? 0.04) : null;
+    const commissionRate = validatedData.role === 'Sales' ? Number(validatedData.commissionRate ?? 0.04) : 0;
 
-    const payloadCandidates = [
-      {
-        username: validatedData.username,
-        full_name: validatedData.name,
-        password: hashedPassword,
-        role: validatedData.role,
-        branch: validatedData.branch,
-        commission_rate: commissionRate,
-      },
-      {
-        username: validatedData.username,
-        name: validatedData.name,
-        password: hashedPassword,
-        role: validatedData.role,
-        branch: validatedData.branch,
-        commissionRate,
-      },
-      {
-        username: validatedData.username,
-        full_name: validatedData.name,
-        password_hash: hashedPassword,
-        role: validatedData.role,
-        branch: validatedData.branch,
-      },
-    ];
+    // Use correct column names matching Supabase schema
+    const payload = {
+      username: validatedData.username,
+      name: validatedData.name,
+      password: hashedPassword,
+      role: validatedData.role,
+      branch: validatedData.branch,
+      commission_rate: commissionRate,
+    };
 
-    let createdUser: any = null;
-    let lastError: any = null;
+    const { data: createdUser, error } = await supabaseAdmin
+      .from('users')
+      .insert(payload)
+      .select('*')
+      .maybeSingle();
 
-    for (const payload of payloadCandidates) {
-      const { data, error } = await supabaseAdmin
-        .from('users')
-        .insert(payload)
-        .select('*')
-        .maybeSingle();
-
-      if (!error) {
-        createdUser = data;
-        break;
-      }
-
-      lastError = error;
-      if (!isColumnError(error)) break;
-    }
-
-    if (!createdUser) {
-      console.error('Error creating user:', lastError);
-      const message = `${lastError?.message || ''}`.toLowerCase().includes('duplicate')
+    if (error) {
+      console.error('Error creating user:', error);
+      const message = `${error?.message || ''}`.toLowerCase().includes('duplicate')
         ? 'Username already exists'
         : 'Failed to create user';
       return NextResponse.json({ error: message }, { status: 500 });
     }
+
+    if (!createdUser) {
+      return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
+    }
+
+    await logAuditEvent({
+      request,
+      actor: currentUser,
+      module: 'user_management',
+      action: 'create_user',
+      entityType: 'user',
+      entityId: createdUser.id,
+      branch: createdUser.branch,
+      status: 'success',
+      sourceSystem: 'supabase',
+      metadata: {
+        username: createdUser.username,
+        role: createdUser.role,
+      },
+      changes: [
+        { field: 'created', newValue: { id: createdUser.id, username: createdUser.username, role: createdUser.role, branch: createdUser.branch } },
+      ],
+    });
 
     return NextResponse.json(
       {
@@ -229,7 +213,7 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -255,23 +239,45 @@ export async function PUT(request: NextRequest) {
     }
 
     const canUpdate =
-      currentUser.role === 'Main Admin' ||
-      (currentUser.role === 'Admin' && currentUser.branch === targetUser.branch) ||
+      normalizeRole(currentUser.role) === 'Main Admin' ||
+      (normalizeRole(currentUser.role) === 'Admin' && currentUser.branch === targetUser.branch) ||
       currentUser.id === userId;
 
     if (!canUpdate) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    const updates: any = {};
+    const updates: Record<string, unknown> = {};
+    const normalizedCurrentRole = normalizeRole(currentUser.role);
 
     if (typeof body.name === 'string') {
       updates.name = body.name;
       updates.full_name = body.name;
     }
+
     if (typeof body.username === 'string') updates.username = body.username;
-    if (typeof body.role === 'string' && ALLOWED_ROLES.includes(body.role)) updates.role = body.role;
-    if (typeof body.branch === 'string' && ALLOWED_BRANCHES.includes(body.branch)) updates.branch = body.branch;
+
+    if (typeof body.role === 'string' && ALLOWED_ROLES.includes(body.role)) {
+      if (normalizedCurrentRole === 'Main Admin') {
+        updates.role = body.role;
+      } else if (normalizedCurrentRole === 'Admin') {
+        // Admin cannot create/promote Main Admin
+        if (body.role !== 'Main Admin') {
+          updates.role = body.role;
+        }
+      }
+    }
+
+    if (typeof body.branch === 'string' && ALLOWED_BRANCHES.includes(body.branch)) {
+      if (normalizedCurrentRole === 'Main Admin') {
+        updates.branch = body.branch;
+      } else if (normalizedCurrentRole === 'Admin') {
+        // Admin can only assign within their own branch
+        if (body.branch === currentUser.branch) {
+          updates.branch = body.branch;
+        }
+      }
+    }
 
     if (typeof body.password === 'string' && body.password.trim().length >= 6) {
       // Hash password using bcrypt (async operation)
@@ -283,6 +289,21 @@ export async function PUT(request: NextRequest) {
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields provided for update' }, { status: 400 });
     }
+
+    const beforeData = {
+      name: targetUser.name,
+      username: targetUser.username,
+      role: targetUser.role,
+      branch: targetUser.branch,
+    };
+
+    const afterData = {
+      ...beforeData,
+      ...('name' in updates ? { name: updates.name } : {}),
+      ...('username' in updates ? { username: updates.username } : {}),
+      ...('role' in updates ? { role: updates.role } : {}),
+      ...('branch' in updates ? { branch: updates.branch } : {}),
+    };
 
     const { error: updateError } = await supabaseAdmin
       .from('users')
@@ -302,9 +323,36 @@ export async function PUT(request: NextRequest) {
 
       if (fallbackError) {
         console.error('Error updating user:', fallbackError);
+        await logAuditEvent({
+          request,
+          actor: currentUser,
+          module: 'user_management',
+          action: 'update_user',
+          entityType: 'user',
+          entityId: userId,
+          branch: targetUser.branch,
+          status: 'failed',
+          sourceSystem: 'supabase',
+          metadata: {
+            error: fallbackError.message,
+          },
+        });
         return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
       }
     }
+
+    await logAuditEvent({
+      request,
+      actor: currentUser,
+      module: 'user_management',
+      action: 'update_user',
+      entityType: 'user',
+      entityId: userId,
+      branch: String(afterData.branch || targetUser.branch || ''),
+      status: 'success',
+      sourceSystem: 'supabase',
+      changes: buildAuditChanges(beforeData, afterData),
+    });
 
     return NextResponse.json({ message: 'User updated successfully' }, { status: 200 });
   } catch (error) {
@@ -315,12 +363,13 @@ export async function PUT(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (currentUser.role !== 'Main Admin' && currentUser.role !== 'Admin') {
+    const actorRole = normalizeRole(currentUser.role);
+    if (!canManageUsers(actorRole)) {
       return NextResponse.json({ error: 'Only admin can update branch assignments' }, { status: 403 });
     }
 
@@ -336,7 +385,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Valid user ID and branch are required' }, { status: 400 });
     }
 
-    if (currentUser.role === 'Admin' && branch !== currentUser.branch) {
+    if (actorRole === 'Admin' && branch !== currentUser.branch) {
       return NextResponse.json({ error: 'Admin can only assign users to their own branch' }, { status: 403 });
     }
 
@@ -361,8 +410,37 @@ export async function PATCH(request: NextRequest) {
 
     if (error) {
       console.error('Error updating branch:', error);
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'user_management',
+        action: 'reassign_branch',
+        entityType: 'user',
+        entityId: userId,
+        branch,
+        status: 'failed',
+        sourceSystem: 'supabase',
+        metadata: {
+          error: error.message,
+        },
+      });
       return NextResponse.json({ error: 'Failed to update branch' }, { status: 500 });
     }
+
+    await logAuditEvent({
+      request,
+      actor: currentUser,
+      module: 'user_management',
+      action: 'reassign_branch',
+      entityType: 'user',
+      entityId: userId,
+      branch,
+      status: 'success',
+      sourceSystem: 'supabase',
+      changes: [
+        { field: 'branch', oldValue: targetUser.branch, newValue: branch },
+      ],
+    });
 
     return NextResponse.json({ message: 'User branch updated successfully' }, { status: 200 });
   } catch (error) {
@@ -373,7 +451,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const currentUser = await getCurrentUser(request);
+    const currentUser = getSessionUserFromRequest(request);
     if (!currentUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -382,13 +460,29 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    if (currentUser.role !== 'Main Admin' && currentUser.role !== 'Admin') {
+    const actorRole = normalizeRole(currentUser.role);
+    if (!canManageUsers(actorRole)) {
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'user_management',
+        action: 'delete_user',
+        entityType: 'user',
+        status: 'denied',
+        sourceSystem: 'supabase',
+      });
       return NextResponse.json({ error: 'Unauthorized - only admin can delete users' }, { status: 403 });
     }
 
     const userId = request.nextUrl.searchParams.get('id');
+    const reason = request.nextUrl.searchParams.get('reason');
+    const referenceNo = request.nextUrl.searchParams.get('referenceNo');
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
+    }
+
+    if (!reason || !reason.trim()) {
+      return NextResponse.json({ error: 'Reason is required for delete action' }, { status: 400 });
     }
 
     if (currentUser.id === userId) {
@@ -409,7 +503,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Cannot delete Main Admin account' }, { status: 400 });
     }
 
-    if (currentUser.role === 'Admin' && targetUser.branch !== currentUser.branch) {
+    if (actorRole === 'Admin' && targetUser.branch !== currentUser.branch) {
       return NextResponse.json({ error: 'Admin can only delete users from their own branch' }, { status: 403 });
     }
 
@@ -420,8 +514,47 @@ export async function DELETE(request: NextRequest) {
 
     if (deleteError) {
       console.error('Error deleting user:', deleteError);
+      await logAuditEvent({
+        request,
+        actor: currentUser,
+        module: 'user_management',
+        action: 'delete_user',
+        entityType: 'user',
+        entityId: userId,
+        branch: targetUser.branch,
+        status: 'failed',
+        sourceSystem: 'supabase',
+        metadata: {
+          error: deleteError.message,
+        },
+      });
       return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 });
     }
+
+    await logAuditEvent({
+      request,
+      actor: currentUser,
+      module: 'user_management',
+      action: 'delete_user',
+      entityType: 'user',
+      entityId: userId,
+      branch: targetUser.branch,
+      status: 'success',
+      reason,
+      referenceNo: referenceNo || undefined,
+      sourceSystem: 'supabase',
+      changes: [
+        {
+          field: 'deleted_user',
+          oldValue: {
+            id: targetUser.id,
+            role: targetUser.role,
+            branch: targetUser.branch,
+          },
+          newValue: null,
+        },
+      ],
+    });
 
     return NextResponse.json({ message: 'User deleted successfully' }, { status: 200 });
   } catch (error) {

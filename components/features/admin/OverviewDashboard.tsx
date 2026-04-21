@@ -14,6 +14,20 @@ interface OverviewMetrics {
   inventoryItems: number;
 }
 
+interface SaleTransaction {
+  total?: number | string;
+  createdAt?: string;
+  created_at?: string;
+}
+
+interface UserRow {
+  role?: string;
+}
+
+interface ProductRow {
+  stock?: number;
+}
+
 export default function OverviewSection() {
   const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -33,19 +47,23 @@ export default function OverviewSection() {
 
         // salesRes is an array of transactions
         const totalSales = Array.isArray(salesRes)
-          ? salesRes.reduce((sum: number, t: any) => sum + (parseFloat(t.total as any) || 0), 0)
+          ? (salesRes as SaleTransaction[]).reduce((sum: number, t) => sum + (Number(t.total ?? 0) || 0), 0)
           : 0;
 
         let salesTrend: { direction: 'up' | 'down' | 'neutral'; percentage: number } = { direction: 'neutral', percentage: 0 };
 
         const totalOrders = Array.isArray(salesRes) ? salesRes.length : 0;
         const totalCustomers = Array.isArray(customersRes) ? customersRes.length : 0;
-        const activeStaff = Array.isArray(usersRes) ? usersRes.filter((u: any) => u.role === 'Sales').length : 0;
-        const inventoryItems = Array.isArray(productsRes) ? productsRes.reduce((sum: number, p: any) => sum + (p.stock || 0), 0) : 0;
+        const activeStaff = Array.isArray(usersRes)
+          ? (usersRes as UserRow[]).filter((u) => u.role === 'Sales').length
+          : 0;
+        const inventoryItems = Array.isArray(productsRes)
+          ? (productsRes as ProductRow[]).reduce((sum: number, p) => sum + (p.stock || 0), 0)
+          : 0;
 
         // quick trend heuristic: compare last 7 vs previous 7 days
         if (Array.isArray(salesRes) && salesRes.length > 0) {
-          const byDate = salesRes.map((s: any) => new Date(s.createdAt || s.created_at || Date.now()));
+          const byDate = (salesRes as SaleTransaction[]).map((s) => new Date(s.createdAt || s.created_at || Date.now()));
           const now = Date.now();
           const last7 = byDate.filter((d: Date) => now - d.getTime() <= 1000 * 60 * 60 * 24 * 7).length;
           const prev7 = byDate.filter((d: Date) => now - d.getTime() > 1000 * 60 * 60 * 24 * 7 && now - d.getTime() <= 1000 * 60 * 60 * 24 * 14).length;
@@ -139,7 +157,7 @@ export default function OverviewSection() {
           <h3 className="text-lg font-semibold text-white mb-4">Quick Stats</h3>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between items-center">
-              <span className="text-slate-400">Today's Sales</span>
+              <span className="text-slate-400">Today&apos;s Sales</span>
               <span className="text-green-400 font-semibold">RM 12,450</span>
             </div>
             <div className="flex justify-between items-center">

@@ -7,8 +7,8 @@ export default function ReportsPage() {
     <div className="min-h-screen p-6 space-y-8">
       <div className="max-w-7xl mx-auto space-y-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white">Pusat Laporan</h1>
-          <p className="text-slate-400 mt-2">Semua laporan harian, mingguan, dan bulanan dalam satu halaman</p>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Monthly Reports</h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-2">Detailed sales analysis and performance metrics by branch</p>
         </div>
 
         <AdminReportsHub />

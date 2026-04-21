@@ -9,8 +9,8 @@ type BranchFilter = 'all' | 'Kota Kinabalu' | 'Kinabatangan';
 export default function AdminSalesPage() {
   const [sales, setSales] = useState<Transaction[]>([]);
   const [branch, setBranch] = useState<BranchFilter>('all');
-  const [date, setDate] = useState<string>('');
-  const [salesmanId, setSalesmanId] = useState<string>('all');
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReferenceNo, setDeleteReferenceNo] = useState('');
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
 
@@ -39,7 +39,21 @@ export default function AdminSalesPage() {
 
   const deleteSale = async (id: string, saleBranch: string) => {
     if (!confirm('Delete this sale?')) return;
-    const res = await fetch(`/api/sales?id=${encodeURIComponent(id)}&branch=${encodeURIComponent(saleBranch)}`, { method: 'DELETE' });
+    if (!deleteReason.trim()) {
+      addToast('Reason is required to delete sale', 'warning');
+      return;
+    }
+
+    const params = new URLSearchParams({
+      id,
+      branch: saleBranch,
+      reason: deleteReason.trim(),
+    });
+    if (deleteReferenceNo.trim()) {
+      params.set('referenceNo', deleteReferenceNo.trim());
+    }
+
+    const res = await fetch(`/api/sales?${params.toString()}`, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) return addToast(data?.error || 'Failed', 'error');
     addToast('Deleted', 'success');
@@ -98,6 +112,27 @@ export default function AdminSalesPage() {
             ? 'All Users'
             : (sales.find((item) => item.salesmanId === salesmanId)?.salesmanName || salesmanId)}
         </span>
+      </div>
+
+      <div className="p-4 rounded bg-slate-900 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm text-slate-300 mb-2">Delete Reason (Required)</label>
+          <input
+            value={deleteReason}
+            onChange={(event) => setDeleteReason(event.target.value)}
+            placeholder="Example: Duplicate sale record"
+            className="w-full p-2 bg-slate-800 text-white rounded border border-slate-700"
+          />
+        </div>
+        <div>
+          <label className="block text-sm text-slate-300 mb-2">Reference No (Optional)</label>
+          <input
+            value={deleteReferenceNo}
+            onChange={(event) => setDeleteReferenceNo(event.target.value)}
+            placeholder="Example: TICKET-2026-001"
+            className="w-full p-2 bg-slate-800 text-white rounded border border-slate-700"
+          />
+        </div>
       </div>
 
       <div className="p-4 rounded bg-slate-900">

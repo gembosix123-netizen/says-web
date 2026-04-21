@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Store, Lock, User as UserIcon } from 'lucide-react';
+import { Lock, User as UserIcon } from 'lucide-react';
 import Image from 'next/image';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -102,6 +102,8 @@ export default function Login() {
                 <input 
                   type="text" 
                   {...register('username')}
+                  autoComplete="username"
+                  suppressHydrationWarning
                   className="w-full pl-12 h-12 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                   placeholder="Enter username"
                 />
@@ -118,6 +120,8 @@ export default function Login() {
                 <input 
                   type="password" 
                   {...register('password')}
+                  autoComplete="current-password"
+                  suppressHydrationWarning
                   className="w-full pl-12 h-12 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                   placeholder="Enter password"
                 />
@@ -145,7 +149,7 @@ export default function Login() {
 
         <div className="mt-8 pt-6 border-t border-slate-800 text-center">
           <p className="text-xs text-slate-500">
-            Demo: <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">sales1</span> / <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">password</span>
+            Demo: <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">founder</span> / <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">Founder2024!</span>
           </p>
         </div>
       </div>

@@ -1,0 +1,11 @@
+@import url('./base.css');
+@import url('./layout.css');
+@import url('./components.css');
+
+/*
+  Central import file so index.html keeps a single stylesheet reference.
+  Browsers that ignore @import will still render base rules defined inline here.
+*/
+body {
+  font-family: var(--font-family, 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif);
+}

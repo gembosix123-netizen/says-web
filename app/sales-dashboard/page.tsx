@@ -1,51 +1,71 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import MetricCard from '@/components/ui/MetricCard';
 import { Button } from '@/components/ui/Button';
-import { ShoppingCart, Store, TrendingUp, LogOut, User } from 'lucide-react';
+import { ShoppingCart, Store, TrendingUp, LogOut, User, MapPin, Check } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+
+const formatCurrency = (amount: number) =>
+  `RM ${amount.toLocaleString('ms-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function SalesDashboardPage() {
   const router = useRouter();
   const [userInfo, setUserInfo] = useState<{ name: string; role: string; branch: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [stats, setStats] = useState({ sales: 0, visits: 0, revenue: 0 });
+  const [selectedArea, setSelectedArea] = useState('');
+  const [customArea, setCustomArea] = useState('');
+  const [areas, setAreas] = useState<string[]>([]);
 
-  useEffect(() => {
-    fetchUserInfo();
-    fetchTodayStats();
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/me', { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+
+      if (response.ok && payload) {
+        setUserInfo({
+          name: payload.name || payload.username || 'User',
+          role: payload.role || '',
+          branch: payload.branch || ''
+        });
+        return;
+      }
+    } catch (e) {
+      console.error('Failed to fetch authenticated user:', e);
+    }
+
+    const localUser = localStorage.getItem('user');
+    if (!localUser) {
+      return;
+    }
+
+    try {
+      const data = JSON.parse(localUser);
+      setUserInfo({
+        name: data.name || data.username || 'User',
+        role: data.role || '',
+        branch: data.branch || ''
+      });
+    } catch (e) {
+      console.error('Failed to parse local user data:', e);
+    }
   }, []);
 
-  const fetchUserInfo = () => {
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    if (sessionCookie) {
-      try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
-        setUserInfo({
-          name: data.name || data.username || 'User',
-          role: data.role || '',
-          branch: data.branch || ''
-        });
-      } catch (e) {
-        console.error('Failed to parse session:', e);
-      }
-    }
-  };
-
-  const fetchTodayStats = async () => {
+  const fetchTodayStats = useCallback(async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
-      
-      const [salesRes, visitsRes] = await Promise.all([
-        supabase.from('sales').select('total_amount').gte('created_at', `${today}T00:00:00`),
-        supabase.from('store_visits').select('id').gte('check_in_time', `${today}T00:00:00`)
-      ]);
+      const userBranch = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').branch || ''; } catch { return ''; } })();
+
+      const salesTable = userBranch === 'Kinabatangan' ? 'sales_kinabatangan' : 'sales_kota_kinabalu';
+      const salesQuery = supabase.from(salesTable).select('total_amount').gte('created_at', `${today}T00:00:00`);
+      const visitsQuery = supabase.from('store_visits').select('id')
+        .gte('check_in_time', `${today}T00:00:00`)
+        .eq('branch', userBranch);
+
+      const [salesRes, visitsRes] = await Promise.all([salesQuery, visitsQuery]);
 
       setStats({
         sales: salesRes.data?.length || 0,
@@ -55,6 +75,40 @@ export default function SalesDashboardPage() {
     } catch (e) {
       console.error('Error fetching stats:', e);
     }
+  }, []);
+
+  useEffect(() => {
+    fetchUserInfo();
+    fetchTodayStats();
+
+    // Load saved area for today
+    const today = new Date().toISOString().split('T')[0];
+    const saved = localStorage.getItem('sales_area_today');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.date === today && parsed.area) setSelectedArea(parsed.area);
+      } catch { /* ignore */ }
+    }
+
+    // Fetch unique areas from customers
+    (async () => {
+      try {
+        const res = await fetch('/api/customers');
+        const data = await res.json().catch(() => []);
+        const list = (Array.isArray(data) ? data : [])
+          .map((c: { area?: string }) => c.area?.trim())
+          .filter(Boolean) as string[];
+        const unique = [...new Set(list)].sort();
+        setAreas(unique);
+      } catch { /* ignore */ }
+    })();
+  }, [fetchTodayStats, fetchUserInfo]);
+
+  const handleSelectArea = (area: string) => {
+    setSelectedArea(area);
+    const today = new Date().toISOString().split('T')[0];
+    localStorage.setItem('sales_area_today', JSON.stringify({ date: today, area }));
   };
 
   const handleLogout = async () => {
@@ -92,7 +146,9 @@ export default function SalesDashboardPage() {
               </div>
               <div className="text-left hidden md:block">
                 <p className="text-sm font-medium text-white">{userInfo?.name || 'User'}</p>
-                <p className="text-xs text-white/50">{userInfo?.role} • {userInfo?.branch}</p>
+                <p className="text-xs text-white/60">
+                  {[userInfo?.role, userInfo?.branch].filter(Boolean).join(' • ') || 'Maklumat akaun tiada'}
+                </p>
               </div>
             </button>
 
@@ -107,12 +163,16 @@ export default function SalesDashboardPage() {
                     <div>
                       <p className="font-bold text-white text-lg">{userInfo?.name}</p>
                       <div className="flex gap-2 mt-1">
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/30 text-blue-300 border border-blue-500/50">
-                          {userInfo?.role}
-                        </span>
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300">
-                          {userInfo?.branch}
-                        </span>
+                        {userInfo?.role && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/30 text-blue-300 border border-blue-500/50">
+                            {userInfo.role}
+                          </span>
+                        )}
+                        {userInfo?.branch && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-300">
+                            {userInfo.branch}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -142,6 +202,69 @@ export default function SalesDashboardPage() {
             </h2>
             <p className="text-white/60">Pilih aktiviti anda untuk hari ini</p>
           </div>
+
+          {/* ── Pilih Kawasan Hari Ini ── */}
+          <Card className="border-2 border-blue-500/30 bg-gradient-to-r from-blue-900/20 to-indigo-900/20">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-600/30 flex items-center justify-center">
+                <MapPin size={20} className="text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-white font-semibold">Kawasan Hari Ini</h3>
+                <p className="text-white/50 text-sm">
+                  {selectedArea
+                    ? <>Anda beroperasi di <span className="text-blue-300 font-medium">{selectedArea}</span></>
+                    : 'Pilih kawasan sebelum mula kerja'}
+                </p>
+              </div>
+              {selectedArea && (
+                <div className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 border border-emerald-500/40 rounded-full">
+                  <Check size={14} className="text-emerald-400" />
+                  <span className="text-emerald-300 text-xs font-semibold">Aktif</span>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {areas.map((area) => (
+                <button
+                  key={area}
+                  onClick={() => handleSelectArea(area)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                    selectedArea === area
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+                  }`}
+                >
+                  {area}
+                </button>
+              ))}
+              {areas.length === 0 && (
+                <p className="text-slate-500 text-sm italic">Tiada area tersedia — admin perlu set area pelanggan dulu</p>
+              )}
+            </div>
+            {/* Custom area input */}
+            <div className="flex items-center gap-2 mt-3">
+              <input
+                placeholder="Atau taip kawasan baru..."
+                value={customArea}
+                onChange={(e) => setCustomArea(e.target.value)}
+                className="flex-1 bg-slate-800 border border-slate-700 text-white text-sm px-3 py-2 rounded-xl focus:outline-none focus:border-blue-500"
+              />
+              <button
+                onClick={() => {
+                  if (customArea.trim()) {
+                    handleSelectArea(customArea.trim());
+                    if (!areas.includes(customArea.trim())) setAreas((prev) => [...prev, customArea.trim()].sort());
+                    setCustomArea('');
+                  }
+                }}
+                disabled={!customArea.trim()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium rounded-xl transition-colors"
+              >
+                Pilih
+              </button>
+            </div>
+          </Card>
 
         {/* Main Action Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -198,17 +321,17 @@ export default function SalesDashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <MetricCard
               title="Sales Today"
-              value={0}
+              value={stats.sales}
               icon={ShoppingCart}
             />
             <MetricCard
               title="Store Visits"
-              value={0}
+              value={stats.visits}
               icon={Store}
             />
             <MetricCard
               title="Revenue"
-              value="RM 0"
+              value={formatCurrency(stats.revenue)}
               icon={TrendingUp}
             />
           </div>

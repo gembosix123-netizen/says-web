@@ -56,7 +56,6 @@ type Sale = Transaction & {
   paymentStatus?: string | null;
   customer_name?: string | null;
   area?: string | null;
-  invoice?: string | null;
   receiptNo?: string | null;
   billingRefNo?: string | null;
   transferRefNo?: string | null;

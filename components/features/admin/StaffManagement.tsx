@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Edit, Trash2, Plus, Search, ChevronDown } from 'lucide-react';
+import { Edit, Trash2, Plus, Search } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
 import clsx from 'clsx';
 
@@ -20,12 +20,35 @@ interface StaffManagementProps {
   userRole?: string;
 }
 
+interface ApiUser {
+  id: string;
+  username: string;
+  name: string;
+  role: string;
+  branch: string;
+  email?: string;
+  salary?: number;
+  status?: 'active' | 'inactive';
+}
+
+const toStaffMember = (u: ApiUser): StaffMember => ({
+  id: u.id,
+  username: u.username,
+  name: u.name,
+  role: u.role,
+  branch: u.branch,
+  email: u.email || '',
+  salary: u.salary || undefined,
+  status: u.status || 'active',
+});
+
 export default function StaffManagement({ userRole = 'Admin' }: StaffManagementProps) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReferenceNo, setDeleteReferenceNo] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: '', email: '', password: '', role: '', branch: '', salary: '' });
   const { addToast } = useToast();
 
@@ -38,20 +61,11 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
         // Fetch staff from API
         const res = await fetch('/api/users');
         if (!res.ok) throw new Error('Failed to fetch staff');
-        const users = await res.json();
+        const users = (await res.json()) as ApiUser[];
         // Map API response to StaffMember[] shape
-        const mapped = (users || []).map((u: any) => ({
-          id: u.id,
-          username: u.username,
-          name: u.name,
-          role: u.role,
-          branch: u.branch,
-          email: u.email || '',
-          salary: u.salary || undefined,
-          status: u.status || 'active',
-        }));
+        const mapped = (users || []).map(toStaffMember);
         setStaff(mapped);
-      } catch (error) {
+      } catch {
         addToast('Failed to load staff data', 'error');
       } finally {
         setIsLoading(false);
@@ -95,17 +109,8 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
 
       // Refresh staff list
       const usersRes = await fetch('/api/users');
-      const users = await usersRes.json();
-      setStaff(users.map((u: any) => ({
-        id: u.id,
-        username: u.username,
-        name: u.name,
-        role: u.role,
-        branch: u.branch,
-        email: u.email || '',
-        salary: u.salary || undefined,
-        status: u.status || 'active',
-      })));
+      const users = (await usersRes.json()) as ApiUser[];
+      setStaff(users.map(toStaffMember));
 
       setFormData({ name: '', email: '', password: '', role: '', branch: '', salary: '' });
       setShowAddForm(false);
@@ -122,31 +127,35 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
       return;
     }
 
+    if (!deleteReason.trim()) {
+      addToast('Reason is required to delete staff member', 'warning');
+      return;
+    }
+
     try {
       // Call API to delete
-      fetch(`/api/users?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const params = new URLSearchParams({
+        id,
+        reason: deleteReason.trim(),
+      });
+      if (deleteReferenceNo.trim()) {
+        params.set('referenceNo', deleteReferenceNo.trim());
+      }
+
+      fetch(`/api/users?${params.toString()}`, { method: 'DELETE' })
         .then(async (res) => {
           const json = await res.json();
           if (!res.ok) throw new Error(json?.error || 'Failed to delete');
           // Refresh list
           const usersRes = await fetch('/api/users');
-          const users = await usersRes.json();
-          setStaff(users.map((u: any) => ({
-            id: u.id,
-            username: u.username,
-            name: u.name,
-            role: u.role,
-            branch: u.branch,
-            email: u.email || '',
-            salary: u.salary || undefined,
-            status: u.status || 'active',
-          })));
+          const users = (await usersRes.json()) as ApiUser[];
+          setStaff(users.map(toStaffMember));
           addToast('Staff member deleted successfully', 'success');
         })
         .catch((err) => {
           addToast(err?.message || 'Failed to delete staff member', 'error');
         });
-    } catch (error) {
+    } catch {
       addToast('Failed to delete staff member', 'error');
     }
   };
@@ -168,17 +177,8 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
 
         // Refresh users
         const usersRes = await fetch('/api/users');
-        const users = await usersRes.json();
-        setStaff(users.map((u: any) => ({
-          id: u.id,
-          username: u.username,
-          name: u.name,
-          role: u.role,
-          branch: u.branch,
-          email: u.email || '',
-          salary: u.salary || undefined,
-          status: u.status || 'active',
-        })));
+        const users = (await usersRes.json()) as ApiUser[];
+        setStaff(users.map(toStaffMember));
 
         addToast('Salary updated successfully', 'success');
       } catch (error) {
@@ -281,6 +281,31 @@ export default function StaffManagement({ userRole = 'Admin' }: StaffManagementP
           className="w-full pl-10 pr-4 py-2 bg-says-card border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-says-accent focus:outline-none transition-colors"
         />
       </div>
+
+      {isSuperAdmin && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-slate-700/50 bg-slate-900/40">
+          <div>
+            <label className="block text-sm text-slate-300 mb-2">Delete Reason (Required)</label>
+            <input
+              type="text"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Example: Resigned / duplicate account"
+              className="w-full px-4 py-2 bg-says-card border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-says-accent focus:outline-none transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-2">Reference No (Optional)</label>
+            <input
+              type="text"
+              value={deleteReferenceNo}
+              onChange={(e) => setDeleteReferenceNo(e.target.value)}
+              placeholder="Example: HR-EXIT-2026-02"
+              className="w-full px-4 py-2 bg-says-card border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-says-accent focus:outline-none transition-colors"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Staff Table */}
       <div className="overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/40 to-slate-900/40 backdrop-blur-glass">

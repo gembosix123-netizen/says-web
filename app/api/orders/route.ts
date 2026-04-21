@@ -20,9 +20,10 @@ import {
   updateTransaction,
   deleteTransaction,
   toApiResponse,
-  Transaction,
 } from '@/lib/firestore-service';
-import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
+import { createOrderSchema } from '@/lib/validations';
+import { requireAuth } from '@/lib/auth-check';
+import { logAuditEvent } from '@/lib/audit';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -34,12 +35,22 @@ import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
 
 export async function GET(request: NextRequest) {
   try {
+    // Authentication required — all roles with Sales level or above
+    const { user: currentUser, error: authError } = await requireAuth(request, 'Sales');
+    if (authError) return authError;
+
     const searchParams = request.nextUrl.searchParams;
     const userId = searchParams.get('userId');
-    const branch = searchParams.get('branch');
+    let branch = searchParams.get('branch');
     const customerId = searchParams.get('customerId');
     const status = searchParams.get('status');
     const id = searchParams.get('id');
+
+    // Branch enforcement: non-Main Admin can only see their own branch
+    const normalizedRole = currentUser!.role;
+    if (normalizedRole !== 'Main Admin') {
+      branch = currentUser!.branch ?? branch;
+    }
 
     // Get single transaction
     if (id) {
@@ -50,13 +61,20 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         );
       }
+      // Ensure non-Main Admin can only see transactions for their branch
+      if (normalizedRole !== 'Main Admin' && transaction.branch && transaction.branch !== currentUser!.branch) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
       return NextResponse.json(toApiResponse(transaction));
     }
 
     // Get transactions by user
     if (userId) {
       const transactions = await getTransactionsByUser(userId);
-      return NextResponse.json(toApiResponse(transactions));
+      const filtered = normalizedRole !== 'Main Admin'
+        ? transactions.filter((t) => !t.branch || t.branch === currentUser!.branch)
+        : transactions;
+      return NextResponse.json(toApiResponse(filtered));
     }
 
     // Get transactions by branch
@@ -68,16 +86,30 @@ export async function GET(request: NextRequest) {
     // Get transactions by customer
     if (customerId) {
       const transactions = await getTransactionsByCustomer(customerId);
-      return NextResponse.json(toApiResponse(transactions));
+      const filtered = normalizedRole !== 'Main Admin'
+        ? transactions.filter((t) => !t.branch || t.branch === currentUser!.branch)
+        : transactions;
+      return NextResponse.json(toApiResponse(filtered));
     }
 
     // Get transactions by status
     if (status) {
       const transactions = await getTransactionsByStatus(status);
+      const filtered = normalizedRole !== 'Main Admin'
+        ? transactions.filter((t) => !t.branch || t.branch === currentUser!.branch)
+        : transactions;
+      return NextResponse.json(toApiResponse(filtered));
+    }
+
+    // Main Admin only — fetch all transactions
+    if (normalizedRole !== 'Main Admin') {
+      if (!currentUser!.branch) {
+        return NextResponse.json({ error: 'Branch not set for this user' }, { status: 400 });
+      }
+      const transactions = await getTransactionsByBranch(currentUser!.branch);
       return NextResponse.json(toApiResponse(transactions));
     }
 
-    // Get all transactions
     const transactions = await getTransactions();
     return NextResponse.json(toApiResponse(transactions));
 
@@ -96,13 +128,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Sales+ role
+    // Check authentication - Sales role or higher can create orders
+    const { user, error } = await requireAuth(request, 'Sales');
+    if (error) return error;
+
     const body = await request.json();
 
     // Validate transaction data with Zod
     const validation = createOrderSchema.safeParse(body);
     if (!validation.success) {
-      const errors = validation.error.issues.map((err: any) => `${err.path.join('.')}: ${err.message}`);
+      const errors = validation.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
       return NextResponse.json(
         { error: 'Ralat pengesahan', details: errors },
         { status: 400 }
@@ -152,6 +187,23 @@ export async function POST(request: NextRequest) {
       metadata: body.metadata || {},
     });
 
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'orders',
+      action: 'create_order',
+      entityType: 'transaction',
+      entityId: transactionId,
+      branch: validatedData.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        orderType: validatedData.orderType,
+        totalAmount: validatedData.totalAmount,
+        itemCount: validatedData.items.length,
+      },
+    });
+
     return NextResponse.json(
       {
         message: 'Transaction created successfully',
@@ -175,7 +227,10 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // TODO: Implement authentication check
+    // Check authentication - Admin role or higher can update orders
+    const { user, error } = await requireAuth(request, 'Admin');
+    if (error) return error;
+
     const body = await request.json();
     const transactionId = body.id || body.transactionId;
 
@@ -198,6 +253,21 @@ export async function PUT(request: NextRequest) {
     // Update transaction
     await updateTransaction(transactionId, body);
 
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'orders',
+      action: 'update_order',
+      entityType: 'transaction',
+      entityId: transactionId,
+      branch: transaction.branch,
+      status: 'success',
+      sourceSystem: 'firestore',
+      metadata: {
+        updatedFields: Object.keys(body || {}),
+      },
+    });
+
     return NextResponse.json(
       { message: 'Transaction updated successfully' },
       { status: 200 }
@@ -218,13 +288,25 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Main Admin only
+    // Check authentication - Main Admin only can delete orders
+    const { user, error } = await requireAuth(request, 'Main Admin');
+    if (error) return error;
+
     const searchParams = request.nextUrl.searchParams;
     const transactionId = searchParams.get('id');
+    const reason = searchParams.get('reason');
+    const referenceNo = searchParams.get('referenceNo');
 
     if (!transactionId) {
       return NextResponse.json(
         { error: 'Transaction ID is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!reason || !reason.trim()) {
+      return NextResponse.json(
+        { error: 'Reason is required for delete action' },
         { status: 400 }
       );
     }
@@ -240,6 +322,31 @@ export async function DELETE(request: NextRequest) {
 
     // Delete transaction
     await deleteTransaction(transactionId);
+
+    await logAuditEvent({
+      request,
+      actor: user,
+      module: 'orders',
+      action: 'delete_order',
+      entityType: 'transaction',
+      entityId: transactionId,
+      branch: transaction.branch,
+      status: 'success',
+      reason,
+      referenceNo: referenceNo || undefined,
+      sourceSystem: 'firestore',
+      changes: [
+        {
+          field: 'deleted_transaction',
+          oldValue: {
+            id: transaction.transactionId,
+            status: transaction.status,
+            amount: transaction.amount,
+          },
+          newValue: null,
+        },
+      ],
+    });
 
     return NextResponse.json(
       { message: 'Transaction deleted successfully' },

@@ -1,39 +1,39 @@
 /**
- * SAYS 2.0 - FIRESTORE DATABASE ARCHITECTURE
- * ==========================================
- * 
- * This document outlines the scalable, secure Firestore architecture
- * with Role-Based Access Control (RBAC) and optimized cost structure.
- * 
- * Core Principles:
- * 1. Single-File Mandate: Fetch complete datasets in one query, filter client-side
- * 2. Flat hierarchies to avoid complex index requirements
- * 3. RBAC enforcement via Security Rules
- * 4. Cost optimization through query efficiency
+ * SAYS 2.0 - SENIBINA PANGKALAN DATA FIRESTORE
+ * ============================================
+ *
+ * Dokumen ini menerangkan senibina Firestore yang boleh diskala serta
+ * selamat dengan kawalan RBAC (Role-Based Access Control) dan struktur kos optimum.
+ *
+ * Prinsip Teras:
+ * 1. Mandat Satu Fail: Ambil keseluruhan dataset dalam satu kueri, tapis di sisi klien
+ * 2. Hirarki rata bagi mengelakkan keperluan indeks kompleks
+ * 3. Penguatkuasaan RBAC melalui Security Rules
+ * 4. Pengoptimuman kos melalui kueri yang cekap
  */
 
 // ============================================================================
-// COLLECTION STRUCTURE
+// STRUKTUR KOLEKSI
 // ============================================================================
 
 // 1. USERS Collection
 // ----
 // Path: /users/{userId}
-// Purpose: Store user profiles and authentication metadata
-// Size: Small (typically < 10KB per document)
-// Read patterns: Authentication, user profile fetches
+// Tujuan: Simpan profil pengguna dan metadata pengesahan
+// Saiz: Kecil (biasanya < 10KB setiap dokumen)
+// Corak bacaan: Autentikasi, bacaan profil pengguna
 
 {
   "userId": "string",
   "username": "string",
   "email": "string",
-  "passwordHash": "string",  // NEVER store plain passwords
+  "passwordHash": "string",  // JANGAN sesekali simpan kata laluan biasa
   "role": "Main Admin | Admin | Sales",
   "branch": "Kota Kinabalu | Kinabatangan | HQ",
   "name": "string",
   "status": "active | inactive | suspended",
   "commissionRate": "number (0.0-1.0)",
-  "salary": "number (for Admin/Main Admin)",
+  "salary": "number (untuk Admin/Main Admin)",
   "createdAt": "timestamp",
   "updatedAt": "timestamp",
   "lastLogin": "timestamp",
@@ -43,9 +43,9 @@
 // 2. PRODUCTS Collection
 // ----
 // Path: /products/{productId}
-// Purpose: Master product catalog (single source of truth)
-// Size: Medium (typically 1-5KB per product)
-// Read patterns: Frequent reads, occasional writes
+// Tujuan: Katalog produk induk (single source of truth)
+// Saiz: Sederhana (1-5KB setiap produk)
+// Corak bacaan: Bacaan kerap, penulisan sekali-sekala
 
 {
   "productId": "string",
@@ -63,15 +63,15 @@
   "isActive": "boolean",
   "createdAt": "timestamp",
   "updatedAt": "timestamp",
-  "metadata": { /* any additional data */ }
+  "metadata": { /* data tambahan */ }
 }
 
 // 3. INVENTORY Collection
 // ----
 // Path: /inventory/{inventoryId}
-// Purpose: Branch-specific stock levels
-// Design: Denormalized product data + quantity for quick reads
-// Read patterns: High-frequency reads, moderate writes
+// Tujuan: Tahap stok khusus cawangan
+// Reka bentuk: Data produk dinormalisasi + kuantiti untuk bacaan pantas
+// Corak bacaan: Bacaan frekuensi tinggi, penulisan sederhana
 
 {
   "inventoryId": "string",
@@ -79,11 +79,11 @@
   "branch": "string",
   "quantity": "number",
   "reservedQuantity": "number",
-  "availableQuantity": "number",  // Calculated: quantity - reservedQuantity
+  "availableQuantity": "number",  // Dikira: quantity - reservedQuantity
   "lastRestockDate": "timestamp",
   "lastCountDate": "timestamp",
   "status": "in-stock | low-stock | out-of-stock",
-  "batchNumbers": ["string"],  // For tracking lot numbers
+  "batchNumbers": ["string"],  // Untuk menjejak nombor lot
   "createdAt": "timestamp",
   "updatedAt": "timestamp"
 }
@@ -91,15 +91,15 @@
 // 4. TRANSACTIONS Collection
 // ----
 // Path: /transactions/{transactionId}
-// Purpose: All financial and inventory movements
-// Size: Large (many documents per day)
-// Read patterns: Reporting, auditing, settlements
+// Tujuan: Semua pergerakan kewangan dan inventori
+// Saiz: Besar (banyak dokumen setiap hari)
+// Corak bacaan: Pelaporan, audit, penyelesaian
 
 {
   "transactionId": "string",
   "type": "sale | return | restock | adjustment | commission",
   "status": "pending | completed | cancelled",
-  "userId": "string",  // User who initiated transaction
+  "userId": "string",  // Pengguna yang memulakan transaksi
   "branch": "string",
   "amount": "number",
   "items": [
@@ -110,22 +110,22 @@
       "totalPrice": "number"
     }
   ],
-  "customerId": "string",  // If applicable
+  "customerId": "string",  // Jika berkenaan
   "paymentMethod": "cash | card | bank-transfer",
-  "reference": "string",  // Invoice/Receipt number
+  "reference": "string",  // Nombor invois/resit
   "notes": "string",
   "createdAt": "timestamp",
   "updatedAt": "timestamp",
   "completedAt": "timestamp",
-  "metadata": { /* flexible */ }
+  "metadata": { /* fleksibel */ }
 }
 
 // 5. CUSTOMERS Collection
 // ----
 // Path: /customers/{customerId}
-// Purpose: Customer relationship management
-// Size: Small to medium (varies by customer count)
-// Read patterns: Lookups, reporting, segmentation
+// Tujuan: Pengurusan hubungan pelanggan (CRM)
+// Saiz: Kecil ke sederhana (bergantung bilangan pelanggan)
+// Corak bacaan: Carian, pelaporan, segmentasi
 
 {
   "customerId": "string",
@@ -151,9 +151,9 @@
 // 6. COMMISSIONS Collection
 // ----
 // Path: /commissions/{commissionId}
-// Purpose: Track commission calculations and payments
-// Size: Medium (one per transaction if applicable)
-// Read patterns: Periodic settlement, reporting
+// Tujuan: Menjejak pengiraan komisen dan pembayaran
+// Saiz: Sederhana (satu setiap transaksi jika perlu)
+// Corak bacaan: Penyelesaian berkala, pelaporan
 
 {
   "commissionId": "string",
@@ -173,9 +173,9 @@
 // 7. AUDITS Collection
 // ----
 // Path: /audits/{auditId}
-// Purpose: Compliance and security logging
-// Size: Large (one per significant action)
-// Read patterns: Compliance reports, security reviews
+// Tujuan: Log pematuhan dan keselamatan
+// Saiz: Besar (satu bagi setiap tindakan penting)
+// Corak bacaan: Laporan pematuhan, semakan keselamatan
 
 {
   "auditId": "string",
@@ -191,27 +191,27 @@
   "ipAddress": "string",
   "userAgent": "string",
   "status": "success | failure",
-  "reason": "string",  // If failure
+  "reason": "string",  // Jika gagal
   "timestamp": "timestamp"
 }
 
 // 8. SETTLEMENTS Collection
 // ----
 // Path: /settlements/{settlementId}
-// Purpose: Periodic financial settlements
-// Size: Small to medium
-// Read patterns: Monthly/weekly reporting
+// Tujuan: Penyata kewangan berkala
+// Saiz: Kecil ke sederhana
+// Corak bacaan: Laporan bulanan/mingguan
 
 {
   "settlementId": "string",
-  "period": "string",  // "2024-02" format
+  "period": "string",  // format "2024-02"
   "branch": "string",
   "totalSales": "number",
   "totalCommissions": "number",
   "totalExpenses": "number",
   "netProfit": "number",
   "commissionBreakdown": {
-    "userId": "number"  // Map of user IDs to commission amounts
+    "userId": "number"  // Peta ID pengguna kepada jumlah komisen
   },
   "status": "draft | finalized | reconciled",
   "createdAt": "timestamp",
@@ -226,7 +226,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions
+    // Fungsi utiliti
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -255,213 +255,213 @@ service cloud.firestore {
     }
 
     // ========================================
-    // USERS COLLECTION RULES
+    // PERATURAN KOLEKSI USERS
     // ========================================
     match /users/{userId} {
-      // Read: Main Admin can read all, Users can read themselves
+      // Baca: Main Admin boleh baca semua, pengguna biasa hanya diri sendiri
       allow read: if isMainAdmin() || request.auth.uid == userId;
       
-      // Create: Main Admin only
+      // Cipta: Main Admin sahaja
       allow create: if isMainAdmin();
       
-      // Update: Main Admin can update all, Users can update limited fields
+      // Kemas kini: Main Admin semua medan, pengguna terhad
       allow update: if isMainAdmin() || 
                        (request.auth.uid == userId && 
                         !request.resource.data.diff(resource.data).affectedKeys()
                           .hasAny(['role', 'permissions', 'salary']));
-      
-      // Delete: Main Admin only
+
+      // Padam: Main Admin sahaja
       allow delete: if isMainAdmin();
     }
 
     // ========================================
-    // PRODUCTS COLLECTION RULES
+    // PERATURAN KOLEKSI PRODUCTS
     // ========================================
     match /products/{productId} {
-      // Read: All authenticated users
+      // Baca: Semua pengguna sah
       allow read: if isAuthenticated();
       
-      // Create/Update: Admin and above
+      // Cipta/Kemas kini: Admin dan ke atas
       allow create, update: if isAdmin();
       
-      // Delete: Main Admin only
+      // Padam: Main Admin sahaja
       allow delete: if isMainAdmin();
     }
 
     // ========================================
-    // INVENTORY COLLECTION RULES
+    // PERATURAN KOLEKSI INVENTORY
     // ========================================
     match /inventory/{inventoryId} {
-      // Read: Users can read their branch inventory, Main Admin sees all
+      // Baca: Pengguna baca inventori cawangan sendiri, Main Admin semua
       allow read: if isAuthenticated() && 
                      (isMainAdmin() || resource.data.branch == getUserBranch());
       
-      // Create/Update: Admin and above on own branch
+      // Cipta/Kemas kini: Admin+ untuk cawangan masing-masing
       allow create, update: if isAdmin() && 
                               userOwnsDocument(request.resource.data.branch);
       
-      // Delete: Main Admin only
+      // Padam: Main Admin sahaja
       allow delete: if isMainAdmin();
     }
 
     // ========================================
-    // TRANSACTIONS COLLECTION RULES
+    // PERATURAN KOLEKSI TRANSACTIONS
     // ========================================
     match /transactions/{transactionId} {
-      // Read: Users see transactions from their branch, Main Admin sees all
+      // Baca: Pengguna lihat transaksi cawangan sendiri, Main Admin semua
       allow read: if isAuthenticated() && 
                      (isMainAdmin() || resource.data.branch == getUserBranch());
       
-      // Create: Sales and Admin on own branch
+      // Cipta: Sales/Admin dalam cawangan masing-masing
       allow create: if (isSalesUser() || isAdmin()) && 
                       userOwnsDocument(request.resource.data.branch);
       
-      // Update: Limited updates only (cancel, complete), Main Admin has full access
+      // Kemas kini: Terhad (batal, lengkap), Main Admin akses penuh
       allow update: if isMainAdmin() ||
                       (request.auth.uid == resource.data.userId && 
                        resource.data.status == 'pending' &&
                        request.resource.data.status in ['completed', 'cancelled']);
       
-      // Delete: Main Admin only
+      // Padam: Main Admin sahaja
       allow delete: if isMainAdmin();
     }
 
     // ========================================
-    // CUSTOMERS COLLECTION RULES
+    // PERATURAN KOLEKSI CUSTOMERS
     // ========================================
     match /customers/{customerId} {
-      // Read: Users see customers from their branch, Main Admin sees all
+      // Baca: Pengguna lihat pelanggan cawangan sendiri, Main Admin semua
       allow read: if isAuthenticated() && 
                      (isMainAdmin() || resource.data.branch == getUserBranch());
       
-      // Create: Sales and Admin
+      // Cipta: Sales dan Admin
       allow create, update: if (isSalesUser() || isAdmin()) && 
                               userOwnsDocument(request.resource.data.branch);
       
-      // Delete: Admin and above
+      // Padam: Admin dan ke atas
       allow delete: if isAdmin();
     }
 
     // ========================================
-    // COMMISSIONS COLLECTION RULES
+    // PERATURAN KOLEKSI COMMISSIONS
     // ========================================
     match /commissions/{commissionId} {
-      // Read: Sales user sees own, Admin sees branch, Main Admin sees all
+      // Baca: Sales lihat sendiri, Admin lihat cawangan, Main Admin semua
       allow read: if isAuthenticated() && 
                      (isMainAdmin() || 
                       isAdmin() && resource.data.branch == getUserBranch() ||
                       isSalesUser() && resource.data.userId == request.auth.uid);
       
-      // Create: Admin triggers commission calculation
+      // Cipta: Admin memicu pengiraan komisen
       allow create: if isAdmin();
       
-      // Update: Only status updates by Admin
+      // Kemas kini: Admin hanya boleh ubah status
       allow update: if isAdmin() && 
                       request.resource.data.diff(resource.data).affectedKeys()
                         .hasOnly(['status', 'paymentDate', 'paidAt']);
       
-      // Delete: Main Admin only
+      // Padam: Main Admin sahaja
       allow delete: if isMainAdmin();
     }
 
     // ========================================
-    // AUDITS COLLECTION RULES
+    // PERATURAN KOLEKSI AUDITS
     // ========================================
     match /audits/{auditId} {
-      // Read: Admin and above for their branch, Main Admin sees all
+      // Baca: Admin+ untuk cawangan sendiri, Main Admin semua
       allow read: if isMainAdmin() || 
                      (isAdmin() && resource.data.branch == getUserBranch());
       
-      // Create: System only (via backend trigger) - should not allow client writes
+      // Cipta: Sistem sahaja (trigger backend) - klien tidak dibenarkan
       allow create: if false;
       
-      // Update/Delete: Never allowed
+      // Kemas kini/Padam: Tidak dibenarkan
       allow update, delete: if false;
     }
 
     // ========================================
-    // SETTLEMENTS COLLECTION RULES
+    // PERATURAN KOLEKSI SETTLEMENTS
     // ========================================
     match /settlements/{settlementId} {
-      // Read: Admin sees own branch, Main Admin sees all
+      // Baca: Admin lihat cawangan sendiri, Main Admin semua
       allow read: if isMainAdmin() || 
                      (isAdmin() && resource.data.branch == getUserBranch());
       
-      // Create/Update: Main Admin only
+      // Cipta/Kemas kini: Main Admin sahaja
       allow create, update: if isMainAdmin();
       
-      // Delete: Main Admin only
+      // Padam: Main Admin sahaja
       allow delete: if isMainAdmin();
     }
   }
 }
 
 // ============================================================================
-// API ENDPOINT STRUCTURE (Next.js)
+// STRUKTUR ENDPOINT API (Next.js)
 // ============================================================================
 
 // GET /api/users
-// - Fetch all users (Main Admin) or self (authenticated user)
-// - Query params: ?branch=*, ?role=*
-// - Returns: Array of users (single query, filter client-side)
+// - Dapatkan semua pengguna (Main Admin) atau diri sendiri (pengguna sah)
+// - Param kueri: ?branch=*, ?role=*
+// - Pulangan: Senarai pengguna (satu kueri, tapis di klien)
 
 // POST /api/users
-// - Create new user (Main Admin only)
+// - Cipta pengguna baharu (Main Admin sahaja)
 // - Body: { username, email, role, branch, salary, commissionRate }
 
 // PUT /api/users/{userId}
-// - Update user data (Main Admin) or self
-// - Body: { name, email, ... (allowed fields) }
+// - Kemas kini data pengguna (Main Admin) atau pemilik akaun
+// - Body: { name, email, ... (medan dibenarkan) }
 
 // DELETE /api/users/{userId}
-// - Delete user (Main Admin only)
+// - Padam pengguna (Main Admin sahaja)
 
 // GET /api/products
-// - Fetch all products (single collection fetch, filter client-side)
-// - Returns: Array of products
+// - Ambil semua produk (sekali baca koleksi, tapis di klien)
+// - Pulangan: Senarai produk
 
 // POST /api/products
-// - Create product (Admin+)
+// - Cipta produk (Admin ke atas)
 // - Body: { sku, name, price, costPrice, ... }
 
 // GET /api/inventory
-// - Fetch inventory (users see own branch, Main Admin sees all)
-// - Query params: ?branch=*
-// - Returns: Complete inventory data (single fetch, filter client-side)
+// - Ambil inventori (pengguna lihat cawangan sendiri, Main Admin lihat semua)
+// - Param kueri: ?branch=*
+// - Pulangan: Data inventori penuh (sekali baca, tapis di klien)
 
 // POST /api/inventory
-// - Create/update inventory entry (Admin+)
+// - Cipta/kemas kini entri inventori (Admin+)
 // - Body: { productId, branch, quantity, ... }
 
 // GET /api/transactions
-// - Fetch transactions (users see own branch, Main Admin sees all)
-// - Query params: ?branch=*, ?startDate=*, ?endDate=*, ?type=*
-// - Returns: Array of transactions (single fetch, client-side filtering)
+// - Ambil transaksi (pengguna lihat cawangan sendiri, Main Admin lihat semua)
+// - Param kueri: ?branch=*, ?startDate=*, ?endDate=*, ?type=*
+// - Pulangan: Senarai transaksi (sekali baca, tapis di klien)
 
 // POST /api/transactions
-// - Create transaction (Sales or Admin)
+// - Cipta transaksi (Sales atau Admin)
 // - Body: { type, items, amount, customerId, ... }
 
 // GET /api/commissions
-// - Fetch commissions (Sales sees own, Admin sees branch)
-// - Query params: ?userId=*, ?branch=*, ?status=*
-// - Returns: Commissions data
+// - Ambil komisen (Sales lihat sendiri, Admin lihat cawangan)
+// - Param kueri: ?userId=*, ?branch=*, ?status=*
+// - Pulangan: Data komisen
 
 // GET /api/settlements
-// - Fetch settlements (paginated, Admin+ only)
-// - Query params: ?branch=*, ?period=*
-// - Returns: Settlement records
+// - Ambil penyelesaian (berhalaman, Admin+ sahaja)
+// - Param kueri: ?branch=*, ?period=*
+// - Pulangan: Rekod penyelesaian
 
 // GET /api/audits
-// - Fetch audit logs (Admin+ only)
-// - Query params: ?branch=*, ?entityType=*, ?startDate=*, ?endDate=*
-// - Returns: Audit records
+// - Ambil log audit (Admin+ sahaja)
+// - Param kueri: ?branch=*, ?entityType=*, ?startDate=*, ?endDate=*
+// - Pulangan: Rekod audit
 
 // ============================================================================
-// CLIENT-SIDE DATA FETCHING PATTERN (DRY)
+// CORAK PENGAMBILAN DATA DI SISI KLIEN (DRY)
 // ============================================================================
 
-// Example hook for fetching and filtering data:
+// Contoh hook untuk mengambil dan menapis data:
 /*
 export function useFirestoreData<T>(
   collection: string,
@@ -474,11 +474,11 @@ export function useFirestoreData<T>(
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch entire collection (single query)
+        // Ambil keseluruhan koleksi (satu kueri)
         const response = await fetch(`/api/${collection}`);
         const allData = await response.json();
         
-        // Filter client-side
+        // Tapis di sisi klien
         const filtered = allData.filter((item: T) => {
           if (!filters) return true;
           return filters.every((filter) => {
@@ -498,7 +498,7 @@ export function useFirestoreData<T>(
         
         setData(filtered);
       } catch (err) {
-        setError('Failed to fetch data');
+        setError('Gagal mengambil data');
       } finally {
         setIsLoading(false);
       }
@@ -512,32 +512,32 @@ export function useFirestoreData<T>(
 */
 
 // ============================================================================
-// COST OPTIMIZATION NOTES
+// NOTA PENGOPTIMUMAN KOS
 // ============================================================================
 
-// 1. Single-File Mandate:
-//    - Fetch complete dataset once, filter client-side
-//    - Reduces Firestore read operations
-//    - Avoids need for complex composite indexes
+// 1. Mandat Satu Fail:
+//    - Ambil keseluruhan dataset sekali, tapis di klien
+//    - Mengurangkan operasi bacaan Firestore
+//    - Mengelak keperluan indeks komposit kompleks
 
-// 2. Denormalization Strategy:
-//    - Duplicate product data in inventory for faster reads
-//    - Update both documents in transaction (maintain consistency)
-//    - Trade-off: Storage cost vs. read cost (favorable for read-heavy apps)
+// 2. Strategi Denormalisasi:
+//    - Gandakan data produk dalam inventori untuk bacaan pantas
+//    - Kemas kini kedua-dua dokumen dalam transaksi (kekalkan konsistensi)
+//    - Timbang tara: kos storan vs. kos bacaan (sesuai untuk aplikasi berat bacaan)
 
-// 3. Index Optimization:
-//    - Firestore automatically indexes simple fields
-//    - Only compound indexes needed for multi-field queries
-//    - Client-side filtering eliminates need for expensive indexes
+// 3. Pengoptimuman Indeks:
+//    - Firestore mengindeks medan ringkas secara automatik
+//    - Hanya perlu indeks kompaun untuk kueri berbilang medan
+//    - Penapisan di klien menghapus keperluan indeks mahal
 
-// 4. Batch Operations:
-//    - Use batch writes for multi-document updates
-//    - Reduces transaction overhead
-//    - Example: Update inventory + create transaction in one batch
+// 4. Operasi Berkumpulan:
+//    - Guna batch write untuk kemas kini pelbagai dokumen
+//    - Mengurangkan overhead transaksi
+//    - Contoh: Kemas kini inventori + cipta transaksi dalam satu batch
 
 // 5. Pagination:
-//    - For large result sets, use cursor-based pagination
-//    - Fetch 100 docs at a time, cursor to next batch
-//    - Reduces bandwidth and processing time
+//    - Untuk set keputusan besar, gunakan pagination berasaskan kursor
+//    - Ambil 100 dokumen setiap kali, kursor ke batch seterusnya
+//    - Mengurangkan jalur lebar dan masa pemprosesan
 
 // ============================================================================

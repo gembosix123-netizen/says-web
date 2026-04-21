@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title>SAYS clone favicon</title>
+  <desc>Letter S in a rounded square</desc>
+  <rect width="64" height="64" rx="12" fill="#1a73e8"/>
+  <path d="M44 20c-4-6-24-6-24 4 0 12 24 4 24 16 0 12-20 12-24 6" fill="none" stroke="#fefefe" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

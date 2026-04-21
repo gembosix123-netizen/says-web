@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { 
@@ -8,7 +8,6 @@ import {
   History, 
   FileText, 
   BarChart3, 
-  ArrowLeft,
   ShoppingCart,
   DollarSign,
   Users,
@@ -18,7 +17,6 @@ import {
   User
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 
 export default function SalesHubPage() {
   const router = useRouter();
@@ -27,34 +25,38 @@ export default function SalesHubPage() {
     totalRevenue: 0,
     totalCustomers: 0
   });
+  const [myCustomerRows, setMyCustomerRows] = useState<Array<{
+    id: string;
+    name: string;
+    area: string;
+    visitedThisMonth: boolean;
+    salesCountThisMonth: number;
+    lastVisit: string | null;
+  }>>([]);
+  const [myCustomerLoading, setMyCustomerLoading] = useState(true);
+  const [selectedArea, setSelectedArea] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<{ name: string; role: string; branch: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
-  useEffect(() => {
-    fetchTodayStats();
-    fetchUserInfo();
-  }, []);
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/me', { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
 
-  const fetchUserInfo = () => {
-    // Get from cookie
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find(c => c.trim().startsWith('session='));
-    if (sessionCookie) {
-      try {
-        const sessionValue = sessionCookie.split('=')[1];
-        const decoded = decodeURIComponent(sessionValue);
-        const data = JSON.parse(decoded);
-        setUserInfo({
-          name: data.name || data.username || 'User',
-          role: data.role || '',
-          branch: data.branch || ''
-        });
-      } catch (e) {
-        console.error('Failed to parse session:', e);
+      if (!response.ok || !payload) {
+        return;
       }
+
+      setUserInfo({
+        name: payload.name || payload.username || 'User',
+        role: payload.role || '',
+        branch: payload.branch || ''
+      });
+    } catch (e) {
+      console.error('Failed to fetch user info:', e);
     }
-  };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -67,29 +69,125 @@ export default function SalesHubPage() {
     router.push('/login');
   };
 
-  const fetchTodayStats = async () => {
+  const fetchTodayStats = useCallback(async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      
-      const { data: sales, error } = await supabase
-        .from('sales')
-        .select('*')
-        .gte('created_at', `${today}T00:00:00`)
-        .lte('created_at', `${today}T23:59:59`);
+      const response = await fetch('/api/sales');
+      const payload = await response.json().catch(() => []);
 
-      if (!error && sales) {
-        setTodayStats({
-          totalSales: sales.length,
-          totalRevenue: sales.reduce((sum, s) => sum + (s.total_amount || 0), 0),
-          totalCustomers: new Set(sales.map(s => s.customer_id)).size
-        });
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to fetch sales');
       }
+
+      const sales = Array.isArray(payload) ? payload : [];
+      const today = new Date().toISOString().split('T')[0];
+
+      const todaysSales = sales.filter((sale) => {
+        const createdAt = sale.created_at || sale.createdAt;
+        return typeof createdAt === 'string' && createdAt.startsWith(today);
+      });
+
+      setTodayStats({
+        totalSales: todaysSales.length,
+        totalRevenue: todaysSales.reduce((sum, sale) => sum + Number(sale.total_amount ?? sale.total ?? 0), 0),
+        totalCustomers: new Set(
+          todaysSales
+            .map((sale) => sale.customer_id || sale.customer?.id)
+            .filter(Boolean)
+        ).size
+      });
     } catch (err) {
       console.error('Error fetching stats:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const fetchMyCustomers = useCallback(async () => {
+    setMyCustomerLoading(true);
+    try {
+      const [custRes, salesRes] = await Promise.all([
+        fetch('/api/customers'),
+        fetch('/api/sales')
+      ]);
+
+      const custPayload = await custRes.json().catch(() => []);
+      const salesPayload = await salesRes.json().catch(() => []);
+
+      const customers = Array.isArray(custPayload) ? custPayload : [];
+      const sales = Array.isArray(salesPayload) ? salesPayload : [];
+
+      const monthKey = new Date().toISOString().slice(0, 7);
+      const salesThisMonth = sales.filter((sale) => {
+        const transactionDate = sale.created_at || sale.createdAt || sale.transactionDate;
+        return typeof transactionDate === 'string' && transactionDate.startsWith(monthKey);
+      });
+
+      const salesByCustomer = salesThisMonth.reduce<Record<string, Array<Record<string, unknown>>>>((acc, sale) => {
+        const customerId = String(sale.customer_id || sale.customer?.id || '');
+        if (!customerId) return acc;
+        if (!acc[customerId]) acc[customerId] = [];
+        acc[customerId].push(sale);
+        return acc;
+      }, {});
+
+      const rows = customers.map((customer) => {
+        const customerId = String(customer.id || '');
+        const customerSales = salesByCustomer[customerId] || [];
+
+        const lastVisitRaw = customerSales
+          .map((sale) => String(sale.created_at || sale.createdAt || sale.transactionDate || ''))
+          .filter((dateValue) => dateValue.length > 0)
+          .sort()
+          .at(-1) || null;
+
+        const area =
+          String(customer.district || '').trim() ||
+          String(customer.town || '').trim() ||
+          String(customer.branch || '').trim() ||
+          'Tidak dinyatakan';
+
+        return {
+          id: customerId,
+          name: String(customer.name || 'Tanpa nama'),
+          area,
+          visitedThisMonth: customerSales.length > 0,
+          salesCountThisMonth: customerSales.length,
+          lastVisit: lastVisitRaw,
+        };
+      });
+
+      setMyCustomerRows(rows);
+    } catch (error) {
+      console.error('Failed to load customer task rows:', error);
+      setMyCustomerRows([]);
+    } finally {
+      setMyCustomerLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTodayStats();
+    fetchUserInfo();
+    fetchMyCustomers();
+  }, [fetchTodayStats, fetchUserInfo, fetchMyCustomers]);
+
+  const areaOptions = useMemo(() => {
+    return Array.from(new Set(myCustomerRows.map((row) => row.area))).sort((a, b) => a.localeCompare(b, 'ms'));
+  }, [myCustomerRows]);
+
+  const filteredCustomerRows = useMemo(() => {
+    if (selectedArea === 'ALL') {
+      return myCustomerRows;
+    }
+
+    return myCustomerRows.filter((row) => row.area === selectedArea);
+  }, [myCustomerRows, selectedArea]);
+
+  useEffect(() => {
+    if (selectedArea !== 'ALL' && !areaOptions.includes(selectedArea)) {
+      setSelectedArea('ALL');
+    }
+  }, [selectedArea, areaOptions]);
 
   const menuItems = [
     {
@@ -290,23 +388,86 @@ export default function SalesHubPage() {
           ))}
         </div>
 
-        {/* Quick Action */}
-        <Card className="p-6 bg-gradient-to-r from-blue-600/20 to-purple-600/20 border-blue-500/30">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+        {/* My Customer (Monthly Task Table) */}
+        <Card className="p-6 border-slate-700/70">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
             <div>
-              <h3 className="text-xl font-bold text-white">Mula Jualan Sekarang!</h3>
-              <p className="text-white/60">Buat pesanan jualan baru dengan cepat</p>
+              <h3 className="text-xl font-bold text-white">My Customer (Bulan Ini)</h3>
+              <p className="text-white/60 text-sm">Kedai sendiri: sudah pergi vs belum pergi</p>
             </div>
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={() => router.push('/sales/new')}
-              className="whitespace-nowrap"
-            >
-              <Plus size={20} className="mr-2" />
+            <Button variant="primary" size="sm" onClick={() => router.push('/sales/new')}>
+              <Plus size={16} className="mr-2" />
               Jualan Baru
             </Button>
           </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-white/60">Filter daerah:</span>
+            <button
+              type="button"
+              onClick={() => setSelectedArea('ALL')}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                selectedArea === 'ALL'
+                  ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
+                  : 'border-slate-600 text-white/70 hover:border-slate-500 hover:text-white'
+              }`}
+            >
+              All
+            </button>
+            {areaOptions.map((area) => (
+              <button
+                key={area}
+                type="button"
+                onClick={() => setSelectedArea(area)}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                  selectedArea === area
+                    ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
+                    : 'border-slate-600 text-white/70 hover:border-slate-500 hover:text-white'
+                }`}
+              >
+                {area}
+              </button>
+            ))}
+          </div>
+
+          {myCustomerLoading ? (
+            <p className="text-white/60">Memuatkan senarai pelanggan...</p>
+          ) : filteredCustomerRows.length === 0 ? (
+            <p className="text-white/60">Tiada pelanggan untuk dipaparkan.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-white/60 border-b border-slate-700">
+                    <th className="py-2 pr-4">Kedai</th>
+                    <th className="py-2 pr-4">Area</th>
+                    <th className="py-2 pr-4">Status Bulan Ini</th>
+                    <th className="py-2 pr-4">Bil. Sales</th>
+                    <th className="py-2">Lawatan Terakhir</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCustomerRows.map((row) => (
+                    <tr key={row.id} className="border-b border-slate-800">
+                      <td className="py-2 pr-4 text-white">{row.name}</td>
+                      <td className="py-2 pr-4 text-white/80">{row.area}</td>
+                      <td className="py-2 pr-4">
+                        {row.visitedThisMonth ? (
+                          <span className="text-emerald-400">Sudah pergi</span>
+                        ) : (
+                          <span className="text-amber-400">Belum pergi</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-4 text-white/80">{row.salesCountThisMonth}</td>
+                      <td className="py-2 text-white/80">
+                        {row.lastVisit ? new Date(row.lastVisit).toLocaleDateString('ms-MY') : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
         </div>
       </div>

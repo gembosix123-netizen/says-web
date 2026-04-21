@@ -46,8 +46,7 @@ export class DB<T extends { id: string }> {
         data = await redis.get<T[]>(this.keyName);
       } catch (error: unknown) {
         // Handle WRONGTYPE error (e.g. key exists but is not a JSON string)
-        const message = error instanceof Error ? error.message : '';
-        if (message.includes('WRONGTYPE')) {
+        if (error instanceof Error && error.message.includes('WRONGTYPE')) {
           console.warn(`[DB] Detected WRONGTYPE for ${this.keyName}. resetting key...`);
           await redis.del(this.keyName);
           data = null; // Allow fall-through to seeding logic
@@ -77,10 +76,10 @@ export class DB<T extends { id: string }> {
       // If file read failed or empty, and this is 'users', provide default admin
       if (initialData.length === 0 && this.keyName === 'users') {
         console.log('[DB] Seeding default admin user (Hardcoded).');
-        const defaultUsers: User[] = [
-          { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin", branch: "HQ" },
-          { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali", branch: "Kota Kinabalu" },
-          { id: "u3", username: "allan", password: "Allan123", role : "Sales", name: "Allan", branch: "Kinabatangan" }
+        initialData = [
+          { id: "u1", username: "admin", password: "password", role: "Admin", name: "System Admin" } as unknown as T,
+          { id: "u2", username: "sales1", password: "password", role: "Sales", name: "Sales Ali" } as unknown as T,
+          { id: "u3", username: "allan", password: "Allan123", role : "Sales", name: "Allan"} as unknown as T
         ];
         initialData = defaultUsers as unknown as T[];
       }
@@ -150,20 +149,7 @@ export class DB<T extends { id: string }> {
   }
 }
 
-import {
-  Customer,
-  Product,
-  User,
-  Order,
-  Transaction,
-  StockAudit,
-  VanInventory,
-  Settlement,
-  CommissionPayout,
-  Store,
-  CommissionPolicy,
-  DailyReport,
-} from '@/types';
+import { Customer, Product, User, Order, Transaction, StockAudit, VanInventory, Settlement, CommissionPayout, Store, MonthlyReportHistory } from '@/types';
 
 // We need to export instances. 
 // Note: methods are now async, so we need to update usage in API routes.
@@ -178,6 +164,5 @@ export const db = {
   vanInventories: new DB<VanInventory>('van_inventories.json'),
   settlements: new DB<Settlement>('settlements.json'),
   payouts: new DB<CommissionPayout>('payouts.json'),
-  commissionPolicies: new DB<CommissionPolicy>('commission_policies.json'),
-  dailyReports: new DB<DailyReport>('daily_reports.json'),
+  monthlyReportHistory: new DB<MonthlyReportHistory>('monthly_report_history.json'),
 };
