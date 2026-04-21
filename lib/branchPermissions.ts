@@ -68,6 +68,11 @@ export function getSalesTableByBranch(branch: Branch): 'sales_kota_kinabalu' | '
   }
 }
 
+export function getCustomersTableByBranch(branch?: Branch): 'customers_kk' | 'customers_kb' {
+  if (branch === 'Kinabatangan') return 'customers_kb';
+  return 'customers_kk';
+}
+
 /**
  * Filter data query by user's branch
  * Used in API routes to enforce data segregation at query level

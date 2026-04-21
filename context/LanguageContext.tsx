@@ -203,6 +203,7 @@ const dictionary: Translations = {
   admin_section: { ms: 'Bahagian Admin', en: 'Admin Section' },
   dashboard: { ms: 'Papan Pemuka', en: 'Dashboard' },
   reports: { ms: 'Laporan', en: 'Reports' },
+  live_sales: { ms: 'Jualan Langsung', en: 'Live Sales' },
   settings: { ms: 'Tetapan', en: 'Settings' },
   logout: { ms: 'Log Keluar', en: 'Logout' },
   user_info: { ms: 'Info Pengguna', en: 'User Info' },
@@ -217,6 +218,7 @@ const dictionary: Translations = {
   sales_history: { ms: 'Sejarah Jualan', en: 'Sales History' },
   audits: { ms: 'Audit', en: 'Audits' },
   commissions: { ms: 'Komisen', en: 'Commissions' },
+  expenses: { ms: 'Perbelanjaan', en: 'Expenses' },
 
   // Navigation & Admin Section Labels
   overview: { ms: 'Gambaran Keseluruhan', en: 'Overview' },
@@ -227,7 +229,30 @@ const dictionary: Translations = {
 
   // Additional Admin & User Info
   per_transaction: { ms: 'Setiap transaksi', en: 'Per transaction' },
-  active_branches_count: { ms: 'Cawangan aktif', en: 'Active branches' }
+  active_branches_count: { ms: 'Cawangan aktif', en: 'Active branches' },
+
+  // Backdated Import
+  backdated_import: { ms: 'Import Data Lama', en: 'Backdated Import' },
+  backdated_import_desc: { ms: 'Import data jualan bulan-bulan sebelum sistem dikuatkuasakan. Guna template CSV yang disediakan.', en: 'Import historical sales data from months before system go-live. Use the provided CSV template.' },
+  official_csv_template: { ms: 'Template CSV Rasmi', en: 'Official CSV Template' },
+  official_template_desc: { ms: 'Isi template ini dalam Excel. Boleh upload terus sebagai .xlsx atau export ke CSV dahulu.', en: 'Fill this template in Excel. You can upload .xlsx directly or export to CSV first.' },
+  customer_list_system: { ms: 'Senarai Nama Customer Dalam Sistem', en: 'Customer Name Reference (System)' },
+  customer_name_warning: { ms: 'Nama dalam kolum customer_name CSV mesti sama persis dengan senarai di atas supaya ID dapat dipadankan.', en: 'Names in customer_name must exactly match the list above so IDs can be mapped.' },
+  no_customer_data: { ms: 'Tiada data customer dalam sistem.', en: 'No customer data found in system.' },
+  release_here: { ms: 'Lepaskan fail di sini', en: 'Release file here' },
+  drag_drop_file: { ms: 'Drag & drop fail CSV atau Excel di sini', en: 'Drag & drop CSV or Excel file here' },
+  drop_hint: { ms: 'atau klik butang di bawah — Terima: .xlsx / .csv — maksimum 500 baris', en: 'or click the button below — Accepts: .xlsx / .csv — max 500 rows' },
+  choose_file_btn: { ms: 'Pilih Fail', en: 'Choose File' },
+  rows_detected: { ms: 'baris dikesan', en: 'rows detected' },
+  row_label: { ms: 'Baris', en: 'Row' },
+  discard_file: { ms: 'Buang fail', en: 'Discard file' },
+  validating: { ms: 'Sedang validasi...', en: 'Validating...' },
+  load_new_file: { ms: 'Muat naik fail baharu', en: 'Load new file' },
+  confirm_import: { ms: 'Sahkan Import', en: 'Confirm Import' },
+  all_rows_valid: { ms: 'Semua baris adalah valid', en: 'All rows are valid' },
+  errors_found_label: { ms: 'ralat dijumpai', en: 'errors found' },
+  import_success_title: { ms: 'Import berjaya disimpan', en: 'Import completed successfully' },
+  import_another: { ms: 'Import fail lain', en: 'Import another file' }
 };
 
 interface LanguageContextType {

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Wallet } from 'lucide-react';
+import { Activity, LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Wallet, Upload } from 'lucide-react';
 import clsx from 'clsx';
 import { useLanguage } from '@/context/LanguageContext';
 import ClientSwitchers from '@/components/ClientSwitchers';
@@ -68,14 +68,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       { to: '/admin/kota-kinabalu', label: 'kota_kinabalu', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'], branches: ['HQ', 'Kota Kinabalu'] },
       { to: '/admin/kinabatangan', label: 'kinabatangan', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'], branches: ['HQ', 'Kinabatangan'] },
       { to: '/admin/reports', label: 'reports', icon: FileText, roles: ['Main Admin', 'Admin'] },
+      { to: '/admin/live-sales', label: 'live_sales', icon: Activity, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/expenses', label: 'expenses', icon: Wallet, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/commissions', label: 'commissions', icon: Banknote, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/loading', label: 'van_loading', icon: Truck, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/orders', label: 'orders', icon: ShoppingCart, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/products', label: 'products', icon: Package, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/customers', label: 'customers', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'] },
+      { to: '/admin/backdated-import', label: 'backdated_import', icon: Upload, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/users', label: 'user_management', icon: Users, roles: ['Main Admin'] },
-      { to: '/admin/global-monitor/users', label: 'staff_mgmt', icon: Users, roles: ['Main Admin'] },
       { to: '/admin/audits', label: 'audits', icon: Package, roles: ['Main Admin'] },
       { to: '/admin/database', label: 'database_nav', icon: Database, roles: ['Main Admin', 'Admin'] },
     ];

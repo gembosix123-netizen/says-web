@@ -8,9 +8,35 @@
  * DELETE /api/products/:id - Delete product (Main Admin only)
  */
 
+import bcrypt from 'bcryptjs';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { createProductSchema, updateProductSchema } from '@/lib/validations';
+
+type SessionData = {
+  id: string;
+  role: string;
+  name: string;
+  branch: string;
+};
+
+function getSessionData(request: NextRequest): SessionData | null {
+  const session = request.cookies.get('session');
+  if (!session?.value) return null;
+
+  let sessionValue = session.value;
+  try {
+    sessionValue = decodeURIComponent(sessionValue);
+  } catch {
+    // ignore if not encoded
+  }
+
+  try {
+    return JSON.parse(sessionValue);
+  } catch {
+    return null;
+  }
+}
 
 // ============================================================================
 // GET HANDLER
@@ -22,8 +48,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
+    const session = getSessionData(request);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get('id');
+    const branchParam = searchParams.get('branch');
 
     // Get single product
     if (id) {
@@ -39,14 +71,30 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         );
       }
+
+      if (session.role !== 'Main Admin' && product.branch !== session.branch) {
+        return NextResponse.json(
+          { error: 'Unauthorized' },
+          { status: 403 }
+        );
+      }
+
       return NextResponse.json(product);
     }
 
     // Get all products
-    const { data: products, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('products')
       .select('*')
       .eq('is_active', true);
+
+    if (session.role !== 'Main Admin') {
+      query = query.eq('branch', session.branch);
+    } else if (branchParam && branchParam !== 'all') {
+      query = query.eq('branch', branchParam);
+    }
+
+    const { data: products, error } = await query;
 
     if (error) {
       console.error('Supabase error:', error);
@@ -73,6 +121,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = getSessionData(request);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
@@ -90,6 +143,9 @@ export async function POST(request: NextRequest) {
     }
 
     const validatedData = validation.data;
+    const branchToSet = session.role === 'Main Admin'
+      ? body.branch || session.branch
+      : session.branch;
 
     // Create product
     const { data, error } = await supabaseAdmin
@@ -101,6 +157,7 @@ export async function POST(request: NextRequest) {
           code: validatedData.code || validatedData.sku,
           price: validatedData.price,
           unit: validatedData.unit,
+          branch: branchToSet,
           is_active: validatedData.isActive,
         },
       ])
@@ -137,7 +194,11 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Admin+ role
+    const session = getSessionData(request);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const productId = body.id || body.productId;
 
@@ -150,6 +211,50 @@ export async function PUT(request: NextRequest) {
 
     if (!supabaseAdmin) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
+    if (session.role !== 'Admin' && session.role !== 'Main Admin') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    const needsMainAdminPassword =
+      body.name !== undefined ||
+      body.sku !== undefined ||
+      body.price !== undefined ||
+      body.unit !== undefined ||
+      body.category !== undefined ||
+      body.description !== undefined ||
+      body.branch !== undefined ||
+      body.is_active !== undefined;
+
+    if (needsMainAdminPassword) {
+      if (session.role !== 'Main Admin') {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      }
+
+      if (!body.password) {
+        return NextResponse.json({ error: 'Password required for product edit' }, { status: 400 });
+      }
+
+      const { data: user, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('password')
+        .eq('id', session.id)
+        .single();
+
+      if (userError || !user || !user.password) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+
+      const passwordHash = String(user.password);
+      const isBcrypt = passwordHash.startsWith('$2a$') || passwordHash.startsWith('$2b$') || passwordHash.startsWith('$2y$');
+      const passwordValid = isBcrypt
+        ? await bcrypt.compare(body.password, passwordHash)
+        : body.password === passwordHash;
+
+      if (!passwordValid) {
+        return NextResponse.json({ error: 'Invalid password' }, { status: 401 });
+      }
     }
 
     // Check product exists
@@ -166,21 +271,41 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    if (session.role !== 'Main Admin' && product.branch !== session.branch) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    const branchToSet = session.role === 'Main Admin'
+      ? body.branch ?? product.branch
+      : session.branch;
+
     // Update product
+    const updatePayload: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (body.stock !== undefined) {
+      updatePayload.stock = body.stock;
+    }
+    if (body.current_stock !== undefined) {
+      updatePayload.current_stock = body.current_stock;
+    }
+
+    if (needsMainAdminPassword) {
+      updatePayload.name = body.name;
+      updatePayload.sku = body.sku;
+      updatePayload.price = body.price;
+      updatePayload.cost = body.cost;
+      updatePayload.unit = body.unit;
+      updatePayload.category = body.category;
+      updatePayload.description = body.description;
+      updatePayload.branch = branchToSet;
+      updatePayload.is_active = body.is_active ?? true;
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from('products')
-      .update({
-        name: body.name,
-        sku: body.sku,
-        price: body.price,
-        cost: body.cost,
-        stock: body.stock,
-        unit: body.unit,
-        category: body.category,
-        description: body.description,
-        is_active: body.is_active ?? true,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('id', productId);
 
     if (updateError) {
@@ -208,7 +333,11 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // TODO: Implement authentication check for Main Admin only
+    const session = getSessionData(request);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const productId = searchParams.get('id');
 
@@ -235,6 +364,10 @@ export async function DELETE(request: NextRequest) {
         { error: 'Product not found' },
         { status: 404 }
       );
+    }
+
+    if (session.role !== 'Main Admin' && product.branch !== session.branch) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
     // Soft delete product

@@ -57,6 +57,11 @@ export const createProductSchema = z.object({
     .trim()
     .optional()
     .nullable(),
+  branch: z
+    .string()
+    .max(100, 'Branch ' + errorMessages.maxLength(100))
+    .trim()
+    .optional(),
   isActive: z.boolean().default(true)
 });
 
@@ -112,6 +117,11 @@ export const updateProductSchema = z.object({
     .trim()
     .optional()
     .nullable(),
+  branch: z
+    .string()
+    .max(100, errorMessages.maxLength(100))
+    .trim()
+    .optional(),
   isActive: z.boolean().optional()
 });
 

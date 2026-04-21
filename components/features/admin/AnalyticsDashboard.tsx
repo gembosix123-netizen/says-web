@@ -15,6 +15,9 @@ interface AnalyticsDashboardProps {
 export default function AnalyticsDashboard({ transactions, products, salesUsers, stockAudits, customers }: AnalyticsDashboardProps) {
   const { t } = useLanguage();
   const [selectedBranch, setSelectedBranch] = useState('all');
+  const [datePreset, setDatePreset] = useState<'today' | '7days' | '30days' | 'thisMonth' | 'allTime' | 'custom'>('allTime');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   // Agent mapping for role-based access
   const agentMapping: { [key: string]: string } = {
@@ -31,13 +34,50 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
     return Array.from(uniqueBranches).sort();
   }, [transactions]);
 
-  // Filter transactions based on selected branch
+  // Filter transactions based on selected branch + date range
   const filteredTransactions = useMemo(() => {
-    if (selectedBranch === 'all') {
-      return transactions || [];
-    }
-    return (transactions || []).filter(t => t.branch === selectedBranch);
-  }, [transactions, selectedBranch]);
+    const byBranch = selectedBranch === 'all'
+      ? transactions || []
+      : (transactions || []).filter(t => t.branch === selectedBranch);
+
+    if (datePreset === 'allTime') return byBranch;
+
+    const now = new Date();
+    const nowTs = now.getTime();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const startOf7Days = startOfToday - (6 * 24 * 60 * 60 * 1000);
+    const startOf30Days = startOfToday - (29 * 24 * 60 * 60 * 1000);
+
+    return byBranch.filter((transaction) => {
+      if (!transaction.createdAt) return false;
+      const ts = new Date(transaction.createdAt).getTime();
+      if (Number.isNaN(ts)) return false;
+
+      if (datePreset === 'today') {
+        return ts >= startOfToday && ts <= nowTs;
+      }
+      if (datePreset === '7days') {
+        return ts >= startOf7Days && ts <= nowTs;
+      }
+      if (datePreset === '30days') {
+        return ts >= startOf30Days && ts <= nowTs;
+      }
+      if (datePreset === 'thisMonth') {
+        return ts >= startOfMonth && ts <= nowTs;
+      }
+
+      if (datePreset === 'custom') {
+        if (!customStartDate || !customEndDate) return true;
+        const start = new Date(`${customStartDate}T00:00:00`).getTime();
+        const end = new Date(`${customEndDate}T23:59:59`).getTime();
+        if (Number.isNaN(start) || Number.isNaN(end)) return true;
+        return ts >= start && ts <= end;
+      }
+
+      return true;
+    });
+  }, [transactions, selectedBranch, datePreset, customStartDate, customEndDate]);
 
   // Top 5 Products
   const topProducts = useMemo(() => {
@@ -76,23 +116,9 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
       .slice(0, 5);
   }, [filteredTransactions, salesUsers]);
 
-  // Stock Alerts (Latest audit for each product < 10)
-  const lowStockAlerts = useMemo(() => {
-     const alerts: any[] = [];
-     stockAudits?.forEach(audit => {
-         audit.items?.forEach(item => {
-             if (item.physicalStock < 10) {
-                 const customer = customers.find(c => c.id === audit.customerId);
-                 alerts.push({
-                     ...item,
-                     customerName: customer?.name || 'Unknown',
-                     auditDate: audit.createdAt,
-                 });
-             }
-         });
-     });
-     return alerts.sort((a, b) => new Date(b.auditDate).getTime() - new Date(a.auditDate).getTime());
-  }, [stockAudits, customers]);
+  // Keep these references to preserve existing prop contract while this section is hidden.
+  void stockAudits;
+  void customers;
 
   // Sales Trend (Last 7 days)
   const salesTrend = useMemo(() => {
@@ -137,19 +163,62 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
 
   return (
     <div className="space-y-6">
-        {/* Branch Filter */}
-        <div className="bg-slate-900/50 backdrop-blur-sm p-4 rounded-lg border border-slate-800">
-          <label className="text-sm font-medium text-slate-300 mr-3">Filter by Branch:</label>
-          <select
-            value={selectedBranch}
-            onChange={(e) => setSelectedBranch(e.target.value)}
-            className="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
-          >
-            <option value="all">All Branches</option>
-            {branches.map(branch => (
-              <option key={branch} value={branch}>{branch}</option>
+        {/* Main filter row */}
+        <div className="bg-slate-900/50 backdrop-blur-sm p-4 rounded-lg border border-slate-800 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-slate-300">Tapis Mengikut Cawangan:</label>
+            <select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value)}
+              className="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">Semua Cawangan</option>
+              {branches.map(branch => (
+                <option key={branch} value={branch}>{branch}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <span className="text-sm text-slate-300">Date Range:</span>
+            {[
+              { key: 'today', label: 'Today' },
+              { key: '7days', label: 'Last 7 Days' },
+              { key: '30days', label: 'Last 30 Days' },
+              { key: 'thisMonth', label: 'This Month' },
+              { key: 'allTime', label: 'All Time' },
+              { key: 'custom', label: 'Custom' },
+            ].map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setDatePreset(item.key as 'today' | '7days' | '30days' | 'thisMonth' | 'allTime' | 'custom')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  datePreset === item.key
+                    ? 'bg-blue-600 text-white border-blue-500'
+                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                }`}
+              >
+                {item.label}
+              </button>
             ))}
-          </select>
+            {datePreset === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="bg-slate-800 text-white border border-slate-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="bg-slate-800 text-white border border-slate-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -159,21 +228,21 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Total Revenue</p>
-                        <p className="text-2xl font-bold text-green-400">{formatCurrency(transactions.reduce((acc, t) => acc + Number(t.total || 0), 0))}</p>
+                        <p className="text-2xl font-bold text-green-400">{formatCurrency(filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0))}</p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Total Transactions</p>
-                        <p className="text-2xl font-bold text-blue-400">{transactions.length}</p>
+                        <p className="text-2xl font-bold text-blue-400">{filteredTransactions.length}</p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Avg. Order Value</p>
                         <p className="text-2xl font-bold text-purple-400">
-                            {formatCurrency(transactions.length > 0 ? transactions.reduce((acc, t) => acc + Number(t.total || 0), 0) / transactions.length : 0)}
+                            {formatCurrency(filteredTransactions.length > 0 ? filteredTransactions.reduce((acc, t) => acc + Number(t.total || 0), 0) / filteredTransactions.length : 0)}
                         </p>
                     </div>
                     <div className="bg-slate-800 p-4 rounded-xl">
                         <p className="text-slate-400 text-sm">Active Agents</p>
-                        <p className="text-2xl font-bold text-orange-400">{new Set(transactions.map(t => t.salesmanId)).size}</p>
+                        <p className="text-2xl font-bold text-orange-400">{new Set(filteredTransactions.map(t => t.salesmanId)).size}</p>
                     </div>
                 </div>
             </div>
@@ -274,42 +343,6 @@ export default function AnalyticsDashboard({ transactions, products, salesUsers,
             </div>
         </div>
 
-        {/* Low Stock Alerts */}
-        <div className="bg-slate-900/50 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-red-900/30">
-            <h3 className="text-lg font-bold mb-4 text-red-500 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
-                {t('low_stock_alerts')}
-            </h3>
-             <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                    <thead>
-                        <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
-                            <th className="pb-3 pl-2">Product</th>
-                            <th className="pb-3">Current Stock</th>
-                            <th className="pb-3">Customer/Loc</th>
-                            <th className="pb-3 text-right pr-2">Date</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800">
-                        {lowStockAlerts.slice(0, 10).map((alert, idx) => ( // Limit to 10
-                            <tr key={idx} className="group hover:bg-slate-800/50 transition-colors">
-                                <td className="py-3 pl-2 font-medium text-slate-300 group-hover:text-white">{alert.productName}</td>
-                                <td className="py-3">
-                                    <span className="inline-flex items-center px-2 py-1 rounded bg-red-950/50 border border-red-900/50 text-red-500 text-xs font-bold">
-                                        {alert.physicalStock} units
-                                    </span>
-                                </td>
-                                <td className="py-3 text-slate-400 text-sm">{alert.customerName}</td> 
-                                <td className="py-3 text-slate-500 text-xs text-right pr-2 font-mono">{new Date(alert.auditDate).toLocaleDateString()}</td>
-                            </tr>
-                        ))}
-                         {lowStockAlerts.length === 0 && (
-                            <tr><td colSpan={4} className="py-8 text-center text-slate-600 italic">No low stock alerts</td></tr>
-                        )}
-                    </tbody>
-                </table>
-             </div>
-        </div>
     </div>
   );
 }

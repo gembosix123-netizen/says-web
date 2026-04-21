@@ -1,4 +1,4 @@
-export type Role = 'Super Admin' | 'Admin' | 'Sales' | 'Merchandiser';
+export type Role = 'Super Admin' | 'Main Admin' | 'Admin' | 'Sales' | 'Merchandiser';
 
 export interface User {
   id: string;
@@ -24,12 +24,37 @@ export interface CommissionPayout {
   notes?: string;
 }
 
+export interface KPITierRule {
+  minSales: number;
+  maxSales?: number | null;
+  payout: number;
+}
+
+export interface CommissionPolicy {
+  id: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  status: 'draft' | 'active' | 'archived';
+  branch: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ' | 'all';
+  cashCommissionRate: number;
+  creditCommissionRate: number;
+  marginCommissionEnabled: boolean;
+  marginCommissionPerUnit?: number;
+  kpiTiers: KPITierRule[];
+  notes?: string;
+}
+
 export interface Product {
   id: string;
   name: string;
   price: number;
   unit: string;
   stock: number;
+  current_stock?: number;
+  branch?: string;
   sku?: string;
   code?: string;
 }
@@ -132,6 +157,88 @@ export interface Settlement {
   status: 'Submitted' | 'Processed';
   branch?: string;
   submittedAt?: string;
+}
+
+export interface DailyReport {
+  id: string;
+  userId: string;
+  userName: string;
+  branch: 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
+  date: string;
+  totalSales: number;
+  totalCash: number;
+  totalCredit: number;
+  totalTransfer?: number;
+  amountBankingManual?: number;
+  balancePtCashManual?: number;
+  expenseLines?: {
+    category: string;
+    description: string;
+    amount: number;
+    receiptImageUrls?: string[];
+  }[];
+  expensesTotal?: number;
+  bankSlipUrls?: string[];
+  cashProofUrls?: string[];
+  salesSnapshot?: {
+    cashSales?: {
+      customer: string;
+      item: string;
+      qn: number | string;
+      price: number | string;
+      amount: number | string;
+      billNo: string;
+    }[];
+    transferSales?: {
+      customer: string;
+      item: string;
+      qn: number | string;
+      price: number | string;
+      amount: number | string;
+      billNo: string;
+    }[];
+    creditSales?: {
+      customer: string;
+      item: string;
+      qn: number | string;
+      price: number | string;
+      amount: number | string;
+      billNo: string;
+    }[];
+  };
+  status:
+    | 'draft'
+    | 'submitted_daily'
+    | 'approved_daily'
+    | 'returned_daily'
+    | 'submitted_weekly'
+    | 'approved_weekly'
+    | 'returned_weekly'
+    | 'submitted_monthly'
+    | 'approved_monthly'
+    | 'returned_monthly'
+    | 'submitted'
+    | 'reviewed'
+    | 'approved'
+    | 'returned';
+  source: 'manual' | 'settlement' | 'sales' | 'merch';
+  settlementId?: string;
+  approvalStage?: 'daily' | 'weekly' | 'monthly';
+  liveSalesRefs?: string[];
+  returnedReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+  submittedAt: string;
+  approvedDailyAt?: string;
+  approvedDailyBy?: string;
+  approvedWeeklyAt?: string;
+  approvedWeeklyBy?: string;
+  approvedMonthlyAt?: string;
+  approvedMonthlyBy?: string;
+  weeklySubmittedAt?: string;
+  monthlySubmittedAt?: string;
+  updatedAt: string;
 }
 
 export interface ApiResponse<T> {

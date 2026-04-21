@@ -1,8 +1,9 @@
  'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useToast } from '@/components/ui/Toast';
-import { Plus, Trash2, Key, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Key, AlertCircle, Users, UserPlus, ShieldCheck } from 'lucide-react';
+import WorkflowControlPanel from '@/components/features/admin/WorkflowControlPanel';
 
 type User = { id: string; username: string; role: string; name: string; branch?: string; created_at?: string };
 
@@ -124,22 +125,39 @@ export default function AdminUsersPage() {
   };
 
   const canCreateUsers = currentUserRole === 'Main Admin' || currentUserRole === 'Admin';
-  const accessInfo = currentUserRole === 'Admin' 
+  const accessInfo = currentUserRole === 'Admin'
     ? `Viewing users from: ${currentUserBranch}` 
     : 'You have limited access to user management';
 
+  const staffStats = useMemo(() => {
+    return {
+      total: users.length,
+      admins: users.filter((u) => u.role === 'Admin' || u.role === 'Main Admin').length,
+      sales: users.filter((u) => u.role === 'Sales').length,
+    };
+  }, [users]);
+
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-white">User Management</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-white">Pengurusan Staf</h1>
+          <p className="text-slate-400 mt-1">Urus akaun staf, peranan, cawangan, dan kawalan akses.</p>
+        </div>
         {canCreateUsers && (
           <button 
             onClick={() => setShowForm(!showForm)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors font-medium"
           >
-            <Plus size={20} /> Add User
+            <Plus size={20} /> Tambah Staf
           </button>
         )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <StatCard icon={<Users size={16} />} label="Jumlah Staf" value={String(staffStats.total)} />
+        <StatCard icon={<ShieldCheck size={16} />} label="Admin / Main Admin" value={String(staffStats.admins)} />
+        <StatCard icon={<UserPlus size={16} />} label="Sales Staff" value={String(staffStats.sales)} />
       </div>
 
       {/* Access Info */}
@@ -156,10 +174,10 @@ export default function AdminUsersPage() {
       {/* Create User Form */}
       {showForm && canCreateUsers && (
         <div className="p-5 rounded-lg bg-slate-900 border border-slate-700">
-          <h3 className="text-lg font-semibold text-white mb-4">Register New User</h3>
+          <h3 className="text-lg font-semibold text-white mb-4">Daftar Staf Baharu</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Full Name *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Nama Penuh *</label>
               <input 
                 placeholder="e.g., Ali bin Muhammad" 
                 value={form.name} 
@@ -177,7 +195,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Password *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Kata Laluan *</label>
               <input 
                 type="password"
                 placeholder="Min. 6 characters" 
@@ -187,7 +205,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Role *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Peranan *</label>
               <select 
                 value={form.role} 
                 onChange={(e) => setForm({...form, role: e.target.value})} 
@@ -199,7 +217,7 @@ export default function AdminUsersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Branch/Area *</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Cawangan *</label>
               <select 
                 value={form.branch} 
                 onChange={(e) => setForm({...form, branch: e.target.value})} 
@@ -216,13 +234,13 @@ export default function AdminUsersPage() {
                 onClick={createUser} 
                 className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-medium transition-colors"
               >
-                Create User
+                Simpan Staf
               </button>
               <button 
                 onClick={() => setShowForm(false)} 
                 className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg font-medium transition-colors"
               >
-                Cancel
+                Batal
               </button>
             </div>
           </div>
@@ -231,7 +249,7 @@ export default function AdminUsersPage() {
 
       {/* Users Table */}
       <div className="p-5 rounded-lg bg-slate-900 border border-slate-700 overflow-hidden">
-        <h3 className="text-lg font-semibold text-white mb-4">Staff Directory</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">Direktori Staf</h3>
         {loading ? (
           <div className="text-center py-8 text-slate-400">Loading users...</div>
         ) : users.length === 0 ? (
@@ -241,12 +259,12 @@ export default function AdminUsersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-700">
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Name</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Nama</th>
                   <th className="text-left px-4 py-3 text-slate-300 font-semibold">Username</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Role</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Branch</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Joined</th>
-                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Actions</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Peranan</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Cawangan</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Tarikh Daftar</th>
+                  <th className="text-left px-4 py-3 text-slate-300 font-semibold">Tindakan</th>
                 </tr>
               </thead>
               <tbody>
@@ -290,6 +308,20 @@ export default function AdminUsersPage() {
           </div>
         )}
       </div>
+
+      {currentUserRole === 'Main Admin' && <WorkflowControlPanel />}
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-4">
+      <div className="flex items-center gap-2 text-slate-400 text-xs uppercase tracking-wide">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <p className="mt-2 text-2xl font-bold text-white">{value}</p>
     </div>
   );
 }

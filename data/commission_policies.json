@@ -1,0 +1,44 @@
+[
+  {
+    "id": "bed66f89-cb72-4666-acdc-8c751c149f0c",
+    "createdBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54",
+    "createdAt": "2026-04-21T17:07:14.425Z",
+    "updatedAt": "2026-04-21T17:07:14.425Z",
+    "effectiveFrom": "2026-04-21",
+    "effectiveTo": null,
+    "status": "active",
+    "branch": "Kota Kinabalu",
+    "cashCommissionRate": 0.04,
+    "creditCommissionRate": 0.004,
+    "marginCommissionEnabled": true,
+    "marginCommissionPerUnit": 0.5,
+    "kpiTiers": [
+      {
+        "minSales": 10000,
+        "maxSales": 24999,
+        "payout": 200
+      },
+      {
+        "minSales": 25000,
+        "maxSales": 49999,
+        "payout": 500
+      },
+      {
+        "minSales": 50000,
+        "maxSales": 99999,
+        "payout": 1000
+      },
+      {
+        "minSales": 100000,
+        "maxSales": 199999,
+        "payout": 2000
+      },
+      {
+        "minSales": 200000,
+        "maxSales": null,
+        "payout": 4000
+      }
+    ],
+    "notes": ""
+  }
+]

@@ -23,6 +23,7 @@ export function VisitSummary() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState('');
 
   const totalProducts = auditItems.length;
   const totalExpired = auditItems.reduce((sum, item) => sum + item.expired_stock, 0);
@@ -38,6 +39,46 @@ export function VisitSummary() {
     setLoading(true);
 
     const success = await completeVisit();
+
+    if (success) {
+      try {
+        const rawUser = localStorage.getItem('user');
+        const user = rawUser ? JSON.parse(rawUser) : {};
+        const reportPayload = {
+          date: new Date().toISOString().slice(0, 10),
+          userId: user?.id || '',
+          userName: user?.name || user?.username || 'Merchandiser',
+          branch: user?.branch || 'HQ',
+          totalSales: 0,
+          totalCash: 0,
+          totalCredit: 0,
+          source: 'merch',
+          status: 'submitted',
+        };
+
+        const checkParams = new URLSearchParams({
+          date: reportPayload.date,
+          userId: reportPayload.userId,
+        });
+        const checkRes = await fetch(`/api/daily-reports?${checkParams.toString()}`);
+        const checkData = await checkRes.json().catch(() => ({}));
+        const existingReports = Array.isArray(checkData?.reports) ? checkData.reports : [];
+
+        if (existingReports.length === 0) {
+          await fetch('/api/daily-reports', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reportPayload),
+          });
+          setSubmitMessage('Laporan merch berjaya dihantar kepada admin untuk semakan.');
+        } else {
+          setSubmitMessage('Laporan merch untuk hari ini sudah pernah dihantar.');
+        }
+      } catch (error) {
+        console.error('Failed to submit merch report:', error);
+        setSubmitMessage('Visit selesai, tetapi submit laporan kepada admin gagal.');
+      }
+    }
 
     setLoading(false);
 
@@ -62,6 +103,9 @@ export function VisitSummary() {
           <p className="text-white/60 mb-6">
             Your store visit and audit have been successfully recorded.
           </p>
+          {submitMessage && (
+            <p className="text-sm text-emerald-300 mb-4">{submitMessage}</p>
+          )}
           <Button onClick={handleDone} variant="primary" size="lg">
             Return to Dashboard
           </Button>
