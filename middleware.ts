@@ -134,6 +134,11 @@ export function middleware(request: NextRequest) {
         if (pathname.startsWith('/admin/global-monitor') && role !== 'Main Admin') {
           return NextResponse.redirect(new URL('/unauthorized', request.url));
         }
+
+        // Stock edit grants (Kaedah 2 approvals) — Main Admin only
+        if (pathname.startsWith('/admin/stock-grants') && role !== 'Main Admin') {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
       }
       
       // Sales routes - only Sales role can create sales (not Merchandiser)

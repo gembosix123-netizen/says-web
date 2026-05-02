@@ -32,11 +32,19 @@ export default function Login() {
         body: JSON.stringify(data),
       });
       const rawText = await res.text();
-      let responseData: any = {};
+      let responseData: { error?: string; success?: boolean; id?: string; name?: string; role?: string; branch?: string } =
+        {};
       try {
         responseData = rawText ? JSON.parse(rawText) : {};
       } catch {
-        responseData = { error: 'Server returned invalid response format' };
+        const isHtmlError =
+          res.status >= 500 &&
+          (res.headers.get('content-type') || '').includes('text/html');
+        responseData = {
+          error: isHtmlError
+            ? 'Server error — response was not JSON. Check the terminal, confirm `.env.local` has NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, then restart the dev server.'
+            : 'Server returned invalid response format',
+        };
       }
 
       if (res.ok) {
@@ -147,9 +155,9 @@ export default function Login() {
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-slate-800 text-center">
+        <div className="mt-8 pt-6 border-t border-slate-800 text-center space-y-1">
           <p className="text-xs text-slate-500">
-            Demo: <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">founder</span> / <span className="text-slate-400 font-mono bg-slate-800 px-1 rounded">Founder2024!</span>
+            Log masuk guna <span className="text-slate-400">username</span> atau <span className="text-slate-400">UUID id</span> dari jadual <code className="text-slate-500">users</code> dalam Supabase (bukan fail JSON tempatan).
           </p>
         </div>
       </div>

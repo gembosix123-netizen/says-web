@@ -259,7 +259,13 @@ export default function VanLoadingManagement() {
         await fetch('/api/products', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: item.productId, stock: nextStock, current_stock: nextStock }),
+          body: JSON.stringify({
+            id: item.productId,
+            stock: nextStock,
+            current_stock: nextStock,
+            stock_adjust_context: 'freezer_in',
+            reason: item.notes?.trim() || undefined,
+          }),
         });
         freezerStockByProductId.set(item.productId, nextStock);
         // Log movement
@@ -369,7 +375,13 @@ export default function VanLoadingManagement() {
         const productRes = await fetch('/api/products', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: item.productId, stock: nextStock, current_stock: nextStock }),
+          body: JSON.stringify({
+            id: item.productId,
+            stock: nextStock,
+            current_stock: nextStock,
+            stock_adjust_context: 'van_to_freezer',
+            reason: item.notes?.trim() || undefined,
+          }),
         });
         if (!productRes.ok) throw new Error('Gagal kemas kini stok freezer');
         freezerStockByProductId.set(item.productId, nextStock);

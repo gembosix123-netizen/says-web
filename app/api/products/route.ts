@@ -15,6 +15,14 @@ import { createProductSchema, updateProductSchema } from '@/lib/validations';
 import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { canManageProducts } from '@/lib/permissions';
+import { logAuditEvent } from '@/lib/audit';
+import {
+  expireStaleStockGrants,
+  findActiveGrantForRequester,
+  incrementGrantChangeCount,
+  STOCK_GRANT_MAX_CHANGES_PER_SESSION,
+  STOCK_GRANT_MIN_REASON_LENGTH,
+} from '@/lib/stock-edit-grants';
 
 type BranchName = 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
 
@@ -485,6 +493,59 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    const oldStock = Number(product.current_stock ?? product.stock ?? 0);
+    let newStock = oldStock;
+    if ('current_stock' in updatePayload) newStock = Number(updatePayload.current_stock);
+    else if ('stock' in updatePayload) newStock = Number(updatePayload.stock);
+
+    const stockFieldUpdated = 'current_stock' in updatePayload || 'stock' in updatePayload;
+    const stockChanged =
+      stockFieldUpdated && Number.isFinite(newStock) && newStock !== oldStock;
+
+    const ctxRaw = typeof body.stock_adjust_context === 'string' ? body.stock_adjust_context.trim() : '';
+    const ALLOWED_STOCK_CTX = new Set(['freezer_in', 'van_to_freezer']);
+    if (ctxRaw && !ALLOWED_STOCK_CTX.has(ctxRaw)) {
+      return NextResponse.json({ error: 'stock_adjust_context tidak sah' }, { status: 400 });
+    }
+    const exemptFromStockGrant = ctxRaw === 'freezer_in' || ctxRaw === 'van_to_freezer';
+
+    const reasonTrim =
+      typeof body.reason === 'string' ? body.reason.trim() : '';
+
+    let activeGrantId: string | null = null;
+
+    if (stockChanged) {
+      if (role === 'Admin') {
+        if (!exemptFromStockGrant) {
+          await expireStaleStockGrants(supabaseAdmin);
+          const grant = await findActiveGrantForRequester(supabaseAdmin, currentUser.id);
+          if (!grant) {
+            return NextResponse.json(
+              { error: 'Tiada sesi lulusan aktif untuk edit stok. Minta Main Admin meluluskan.' },
+              { status: 403 }
+            );
+          }
+          if (grant.change_count >= STOCK_GRANT_MAX_CHANGES_PER_SESSION) {
+            return NextResponse.json(
+              { error: `Had ${STOCK_GRANT_MAX_CHANGES_PER_SESSION} ubahan stok bagi sesi ini telah dicapai.` },
+              { status: 403 }
+            );
+          }
+          if (reasonTrim.length < STOCK_GRANT_MIN_REASON_LENGTH) {
+            return NextResponse.json(
+              {
+                error: `Sebab penyesuaian wajib (min ${STOCK_GRANT_MIN_REASON_LENGTH} aksara)`,
+              },
+              { status: 400 }
+            );
+          }
+          activeGrantId = grant.id;
+        }
+      } else if (role === 'Main Admin') {
+        // optional reason; default below for audit
+      }
+    }
+
     // Update product
     let updateQuery = supabaseAdmin
       .from('products')
@@ -499,6 +560,66 @@ export async function PUT(request: NextRequest) {
       }
       console.error('Error updating product:', updateError);
       return NextResponse.json({ error: 'Failed to update product' }, { status: 500 });
+    }
+
+    if (stockChanged) {
+      const auditReason =
+        reasonTrim ||
+        (role === 'Main Admin' ? 'Penyesuaian Main Admin' : reasonTrim) ||
+        (exemptFromStockGrant ? `Konteks: ${ctxRaw}` : '');
+
+      await logAuditEvent({
+        request,
+        module: 'inventory',
+        action: 'stock_adjust',
+        entityType: 'product',
+        entityId: productId,
+        branch: userBranch || normalizeBranch(currentUser.branch) || undefined,
+        reason: auditReason || undefined,
+        referenceNo: activeGrantId ?? undefined,
+        metadata: {
+          product_name: product.name ?? null,
+          stock_adjust_context: ctxRaw || null,
+          grant_id: activeGrantId,
+          delta: newStock - oldStock,
+        },
+        changes: [
+          {
+            field: 'current_stock',
+            oldValue: oldStock,
+            newValue: newStock,
+          },
+        ],
+      });
+
+      if (!exemptFromStockGrant) {
+        const delta = newStock - oldStock;
+        const branchLabel =
+          (typeof product.branch === 'string' && product.branch.trim()) ||
+          userBranch ||
+          normalizeBranch(currentUser.branch) ||
+          'HQ';
+        await supabaseAdmin.from('inventory_movements').insert({
+          branch: branchLabel,
+          actor_id: currentUser.id,
+          actor_name: currentUser.name || currentUser.username || null,
+          movement_type: 'adjustment',
+          product_id: productId,
+          product_name: product.name ?? null,
+          qty: Math.abs(delta),
+          from_bucket: 'freezer',
+          to_bucket: 'freezer',
+          notes:
+            auditReason ||
+            `Penyesuaian stok freezer (${delta >= 0 ? '+' : ''}${delta})`,
+          source_ref: activeGrantId || null,
+          movement_date: new Date().toISOString(),
+        });
+      }
+
+      if (activeGrantId) {
+        await incrementGrantChangeCount(supabaseAdmin, activeGrantId);
+      }
     }
 
     return NextResponse.json(

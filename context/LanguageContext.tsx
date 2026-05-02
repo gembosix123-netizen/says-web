@@ -204,6 +204,7 @@ const dictionary: Translations = {
   dashboard: { ms: 'Papan Pemuka', en: 'Dashboard' },
   reports: { ms: 'Laporan', en: 'Reports' },
   audit_center: { ms: 'Pusat Audit', en: 'Audit Center' },
+  stock_grants: { ms: 'Lulusan Stok', en: 'Stock approvals' },
   settings: { ms: 'Tetapan', en: 'Settings' },
   logout: { ms: 'Log Keluar', en: 'Logout' },
   user_info: { ms: 'Info Pengguna', en: 'User Info' },

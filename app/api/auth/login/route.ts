@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase';
+import { isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -19,6 +19,101 @@ type AuthUser = {
   password?: string;
   password_hash?: string;
 };
+
+function findLocalUserByLoginIdentifier(
+  localUsers: readonly unknown[],
+  login: string
+): AuthUser | undefined {
+  const q = login.trim().toLowerCase();
+  const row = localUsers.find((raw) => {
+    const u = raw as Record<string, unknown>;
+    const uname = String(u.username ?? '').toLowerCase();
+    const uid = String(u.id ?? u.userId ?? '').toLowerCase();
+    return uname === q || uid === q;
+  });
+  if (!row) return undefined;
+  const u = row as Record<string, unknown>;
+  const id = String(u.id ?? u.userId ?? '');
+  if (!id) return undefined;
+  const pw = (u.password ?? u.password_hash ?? u.passwordHash) as string | undefined;
+  return {
+    id,
+    username: u.username as string | undefined,
+    role: u.role as string | undefined,
+    branch: u.branch as string | undefined,
+    name: u.name as string | undefined,
+    full_name: u.full_name as string | undefined,
+    password: pw,
+    password_hash: u.password_hash as string | undefined,
+  };
+}
+
+/** Avoid mixing non-UUID login strings with `id.eq` in PostgREST `.or()` (can yield no rows / odd parsing). */
+function isProbablyUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    s.trim()
+  );
+}
+
+/** Map Supabase row to AuthUser (supports password or password_hash column names). */
+function rowToAuthUser(row: Record<string, unknown>): AuthUser {
+  const id = String(row.id ?? '');
+  const pw = (row.password ?? row.password_hash) as string | undefined;
+  return {
+    ...row,
+    id,
+    username: row.username as string | undefined,
+    role: row.role as string | undefined,
+    branch: row.branch as string | undefined,
+    name: row.name as string | undefined,
+    full_name: row.full_name as string | undefined,
+    password: pw,
+    password_hash: row.password_hash as string | undefined,
+  };
+}
+
+async function loadUserFromSupabase(
+  admin: NonNullable<typeof supabaseAdmin>,
+  loginInput: string
+): Promise<{ user?: AuthUser; queryError?: { message?: string } }> {
+  const raw = loginInput.trim();
+  const lower = raw.toLowerCase();
+
+  /**
+   * Beberapa deployment / PostgREST: `ilike` sahaja kadang tidak padan seperti `eq`.
+   * Cuba beberapa penapis untuk username (ikut screenshot Dashboard: semua huruf kecil).
+   */
+  const usernameAttempts = [
+    () => admin.from('users').select('*').eq('username', raw).limit(1),
+    () => admin.from('users').select('*').eq('username', lower).limit(1),
+    () => admin.from('users').select('*').ilike('username', raw).limit(1),
+    () => admin.from('users').select('*').ilike('username', lower).limit(1),
+  ];
+
+  for (const run of usernameAttempts) {
+    const { data, error } = await run();
+    if (error) {
+      return { queryError: error };
+    }
+    const row = (data as Array<Record<string, unknown>> | null)?.[0];
+    if (row) {
+      return { user: rowToAuthUser(row) };
+    }
+  }
+
+  if (isProbablyUuid(raw)) {
+    const { data, error } = await admin.from('users').select('*').eq('id', raw).limit(1);
+    if (error) {
+      return { queryError: error };
+    }
+    const row = (data as Array<Record<string, unknown>> | null)?.[0];
+    if (row) {
+      return { user: rowToAuthUser(row) };
+    }
+  }
+
+  return {};
+}
 
 /**
  * Check if password hash is bcrypt format
@@ -114,70 +209,55 @@ export async function POST(request: Request) {
     }
 
 
-    let users: Array<Record<string, unknown>> | null = null;
-    let error: { message?: string } | null = null;
-    let localFallbackError: unknown = null;
+    let user: AuthUser | undefined;
 
-    if (supabaseAdmin) {
-      const primaryQuery = await supabaseAdmin
-        .from('users')
-        .select('id, username, role, branch, password')
-        .ilike('username', username)
-        .limit(1);
+    if (isSupabaseConfigured && supabaseAdmin) {
+      if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        console.warn(
+          '[LOGIN] Tiada SUPABASE_SERVICE_ROLE_KEY — klien guna anon key. RLS pada jadual users selalunya menghalang bacaan; log masuk akan dapat “Invalid credentials”. Tambah service role key dalam .env.local dan mulakan semula dev server.'
+        );
+      }
 
-      users = primaryQuery.data as Array<Record<string, unknown>> | null;
-      error = primaryQuery.error as { message?: string } | null;
+      const loginInput = username.trim();
+      const { user: sbUser, queryError } = await loadUserFromSupabase(supabaseAdmin, loginInput);
+      user = sbUser;
 
-      // Backward compatibility: some environments still use password_hash
-      if ((!users || users.length === 0) && !error) {
-        const legacyQuery = await supabaseAdmin
-          .from('users')
-          .select('id, username, role, branch, password_hash')
-          .ilike('username', username)
-          .limit(1);
+      if (queryError && !user) {
+        console.error('[LOGIN] Supabase:', queryError);
+        return NextResponse.json({ error: 'Authentication service unavailable' }, { status: 500 });
+      }
 
-        users = legacyQuery.data as Array<Record<string, unknown>> | null;
-        error = legacyQuery.error as { message?: string } | null;
+      if (!user) {
+        console.warn(`[LOGIN] Tiada baris dalam public.users untuk identifier: "${loginInput}" (semak RLS & SUPABASE_SERVICE_ROLE_KEY)`);
+        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
       }
     } else {
-      console.warn('[LOGIN] Supabase admin unavailable. Using local auth fallback.');
-    }
-
-    let user = users?.[0] as AuthUser | undefined;
-
-    if (!user) {
-      // Fallback to local JSON/Redis DB for environments where Supabase schema is incomplete
+      console.warn('[LOGIN] Supabase tidak dikonfigurasi — sandaran data/users.json (hanya untuk dev tanpa env).');
       try {
         const localUsers = await db.users.getAll();
-        user = localUsers.find((u) => (u.username || '').toLowerCase() === username.toLowerCase()) as AuthUser | undefined;
+        user = findLocalUserByLoginIdentifier(localUsers, username);
       } catch (fallbackError) {
-        localFallbackError = fallbackError;
-        console.error('Local auth fallback error:', fallbackError);
+        console.error('[LOGIN] Sandaran tempatan gagal:', fallbackError);
+        return NextResponse.json({ error: 'Authentication service unavailable' }, { status: 500 });
       }
-    }
 
-    if (!user && error && localFallbackError) {
-      console.error('Supabase error:', error);
-      return NextResponse.json({ error: 'Authentication service unavailable' }, { status: 500 });
-    }
-
-    if (!user) {
-      if (error) {
-        console.warn('[LOGIN] Supabase lookup failed, but no matching fallback user was found:', error);
+      if (!user) {
+        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
       }
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
     const storedPassword = user.password || user.password_hash;
     if (!storedPassword) {
+      console.warn('[LOGIN] Pengguna dijumpai tetapi tiada password / password_hash dalam baris — semak skema Supabase');
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
-    // Verify password with automatic migration from legacy formats
     const verificationResult = await verifyPasswordWithMigration(password, storedPassword);
 
     if (!verificationResult.valid) {
-      console.log('[LOGIN] Failed login attempt for user:', username);
+      console.warn(
+        `[LOGIN] Kata laluan tidak sepadan untuk username/id "${username}" (baris Supabase dijumpai — semak kata laluan atau reset dalam Supabase)`
+      );
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 

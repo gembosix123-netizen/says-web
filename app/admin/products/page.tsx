@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useToast } from '@/components/ui/Toast';
+import { normalizeRole } from '@/lib/roles';
 import { Product } from '@/types';
-import { Tag, ChevronDown, ChevronUp, Plus, X, PackagePlus } from 'lucide-react';
+import { Tag, ChevronDown, ChevronUp, Plus, X, PackagePlus, Pencil, Clock, ShieldAlert, CheckCircle } from 'lucide-react';
 
 const ALL_BRANCHES = ['Kota Kinabalu', 'Kinabatangan', 'HQ'];
 
@@ -36,8 +37,46 @@ export default function AdminProductsPage() {
   const [stockInQty, setStockInQty] = useState('');
   const [stockInNotes, setStockInNotes] = useState('');
   const [stockInSaving, setStockInSaving] = useState(false);
-  const [, setUserRole] = useState('');
+  const [userRole, setUserRole] = useState('');
+  const [activeGrant, setActiveGrant] = useState<{
+    id: string;
+    expires_at: string;
+    change_count: number;
+    duration_minutes: number;
+  } | null>(null);
+  const [grantNow, setGrantNow] = useState(() => Date.now());
+  const [requestGrantOpen, setRequestGrantOpen] = useState(false);
+  const [requestReason, setRequestReason] = useState('');
+  const [requestDuration, setRequestDuration] = useState(15);
+  const [requestSaving, setRequestSaving] = useState(false);
+  const [stockEditModal, setStockEditModal] = useState<{ id: string; name: string; current: number } | null>(null);
+  const [stockEditNew, setStockEditNew] = useState('');
+  const [stockEditReason, setStockEditReason] = useState('');
+  const [stockEditSaving, setStockEditSaving] = useState(false);
+  const [finishSessionSaving, setFinishSessionSaving] = useState(false);
+  /** Banner selepas sesi tamat: manual = pengguna tekan Selesai; expired = masa habis */
+  const [sessionEndedKind, setSessionEndedKind] = useState<'manual' | 'expired' | null>(null);
+  const prevGrantActiveRef = useRef(false);
+  const suppressExpiryBannerRef = useRef(false);
   const { addToast } = useToast();
+
+  const roleNorm = normalizeRole(userRole);
+  const isMainAdmin = roleNorm === 'Main Admin';
+  const isBranchAdmin = roleNorm === 'Admin';
+  const grantExpiresMs = activeGrant?.expires_at ? new Date(activeGrant.expires_at).getTime() : 0;
+  const grantActive = Boolean(activeGrant && grantExpiresMs > grantNow);
+  const canDirectEditStock = isMainAdmin || (isBranchAdmin && grantActive);
+
+  const refreshActiveGrant = useCallback(async () => {
+    try {
+      const res = await fetch('/api/stock-grants?view=active');
+      if (!res.ok) return;
+      const data = await res.json();
+      setActiveGrant(data.grant || null);
+    } catch {
+      /* noop */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -52,9 +91,18 @@ export default function AdminProductsPage() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+      if (raw) {
+        const u = JSON.parse(raw) as { role?: string };
+        if (u.role) setUserRole(u.role);
+      }
+    } catch {
+      /* noop */
+    }
     async function fetchUserRole() {
       try {
-        const res = await fetch('/api/auth/me');
+        const res = await fetch('/api/auth/me', { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
         setUserRole(data.role || '');
@@ -64,6 +112,55 @@ export default function AdminProductsPage() {
     }
     fetchUserRole();
   }, []);
+
+  useEffect(() => {
+    refreshActiveGrant();
+  }, [refreshActiveGrant, userRole]);
+
+  useEffect(() => {
+    if (!isBranchAdmin || isMainAdmin) return undefined;
+    const id = window.setInterval(() => {
+      setGrantNow(Date.now());
+      refreshActiveGrant();
+    }, 15000);
+    return () => window.clearInterval(id);
+  }, [isBranchAdmin, isMainAdmin, refreshActiveGrant]);
+
+  useEffect(() => {
+    if (!grantActive) return undefined;
+    const id = window.setInterval(() => setGrantNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [grantActive]);
+
+  useEffect(() => {
+    if (grantActive) {
+      setSessionEndedKind(null);
+      suppressExpiryBannerRef.current = false;
+    } else if (isBranchAdmin && prevGrantActiveRef.current && !suppressExpiryBannerRef.current) {
+      setSessionEndedKind('expired');
+    }
+    prevGrantActiveRef.current = grantActive;
+  }, [grantActive, isBranchAdmin]);
+
+  const handleFinishEditSession = async () => {
+    if (!activeGrant?.id) return;
+    if (!confirm('Tamatkan sesi edit stok? Selepas ini anda perlu minta akses semula untuk edit lagi.')) return;
+    setFinishSessionSaving(true);
+    try {
+      suppressExpiryBannerRef.current = true;
+      const res = await fetch(`/api/stock-grants/${activeGrant.id}/finish`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Gagal');
+      setSessionEndedKind('manual');
+      addToast('Sesi edit ditamatkan.', 'success');
+      await refreshActiveGrant();
+      setGrantNow(Date.now());
+    } catch (e) {
+      suppressExpiryBannerRef.current = false;
+      addToast(e instanceof Error ? e.message : 'Gagal', 'error');
+    }
+    setFinishSessionSaving(false);
+  };
 
   const create = async () => {
     if (!form.name.trim()) return addToast('Nama produk wajib diisi', 'error');
@@ -164,9 +261,18 @@ export default function AdminProductsPage() {
       const putRes = await fetch('/api/products', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: stockInModal.id, stock: newStock, current_stock: newStock }),
+        body: JSON.stringify({
+          id: stockInModal.id,
+          stock: newStock,
+          current_stock: newStock,
+          stock_adjust_context: 'freezer_in',
+          reason: stockInNotes?.trim() || undefined,
+        }),
       });
-      if (!putRes.ok) throw new Error('Gagal kemaskini stok');
+      if (!putRes.ok) {
+        const errBody = await putRes.json().catch(() => ({}));
+        throw new Error(typeof errBody?.error === 'string' ? errBody.error : 'Gagal kemaskini stok');
+      }
       // Log movement
       await fetch('/api/inventory/movements', {
         method: 'POST',
@@ -192,9 +298,269 @@ export default function AdminProductsPage() {
     setStockInSaving(false);
   };
 
+  const submitStockGrantRequest = async () => {
+    const r = requestReason.trim();
+    if (r.length < 5) return addToast('Sebab permintaan min 5 aksara', 'error');
+    setRequestSaving(true);
+    try {
+      const res = await fetch('/api/stock-grants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason_request: r, requested_duration_minutes: requestDuration }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Gagal');
+      addToast('Permintaan dihantar ke Main Admin', 'success');
+      setRequestGrantOpen(false);
+      setRequestReason('');
+      setRequestDuration(15);
+      refreshActiveGrant();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Gagal', 'error');
+    }
+    setRequestSaving(false);
+  };
+
+  const handleStockEditSave = async () => {
+    if (!stockEditModal) return;
+    const next = parseInt(stockEditNew, 10);
+    if (Number.isNaN(next) || next < 0) return addToast('Kuantiti stok tidak sah', 'error');
+    if (next === stockEditModal.current) return addToast('Tiada perubahan', 'error');
+    const reasonNeed = isBranchAdmin ? stockEditReason.trim().length >= 5 : stockEditReason.trim().length >= 0;
+    if (isBranchAdmin && !reasonNeed) return addToast('Sebab penyesuaian wajib (min 5 aksara)', 'error');
+    setStockEditSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        id: stockEditModal.id,
+        stock: next,
+        current_stock: next,
+        reason: stockEditReason.trim() || (isMainAdmin ? 'Penyesuaian Main Admin' : undefined),
+      };
+      const res = await fetch('/api/products', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Gagal kemaskini');
+      addToast('Stok dikemaskini', 'success');
+      setStockEditModal(null);
+      setStockEditNew('');
+      setStockEditReason('');
+      load();
+      refreshActiveGrant();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Gagal', 'error');
+    }
+    setStockEditSaving(false);
+  };
+
+  const grantSecondsLeft = grantActive ? Math.max(0, Math.floor((grantExpiresMs - grantNow) / 1000)) : 0;
+  const grantTimeLabel = `${Math.floor(grantSecondsLeft / 60)}:${String(grantSecondsLeft % 60).padStart(2, '0')}`;
+
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-white">Admin — Produk</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-bold text-white">Admin — Produk</h1>
+        {isBranchAdmin && (
+          <div className="flex flex-wrap gap-2">
+            {!grantActive && (
+              <button
+                type="button"
+                onClick={() => setRequestGrantOpen(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white text-sm font-medium"
+              >
+                <ShieldAlert size={16} /> Minta akses edit stok
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isBranchAdmin && (
+        <div
+          className={`rounded-xl border px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-sm ${
+            grantActive
+              ? 'bg-emerald-950/40 border-emerald-700/60 text-emerald-200'
+              : sessionEndedKind
+                ? sessionEndedKind === 'manual'
+                  ? 'bg-sky-950/35 border-sky-700/50 text-sky-100'
+                  : 'bg-amber-950/35 border-amber-700/50 text-amber-100'
+                : 'bg-slate-900 border-slate-700 text-slate-400'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            {grantActive ? (
+              <Clock size={18} className="text-emerald-400 shrink-0" />
+            ) : sessionEndedKind === 'manual' ? (
+              <CheckCircle size={18} className="text-sky-400 shrink-0" />
+            ) : sessionEndedKind === 'expired' ? (
+              <Clock size={18} className="text-amber-400 shrink-0" />
+            ) : (
+              <Clock size={18} className="text-slate-500 shrink-0" />
+            )}
+            {grantActive ? (
+              <span>
+                Sesi edit stok aktif — baki masa <strong className="text-white">{grantTimeLabel}</strong>
+                {typeof activeGrant?.change_count === 'number' && (
+                  <span className="text-slate-400">
+                    {' '}
+                    · Ubahan: {activeGrant.change_count}/50
+                  </span>
+                )}
+              </span>
+            ) : sessionEndedKind === 'manual' ? (
+              <span>
+                <strong className="text-white">Sesi edit telah ditamatkan.</strong>{' '}
+                Semua perubahan telah direkod. Tekan &quot;Minta akses edit stok&quot; jika perlu edit lagi.
+              </span>
+            ) : sessionEndedKind === 'expired' ? (
+              <span>
+                <strong className="text-white">Sesi edit tamat</strong> — masa lulusan telah habis. Tekan &quot;Minta akses
+                edit stok&quot; untuk mohon sesi baharu.
+              </span>
+            ) : (
+              <span>Tiada sesi lulusan. Tekan &quot;Minta akses edit stok&quot; untuk mohon kepada Main Admin.</span>
+            )}
+          </div>
+          {grantActive && activeGrant?.id && (
+            <button
+              type="button"
+              disabled={finishSessionSaving}
+              onClick={handleFinishEditSession}
+              className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-emerald-700/40 text-emerald-100 text-xs font-medium disabled:opacity-50"
+            >
+              <CheckCircle size={14} />
+              {finishSessionSaving ? 'Menyimpan...' : 'Selesai edit'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {isMainAdmin && (
+        <p className="text-xs text-slate-500">
+          Main Admin: ubah stok terus (edit nilai) atau Stok In tanpa sesi; audit direkod automatik.
+        </p>
+      )}
+
+      {/* Request grant modal */}
+      {requestGrantOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-semibold flex items-center gap-2">
+                <ShieldAlert size={16} className="text-amber-400" /> Minta akses edit stok
+              </h3>
+              <button type="button" onClick={() => { setRequestGrantOpen(false); setRequestReason(''); }} className="text-slate-500 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-400">Main Admin akan meluluskan tempoh akses (cadangan di bawah).</p>
+            <div className="space-y-2">
+              <label className="text-xs text-slate-400">Cadangan tempoh (minit)</label>
+              <select
+                value={requestDuration}
+                onChange={(e) => setRequestDuration(Number(e.target.value))}
+                className="w-full p-2 bg-slate-800 text-white rounded border border-slate-700"
+              >
+                {[10, 15, 20, 30, 45, 60].map((m) => (
+                  <option key={m} value={m}>{m} minit</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-slate-400">Sebab permintaan (wajib)</label>
+              <textarea
+                value={requestReason}
+                onChange={(e) => setRequestReason(e.target.value)}
+                rows={3}
+                placeholder="cth: Stock take / pembetulan rekod..."
+                className="w-full p-2 bg-slate-800 text-white rounded border border-slate-700 text-sm"
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => { setRequestGrantOpen(false); setRequestReason(''); }}
+                className="flex-1 py-2 rounded bg-slate-700 text-slate-300 text-sm hover:bg-slate-600"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={requestSaving || requestReason.trim().length < 5}
+                onClick={submitStockGrantRequest}
+                className="flex-1 py-2 rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold"
+              >
+                {requestSaving ? 'Menghantar...' : 'Hantar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit stock modal */}
+      {stockEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-semibold flex items-center gap-2">
+                <Pencil size={16} className="text-blue-400" /> Edit stok freezer
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setStockEditModal(null); setStockEditNew(''); setStockEditReason(''); }}
+                className="text-slate-500 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-slate-300 font-medium">{stockEditModal.name}</p>
+            <p className="text-xs text-slate-500">
+              Stok semasa: <span className="text-blue-400 font-semibold">{stockEditModal.current}</span> unit
+            </p>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-slate-400">Stok baharu (unit)</label>
+              <input
+                type="number"
+                min={0}
+                value={stockEditNew}
+                onChange={(e) => setStockEditNew(e.target.value)}
+                className="p-2 bg-slate-800 text-white rounded border border-slate-700"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-slate-400">
+                Sebab penyesuaian {isBranchAdmin ? '(wajib, min 5 aksara)' : '(pilihan)'}
+              </label>
+              <textarea
+                value={stockEditReason}
+                onChange={(e) => setStockEditReason(e.target.value)}
+                rows={3}
+                className="p-2 bg-slate-800 text-white rounded border border-slate-700 text-sm"
+                placeholder="cth: Koreksi key-in / stock take..."
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => { setStockEditModal(null); setStockEditNew(''); setStockEditReason(''); }}
+                className="flex-1 py-2 rounded bg-slate-700 text-slate-300 text-sm hover:bg-slate-600"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={stockEditSaving}
+                onClick={handleStockEditSave}
+                className="flex-1 py-2 rounded bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm font-semibold"
+              >
+                {stockEditSaving ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stock-In Modal */}
       {stockInModal && (
@@ -214,6 +580,16 @@ export default function AdminProductsPage() {
                   value={stockInQty}
                   onChange={(e) => setStockInQty(e.target.value)}
                   className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-emerald-500 outline-none text-lg font-bold"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-400">Nota (pilihan)</label>
+                <textarea
+                  value={stockInNotes}
+                  onChange={(e) => setStockInNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Resit / pembekal..."
+                  className="p-2 bg-slate-800 text-white rounded border border-slate-700 text-sm"
                 />
               </div>
             </div>
@@ -326,6 +702,19 @@ export default function AdminProductsPage() {
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded text-xs transition-colors">
                         <PackagePlus size={10} /> Stok In
                       </button>
+                      {canDirectEditStock && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = Number(p.stock ?? 0);
+                            setStockEditModal({ id: p.id, name: p.name, current: cur });
+                            setStockEditNew(String(cur));
+                            setStockEditReason('');
+                          }}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded text-xs transition-colors">
+                          <Pencil size={10} /> Edit
+                        </button>
+                      )}
                     </div>
                   </td>
                   <td className="px-2 py-2.5">

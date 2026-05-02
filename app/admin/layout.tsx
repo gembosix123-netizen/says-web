@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Upload, ReceiptText, Receipt, BarChart2 } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Database, LogOut, Menu, X, ShoppingCart, Store, Truck, FileText, Banknote, Globe, Upload, ReceiptText, Receipt, BarChart2, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
 import { useLanguage } from '@/context/LanguageContext';
 import ClientSwitchers from '@/components/ClientSwitchers';
@@ -69,6 +69,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       { to: '/admin/kinabatangan', label: 'kinabatangan', icon: Store, roles: ['Main Admin', 'Admin', 'Sales'], branches: ['HQ', 'Kinabatangan'] },
       { to: '/admin/reports', label: 'reports', icon: FileText, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/audit-center', label: 'audit_center', icon: FileText, roles: ['Main Admin'] },
+      { to: '/admin/stock-grants', label: 'stock_grants', icon: ShieldAlert, roles: ['Main Admin'] },
       { to: '/admin/commissions', label: 'commissions', icon: Banknote, roles: ['Main Admin', 'Admin', 'Sales'] },
       { to: '/admin/live-sales', label: 'Live Sales', icon: ReceiptText, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/weekly-reports', label: 'Laporan Mingguan', icon: BarChart2, roles: ['Main Admin', 'Admin'] },
@@ -80,7 +81,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       { to: '/admin/backdated-import', label: 'backdated_import', icon: Upload, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/users', label: 'user_management', icon: Users, roles: ['Main Admin'] },
       { to: '/admin/audits', label: 'audits', icon: Package, roles: ['Main Admin'] },
-      { to: '/admin/backdated-import', label: 'backdated_import', icon: Upload, roles: ['Main Admin', 'Admin'] },
       { to: '/admin/database', label: 'database_nav', icon: Database, roles: ['Main Admin', 'Admin'] },
     ];
 
