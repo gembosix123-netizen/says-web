@@ -18,6 +18,7 @@ export function canAccessAdminPath(role: NormalizedRole, pathname: string): bool
     '/admin/products',
     '/admin/customers',
     '/admin/database',
+    '/admin/data-archive',
     '/admin/backdated-import',
     '/admin/weekly-reports',
     '/admin/expenses',

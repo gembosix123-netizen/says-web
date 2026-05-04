@@ -35,11 +35,24 @@ function parseDateCell(raw: string): { month: string; fullDate: string } | null 
     // YYYY-MM-DD
     [year, mon, day] = parts;
   } else {
-    // D.M.YYYY or DD/MM/YYYY
+    // D.M.YYYY or DD/MM/YYYY (also accepts D.M.YY with 2-digit year)
     [day, mon, year] = parts;
   }
   if (!year || !mon || !day) return null;
-  const y = year.padStart(4, '0');
+
+  // Expand 2-digit years to 2000-2099 instead of zero-padding (avoids "0026").
+  // 1- or 2-digit yy is interpreted as 20yy. 3-digit years are rejected to
+  // prevent silent data corruption (caller must use 4-digit explicitly).
+  let y: string;
+  if (year.length <= 2) {
+    if (!/^\d{1,2}$/.test(year)) return null;
+    y = String(2000 + parseInt(year, 10)).padStart(4, '0');
+  } else if (year.length === 4) {
+    y = year;
+  } else {
+    return null;
+  }
+
   const m = mon.padStart(2, '0');
   const d = day.padStart(2, '0');
   if (!/^\d{4}$/.test(y) || !/^\d{2}$/.test(m) || !/^\d{2}$/.test(d)) return null;

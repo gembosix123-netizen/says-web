@@ -189,7 +189,7 @@ export default function AdminLiveSalesPage() {
 
   // 60s polling fallback
   useEffect(() => {
-    const id = setInterval(() => void load(false), 60_000);
+    const id = setInterval(() => void load(false), 30_000);
     return () => clearInterval(id);
   }, [load]);
 

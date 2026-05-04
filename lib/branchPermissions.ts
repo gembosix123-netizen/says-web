@@ -97,6 +97,70 @@ export function getCustomersTableByBranch(branch?: string): 'customers_kb' | 'cu
   return 'customers_kb';
 }
 
+/** Lowercase, trim, collapse spaces — for comparing branch labels from DB vs session. */
+export function normalizeBranchLabel(value?: string | null): string {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+/**
+ * True when two branch labels refer to the same operating branch.
+ * Treats KK ↔ Kota Kinabalu and KB ↔ Kinabatangan as equivalent (legacy/alternate spellings).
+ */
+function isKotaKinabaluBucket(n: string): boolean {
+  if (!n) return false;
+  if (n === 'kota kinabalu') return true;
+  if (n.includes('kota') && n.includes('kinabalu')) return true;
+  return /\bkk\b/.test(n);
+}
+
+function isKinabatanganBucket(n: string): boolean {
+  if (!n) return false;
+  if (n === 'kinabatangan') return true;
+  if (n.includes('kinabatangan')) return true;
+  return /\bkb\b/.test(n);
+}
+
+export function branchLabelsEquivalent(a?: string | null, b?: string | null): boolean {
+  const left = normalizeBranchLabel(a);
+  const right = normalizeBranchLabel(b);
+  if (!right || right === 'all') return true;
+  if (!left) return false;
+  if (left === right) return true;
+
+  if (isKotaKinabaluBucket(left) && isKotaKinabaluBucket(right)) return true;
+  if (isKinabatanganBucket(left) && isKinabatanganBucket(right)) return true;
+
+  return false;
+}
+
+/**
+ * PostgREST `.or()` fragment to fetch rows when session branch may not match DB spelling.
+ * Returns null when a single `ilike(normalized)` is enough.
+ */
+export function buildSalesBranchOrFilter(sessionBranch: string): string | null {
+  const n = normalizeBranchLabel(sessionBranch);
+  if (n === 'kota kinabalu' || n === 'kk') {
+    return [
+      'branch.ilike.KK',
+      'branch.ilike.kk',
+      'branch.ilike."Kota Kinabalu"',
+      'branch.ilike."kota kinabalu"',
+    ].join(',');
+  }
+  if (n === 'kinabatangan' || n === 'kb') {
+    return [
+      'branch.ilike.KB',
+      'branch.ilike.kb',
+      'branch.ilike.Kinabatangan',
+      'branch.ilike.kinabatangan',
+    ].join(',');
+  }
+  return null;
+}
+
 /**
  * Filter data query by user's branch
  * Used in API routes to enforce data segregation at query level

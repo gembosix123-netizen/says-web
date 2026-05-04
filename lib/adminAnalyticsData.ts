@@ -1,7 +1,12 @@
 import { supabaseAdmin } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { Transaction, Product, User, StockAudit, Customer } from '@/types';
-import { getCustomersTableByBranch } from '@/lib/branchPermissions';
+import {
+  getCustomersTableByBranch,
+  branchLabelsEquivalent,
+  buildSalesBranchOrFilter,
+  normalizeBranchLabel,
+} from '@/lib/branchPermissions';
 
 type SalesTransactionRow = {
   id: string;
@@ -52,22 +57,6 @@ type UserRow = {
   commission_rate?: number | string | null;
 };
 
-function normalizeBranchValue(value?: string | null): string {
-  return String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
-}
-
-function branchMatches(value?: string | null, expected?: string): boolean {
-  const left = normalizeBranchValue(value);
-  const right = normalizeBranchValue(expected);
-
-  if (!right) return true;
-  if (!left) return false;
-  return left === right;
-}
-
 export async function getAdminAnalyticsData(branch?: string): Promise<{
   transactions: Transaction[];
   products: Product[];
@@ -76,7 +65,7 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   customers: Customer[];
 }> {
   const useBranchFilter = Boolean(branch);
-  const normalizedBranch = normalizeBranchValue(branch);
+  const normalizedBranch = branch ? normalizeBranchLabel(branch) : '';
 
   if (!supabaseAdmin) {
     const transactions = (await db.transactions.getAll()) as Transaction[];
@@ -86,10 +75,10 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
     const customers = (await db.customers.getAll()) as Customer[];
 
     const filteredTransactions = useBranchFilter
-      ? transactions.filter((t) => branchMatches(t.branch, normalizedBranch))
+      ? transactions.filter((t) => branchLabelsEquivalent(t.branch, branch))
       : transactions;
     const salesUsers = useBranchFilter
-      ? users.filter((u) => u.role === 'Sales' && branchMatches(u.branch, normalizedBranch))
+      ? users.filter((u) => u.role === 'Sales' && branchLabelsEquivalent(u.branch, branch))
       : users.filter((u) => u.role === 'Sales');
 
     return {
@@ -102,16 +91,26 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   }
 
   let txQuery = supabaseAdmin.from('sales_transactions').select('*').order('created_at', { ascending: false });
-  if (useBranchFilter && normalizedBranch) {
-    txQuery = txQuery.ilike('branch', normalizedBranch);
+  if (useBranchFilter && branch) {
+    const orFragment = buildSalesBranchOrFilter(branch);
+    if (orFragment) {
+      txQuery = txQuery.or(orFragment);
+    } else if (normalizedBranch) {
+      txQuery = txQuery.ilike('branch', normalizedBranch);
+    }
   }
 
   // Get the correct customers table based on branch
   const customersTable = getCustomersTableByBranch(branch);
 
   let productQuery = supabaseAdmin.from('products').select('*');
-  if (useBranchFilter && normalizedBranch) {
-    productQuery = productQuery.ilike('branch', normalizedBranch);
+  if (useBranchFilter && branch) {
+    const orFragment = buildSalesBranchOrFilter(branch);
+    if (orFragment) {
+      productQuery = productQuery.or(orFragment);
+    } else if (normalizedBranch) {
+      productQuery = productQuery.ilike('branch', normalizedBranch);
+    }
   }
 
   const [
@@ -138,10 +137,10 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
     const customers = (await db.customers.getAll()) as Customer[];
 
     const filteredTransactions = useBranchFilter
-      ? transactions.filter((t) => branchMatches(t.branch, normalizedBranch))
+      ? transactions.filter((t) => branchLabelsEquivalent(t.branch, branch))
       : transactions;
     const salesUsers = useBranchFilter
-      ? users.filter((u) => u.role === 'Sales' && branchMatches(u.branch, normalizedBranch))
+      ? users.filter((u) => u.role === 'Sales' && branchLabelsEquivalent(u.branch, branch))
       : users.filter((u) => u.role === 'Sales');
 
     return {
@@ -158,7 +157,7 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   if (customerError) console.error('[adminAnalyticsData] customers table query failed (table:', customersTable, '):', customerError);
 
   const txRows = ((txRowsRaw || []) as SalesTransactionRow[])
-    .filter((row) => !useBranchFilter || branchMatches(row.branch, normalizedBranch));
+    .filter((row) => !useBranchFilter || branchLabelsEquivalent(row.branch, branch));
   const txIds = txRows.map((row) => row.id);
 
   let itemsByTxId: Record<string, SalesItemRow[]> = {};
@@ -204,7 +203,7 @@ export async function getAdminAnalyticsData(branch?: string): Promise<{
   })) as User[];
 
   const salesUsers = useBranchFilter
-    ? users.filter((u) => u.role === 'Sales' && branchMatches(u.branch, normalizedBranch))
+    ? users.filter((u) => u.role === 'Sales' && branchLabelsEquivalent(u.branch, branch))
     : users.filter((u) => u.role === 'Sales');
 
   const transactions = txRows.map((row) => {

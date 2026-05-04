@@ -94,49 +94,109 @@
     "id": "e17b2d2d-ee4b-4baf-a94d-51a0173d332b",
     "userId": "5ab2a890-942c-47d5-9ab4-892c62fcf4be",
     "userName": "allan",
-    "branch": "k.k",
+    "branch": "k,.k",
     "date": "2026-05-05",
-    "totalSales": 0,
-    "totalCash": 0,
+    "totalSales": 130,
+    "totalCash": 130,
     "totalCredit": 0,
     "totalTransfer": 0,
-    "amountBankingManual": 20,
-    "balancePtCashManual": 10,
+    "amountBankingManual": 130,
+    "balancePtCashManual": 20,
     "expenseLines": [
       {
         "category": "minyak",
         "description": "Petrol / Diesel",
-        "amount": 20,
+        "amount": 50,
         "receiptImageUrls": [
-          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/expenses/2026-05-05/1777919607272_bt9r09.png"
+          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/expenses/2026-05-05/1777926085314_58l47r.png"
         ]
       },
       {
-        "category": "makan",
-        "description": "Makan / F&B",
-        "amount": 50,
+        "category": "penginapan",
+        "description": "Penginapan",
+        "amount": 20,
         "receiptImageUrls": [
-          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/expenses/2026-05-05/1777919607780_e3khan.png"
+          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/expenses/2026-05-05/1777926086916_sie3a2.png"
         ]
       }
     ],
     "expensesTotal": 70,
     "bankSlipUrls": [
-      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/banking/2026-05-05/1777919608179_10j1zn.png"
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/banking/2026-05-05/1777926087372_rukxqg.png"
     ],
     "cashProofUrls": [
-      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-05-05/1777919608548_92qdo9.png"
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-05-05/1777926087821_olzzth.png"
     ],
     "salesSnapshot": {
-      "cashSales": [],
+      "cashSales": [
+        {
+          "no": 1,
+          "customer": "qq",
+          "item": "Udang Masak Cili Maboona 150g",
+          "qn": 1,
+          "price": 6,
+          "amount": 6,
+          "billNo": "INV-X-20260504-MORKW7QG-O8FW"
+        },
+        {
+          "no": 2,
+          "customer": "qq",
+          "item": "Udang Masak Cili Maboona 150g",
+          "qn": 5,
+          "price": 7.6,
+          "amount": 38,
+          "billNo": "INV-X-20260504-MORKDSV8-YQ9G"
+        },
+        {
+          "no": 0,
+          "customer": "",
+          "item": "Magello Kon Lo Mien Original Sauce 150 g",
+          "qn": 4,
+          "price": 7.6,
+          "amount": 30.4,
+          "billNo": ""
+        },
+        {
+          "no": 3,
+          "customer": "qq",
+          "item": "Udang Masak Cili Maboona 150g",
+          "qn": 3,
+          "price": 8,
+          "amount": 24,
+          "billNo": "INV-X-20260504-MORK0KAN-MV6L"
+        },
+        {
+          "no": 0,
+          "customer": "",
+          "item": "Magello Kon Lo Mien Original Sauce 150 g",
+          "qn": 3,
+          "price": 7.8,
+          "amount": 23.4,
+          "billNo": ""
+        },
+        {
+          "no": 4,
+          "customer": "qq",
+          "item": "Udang Masak Cili Maboona 150g",
+          "qn": 1,
+          "price": 8.2,
+          "amount": 8.2,
+          "billNo": "INV-X-20260504-MORJS47E-O4M3"
+        }
+      ],
       "transferSales": [],
       "creditSales": []
     },
     "status": "submitted_daily",
     "source": "sales",
     "approvalStage": "daily",
-    "liveSalesRefs": [],
+    "liveSalesRefs": [
+      "84681655-3c9b-41dd-8eea-7b0c0fe69a4d",
+      "b3d67ff0-dc9d-43cb-9bb4-8530ccc1fa74",
+      "a6edae35-1258-40d5-9368-d8db9545c8e6",
+      "b59a712d-c2e6-47e0-9413-b84cc22007bb"
+    ],
     "submittedAt": "2026-05-04T18:31:46.370Z",
-    "updatedAt": "2026-05-04T18:33:28.918Z"
+    "updatedAt": "2026-05-04T20:21:30.538Z"
   }
 ]

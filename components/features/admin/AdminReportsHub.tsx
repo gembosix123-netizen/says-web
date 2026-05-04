@@ -1,8 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { BarChart2, RefreshCw } from 'lucide-react';
 import MonthlyReportSupabase from '@/components/features/admin/MonthlyReportSupabase';
+import { DailyReportDataTable } from '@/components/features/admin/DailyReportDataTable';
+import { openDailyReportPdfWindow } from '@/lib/dailyReportPdf';
 
 type DailyReport = {
   id: string;
@@ -69,6 +73,7 @@ export default function AdminReportsHub() {
   const [tab, setTab] = useState<ReportTab>('daily');
   const [reports, setReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dailyViewDate, setDailyViewDate] = useState(() => toLocalDateInput(new Date()));
 
   const fetchReports = async () => {
     setLoading(true);
@@ -95,19 +100,83 @@ export default function AdminReportsHub() {
   const todayStr = toLocalDateInput(new Date());
   const last7DaysStart = toLocalDateInput(new Date(Date.now() - (6 * 24 * 60 * 60 * 1000)));
 
-  const dailyReports = useMemo(() => reports.filter((item) => item.date === todayStr), [reports, todayStr]);
-  const weeklyReports = useMemo(
-    () => reports.filter((item) => item.date >= last7DaysStart && item.date <= todayStr && (item.approvalStage || 'daily') === 'weekly'),
+  /** Laporan harian (workflow daily) untuk tarikh pilihan — bukan hanya “hari ini”. */
+  const dailyReports = useMemo(
+    () =>
+      reports.filter(
+        (item) =>
+          item.date === dailyViewDate && (item.approvalStage || 'daily') === 'daily'
+      ),
+    [reports, dailyViewDate]
+  );
+
+  /** 7 hari lepas: semua hantaran peringkat harian (bukan laporan “weekly stage” kosong). */
+  const rollingWeekDailyReports = useMemo(
+    () =>
+      reports.filter(
+        (item) =>
+          item.date >= last7DaysStart &&
+          item.date <= todayStr &&
+          (item.approvalStage || 'daily') === 'daily'
+      ),
     [reports, last7DaysStart, todayStr]
+  );
+
+  /** Peringkat kelulusan mingguan (jarang) — diasingkan daripada gelung 7 hari. */
+  const weeklyStageReports = useMemo(
+    () => reports.filter((item) => item.approvalStage === 'weekly'),
+    [reports]
   );
   const monthlyReports = useMemo(
     () => reports.filter((item) => (item.approvalStage || 'daily') === 'monthly'),
     [reports]
   );
-  const dailyQueue = useMemo(
-    () => dailyReports.filter((item) => ['submitted_daily', 'approved_daily', 'returned_daily', 'draft'].includes(item.status)),
-    [dailyReports]
+  const allowedDailyStatuses = useMemo(
+    () =>
+      new Set<string>(['submitted_daily', 'approved_daily', 'returned_daily', 'draft', 'submitted', 'reviewed', 'approved', 'returned']),
+    []
   );
+
+  const dailyQueue = useMemo(
+    () => dailyReports.filter((item) => allowedDailyStatuses.has(String(item.status))),
+    [dailyReports, allowedDailyStatuses]
+  );
+
+  /** Semua hantaran peringkat harian (untuk jadual “terkini”) — max 50, tarikh paling baru dahulu. */
+  const recentDailyAllDates = useMemo(() => {
+    const rows = reports.filter(
+      (item) => (item.approvalStage || 'daily') === 'daily' && allowedDailyStatuses.has(String(item.status))
+    );
+    return [...rows]
+      .sort((a, b) => {
+        const byDate = b.date.localeCompare(a.date);
+        if (byDate !== 0) return byDate;
+        return String(b.updatedAt || b.submittedAt || '').localeCompare(String(a.updatedAt || a.submittedAt || ''));
+      })
+      .slice(0, 50);
+  }, [reports, allowedDailyStatuses]);
+
+  /** Tarikh yang ada sekurang-kurangnya satu laporan harian (untuk cip pantas). */
+  const datesWithDailyData = useMemo(() => {
+    const set = new Set<string>();
+    reports.forEach((r) => {
+      if ((r.approvalStage || 'daily') === 'daily' && allowedDailyStatuses.has(String(r.status))) {
+        set.add(r.date);
+      }
+    });
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [reports, allowedDailyStatuses]);
+
+  /** Selepas ada data: sekali sahaja — jika tarikh pilihan tiada rekod tetapi ada tarikh lain, lompat ke yang terbaru. */
+  const didAlignInitialDate = useRef(false);
+  useEffect(() => {
+    if (loading || didAlignInitialDate.current) return;
+    if (datesWithDailyData.length === 0) return;
+    didAlignInitialDate.current = true;
+    if (!datesWithDailyData.includes(dailyViewDate)) {
+      setDailyViewDate(datesWithDailyData[0]);
+    }
+  }, [loading, datesWithDailyData, dailyViewDate]);
 
   const dailySummary = useMemo(() => {
     return {
@@ -120,126 +189,12 @@ export default function AdminReportsHub() {
 
   const weeklySummary = useMemo(() => {
     return {
-      totalSales: weeklyReports.reduce((sum, item) => sum + Number(item.totalSales || 0), 0),
-      totalCash: weeklyReports.reduce((sum, item) => sum + Number(item.totalCash || 0), 0),
-      totalCredit: weeklyReports.reduce((sum, item) => sum + Number(item.totalCredit || 0), 0),
-      totalReports: weeklyReports.length,
+      totalSales: rollingWeekDailyReports.reduce((sum, item) => sum + Number(item.totalSales || 0), 0),
+      totalCash: rollingWeekDailyReports.reduce((sum, item) => sum + Number(item.totalCash || 0), 0),
+      totalCredit: rollingWeekDailyReports.reduce((sum, item) => sum + Number(item.totalCredit || 0), 0),
+      totalReports: rollingWeekDailyReports.length,
     };
-  }, [weeklyReports]);
-
-  const handleOpenReportPdf = (row: DailyReport) => {
-    const expenseRows = Array.isArray(row.expenseLines) ? row.expenseLines : [];
-    const format = (value: number | undefined) => (Number(value || 0) > 0 ? Number(value || 0).toFixed(2) : '');
-    const totalAll = Number(row.totalCash || 0) + Number(row.totalTransfer || 0) + Number(row.totalCredit || 0);
-    const proofLinks = {
-      cash: Array.isArray(row.cashProofUrls) ? row.cashProofUrls : [],
-      banking: Array.isArray(row.bankSlipUrls) ? row.bankSlipUrls : [],
-      expenses: expenseRows.flatMap((line) => (Array.isArray(line.receiptImageUrls) ? line.receiptImageUrls : [])),
-    };
-    const expenseDisplayRows = [
-      { label: 'Expenses Sales', value: expenseRows.reduce((sum, item) => sum + Number(item.amount || 0), 0) },
-      ...expenseRows.slice(0, 4).map((item) => ({ label: item.description, value: Number(item.amount || 0) })),
-      { label: 'Balance PTCash', value: Number(row.balancePtCashManual || 0) },
-    ];
-    const renderSalesRows = (
-      rows: Array<{ customer: string; item: string; qn: number | string; price: number | string; amount: number | string; billNo: string }>
-    ) => {
-      const normalizedRows = Array.isArray(rows) ? rows : [];
-      const hasAnyValue = normalizedRows.some(
-        (r) => (r.customer || r.item || r.billNo || Number(r.amount || 0) > 0 || Number(r.qn || 0) > 0)
-      );
-      const effectiveRows = hasAnyValue
-        ? normalizedRows
-        : [{ customer: '', item: '', qn: '', price: '', amount: '', billNo: '' }];
-      const filledRows = effectiveRows
-        .map((r, idx) => `<tr><td>${idx + 1}</td><td>${r.customer || ''}</td><td>${r.item || ''}</td><td>${r.qn || ''}</td><td>${r.price || ''}</td><td>${r.amount || ''}</td><td>${r.billNo || ''}</td><td></td></tr>`)
-        .join('');
-      const minRows = 8;
-      const blanksNeeded = Math.max(0, minRows - effectiveRows.length);
-      const blankRows = Array.from({ length: blanksNeeded })
-        .map(() => '<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>')
-        .join('');
-      return `${filledRows}${blankRows}`;
-    };
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) return;
-    win.document.write(`
-      <html>
-        <head>
-          <title>Daily Report ${row.date}</title>
-          <style>
-            body { font-family: Arial, sans-serif; background: #fff; color: #000; padding: 18px; }
-            .header { text-align: center; margin-bottom: 12px; }
-            .header h2 { margin: 0; font-size: 13px; text-transform: uppercase; }
-            .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px; margin-bottom: 10px; }
-            table { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 8px; }
-            th, td { border: 1px solid #8a8a8a; padding: 4px; }
-            th { background: #dbeafe; }
-            .sectionTitle { font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center; background: #bfdbfe; }
-            .proofs { margin-top: 12px; font-size: 10px; }
-            .proofs h4 { margin: 6px 0; font-size: 10px; }
-            .toolbar { margin-bottom: 10px; display: flex; gap: 8px; }
-            .toolbar button { font-size: 11px; padding: 6px 10px; }
-            @media print { .toolbar { display: none; } body { padding: 0; } }
-          </style>
-        </head>
-        <body>
-          <div class="toolbar">
-            <button onclick="window.print()">Print / Save PDF</button>
-          </div>
-          <div class="header">
-            <h2>Daily Sales Report</h2>
-            <h2>Data</h2>
-          </div>
-          <div class="meta">
-            <div>Tarikh: ${row.date}<br/>Staff: ${row.userName}</div>
-            <div>Kawasan: ${row.branch}<br/>Status: ${row.status}</div>
-          </div>
-
-          <table>
-            <thead><tr><th colspan="8" class="sectionTitle">Cash Sales</th></tr><tr><th>No</th><th>Customer</th><th>Item</th><th>QN</th><th>Price</th><th>Amount</th><th>Bill No</th><th>PO By</th></tr></thead>
-            <tbody>${renderSalesRows(row.salesSnapshot?.cashSales || [])}</tbody>
-          </table>
-          <table>
-            <thead><tr><th colspan="8" class="sectionTitle">Transfer Sales</th></tr><tr><th>No</th><th>Customer</th><th>Item</th><th>QN</th><th>Price</th><th>Amount</th><th>Bill No</th><th>PO By</th></tr></thead>
-            <tbody>${renderSalesRows(row.salesSnapshot?.transferSales || [])}</tbody>
-          </table>
-          <table>
-            <thead><tr><th colspan="8" class="sectionTitle">Credit Terms Customer</th></tr><tr><th>No</th><th>Customer</th><th>Item</th><th>QN</th><th>Price</th><th>Amount</th><th>Bill No</th><th>PO By</th></tr></thead>
-            <tbody>${renderSalesRows(row.salesSnapshot?.creditSales || [])}</tbody>
-          </table>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-            <table>
-              <thead><tr><th>Descriptions</th><th style="width:120px;">Amount (RM)</th></tr></thead>
-              <tbody>
-                ${expenseDisplayRows.map((item, idx) => `<tr><td>${idx + 1}. ${item.label}</td><td style="text-align:right;">${format(item.value)}</td></tr>`).join('')}
-              </tbody>
-            </table>
-            <table>
-              <thead><tr><th>Sales</th><th style="width:120px;">Amount (RM)</th></tr></thead>
-              <tbody>
-                <tr><td>Cash</td><td style="text-align:right;">${format(Number(row.totalCash || 0))}</td></tr>
-                <tr><td>Transfer</td><td style="text-align:right;">${format(Number(row.totalTransfer || 0))}</td></tr>
-                <tr><td>Credit</td><td style="text-align:right;">${format(Number(row.totalCredit || 0))}</td></tr>
-                <tr><td><b>Total</b></td><td style="text-align:right;"><b>${format(totalAll)}</b></td></tr>
-                <tr><td><b>Amount Banking</b></td><td style="text-align:right;"><b>${format(Number(row.amountBankingManual || 0))}</b></td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="proofs">
-            <h4>Lampiran Bukti (asing dari borang PDF)</h4>
-            <div>Cash Proof: ${proofLinks.cash.length > 0 ? proofLinks.cash.map((url, idx) => `<a href="${url}" target="_blank">Cash ${idx + 1}</a>`).join(' | ') : 'Tiada'}</div>
-            <div>Banking Slip: ${proofLinks.banking.length > 0 ? proofLinks.banking.map((url, idx) => `<a href="${url}" target="_blank">Bank ${idx + 1}</a>`).join(' | ') : 'Tiada'}</div>
-            <div>Resit Expenses: ${proofLinks.expenses.length > 0 ? proofLinks.expenses.map((url, idx) => `<a href="${url}" target="_blank">Resit ${idx + 1}</a>`).join(' | ') : 'Tiada'}</div>
-          </div>
-        </body>
-      </html>
-    `);
-    win.document.close();
-    win.focus();
-  };
+  }, [rollingWeekDailyReports]);
 
   return (
     <div className="space-y-6">
@@ -268,11 +223,101 @@ export default function AdminReportsHub() {
 
       {tab === 'daily' && (
         <section className="rounded-2xl border border-slate-700/80 bg-slate-900/60 p-5 space-y-4 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <h3 className="text-xl font-semibold text-white">Daily Report (Hari Ini)</h3>
-            <span className="rounded-full border border-slate-600 bg-slate-800/80 px-3 py-1 text-xs text-slate-300">
-              {dailyQueue.length} laporan
-            </span>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-semibold text-white">Laporan harian</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Filter mengikut <strong className="text-slate-300">tarikh laporan</strong> (bukan semestinya hari ini). Jika kosong, data mungkin
+                pada tarikh lain — guna cip di bawah atau jadual &quot;Terkini&quot;.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void fetchReports()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs text-slate-200 hover:bg-slate-700"
+                title="Muat semula dari pelayan"
+              >
+                <RefreshCw size={14} className="opacity-80" />
+                Muat semula
+              </button>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Tarikh
+                <input
+                  type="date"
+                  value={dailyViewDate}
+                  onChange={(e) => setDailyViewDate(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setDailyViewDate(todayStr)}
+                className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs text-slate-200 hover:bg-slate-700"
+              >
+                Hari ini
+              </button>
+              {datesWithDailyData[0] && datesWithDailyData[0] !== dailyViewDate && (
+                <button
+                  type="button"
+                  onClick={() => setDailyViewDate(datesWithDailyData[0])}
+                  className="rounded-lg border border-amber-600/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200 hover:bg-amber-900/50"
+                >
+                  Tarikh terakhir ada data ({datesWithDailyData[0]})
+                </button>
+              )}
+              <span className="rounded-full border border-slate-600 bg-slate-800/80 px-3 py-1 text-xs text-slate-300">
+                {dailyQueue.length} laporan
+              </span>
+            </div>
+          </div>
+
+          {datesWithDailyData.length > 0 && (
+            <div className="rounded-lg border border-slate-700 bg-slate-950/50 px-3 py-2">
+              <p className="text-[11px] text-slate-500 mb-1.5">Tarikh yang ada hantaran dalam sistem:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {datesWithDailyData.slice(0, 20).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDailyViewDate(d)}
+                    className={`rounded-md px-2 py-0.5 text-xs font-mono border transition-colors ${
+                      d === dailyViewDate
+                        ? 'bg-blue-600 border-blue-500 text-white'
+                        : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {dailyQueue.length === 0 && !loading && recentDailyAllDates.length > 0 && (
+            <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-100/95">
+              Tiada rekod untuk <span className="font-mono font-semibold">{dailyViewDate}</span>, tetapi sistem ada{' '}
+              {recentDailyAllDates.length} laporan harian pada tarikh lain. Klik cip tarikh di atas atau rujuk jadual
+              &quot;Terkini&quot; di bawah.
+            </div>
+          )}
+
+          {dailyQueue.length === 0 && !loading && recentDailyAllDates.length === 0 && (
+            <div className="rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-2 text-sm text-slate-300">
+              Tiada laporan harian dalam pangkalan untuk akaun/cawangan ini. Pastikan staff sudah hantar dari{' '}
+              <strong>Jualan → Laporan harian</strong>, dan environment sama (data laporan disimpan di pelayan app / KV,
+              bukan jadual jualan Supabase sahaja).
+            </div>
+          )}
+
+          <div className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-3 py-2 mb-1">
+            <p className="text-xs text-slate-400 leading-relaxed">
+              <span className="font-medium text-slate-300">Apa kad ini?</span> Ia menjumlahkan field{' '}
+              <strong className="text-slate-200">laporan harian</strong> yang dihantar staff untuk{' '}
+              <span className="font-mono text-amber-200/90">{dailyViewDate}</span> sahaja —{' '}
+              <em>bukan</em> jumlah jualan live dari Supabase. Jika RM 0.00, tiada laporan untuk tarikh itu atau jumlah
+              memang sifar dalam borang.
+            </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <Stat label="Jumlah Sales" value={formatMoney(dailySummary.totalSales)} />
@@ -280,21 +325,59 @@ export default function AdminReportsHub() {
             <Stat label="Kredit" value={formatMoney(dailySummary.totalCredit)} />
             <Stat label="Bil. Laporan" value={String(dailySummary.totalReports)} />
           </div>
-          <ReportTable
+          <DailyReportDataTable
             rows={dailyQueue}
             loading={loading}
-            emptyText="Tiada laporan harian untuk hari ini."
-            onOpenReportPdf={handleOpenReportPdf}
+            emptyText={`Tiada laporan untuk tarikh ${dailyViewDate}.`}
+            onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
           />
+
+          {recentDailyAllDates.length > 0 && (
+            <div className="pt-4 border-t border-slate-700 space-y-2">
+              <h4 className="text-sm font-semibold text-slate-200">Laporan harian terkini (semua tarikh)</h4>
+              <p className="text-xs text-slate-500">
+                Senarai pantas 50 hantaran terbaru — sentiasa ada data di sini jika pangkalan tidak kosong.
+              </p>
+              <DailyReportDataTable
+                rows={recentDailyAllDates}
+                loading={loading}
+                emptyText="Tiada data."
+                onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
+              />
+            </div>
+          )}
         </section>
       )}
 
       {tab === 'weekly' && (
         <section className="rounded-2xl border border-slate-700/80 bg-slate-900/60 p-5 space-y-4 shadow-sm">
+          <div className="rounded-xl border border-indigo-600/40 bg-indigo-950/30 p-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white flex items-center gap-2">
+                <BarChart2 size={18} className="text-indigo-400" />
+                Laporan mingguan penuh (penggal ISO, Excel / PDF)
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Gunakan halaman khas untuk ringkasan mingguan berkualiti — berbeza daripada senarai hantaran harian di bawah.
+              </p>
+            </div>
+            <Link
+              href="/admin/weekly-reports"
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+            >
+              Buka Laporan Mingguan
+            </Link>
+          </div>
+
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <h3 className="text-xl font-semibold text-white">Weekly Report (7 Hari Terakhir)</h3>
+            <div>
+              <h3 className="text-xl font-semibold text-white">Hantaran harian (7 hari lepas)</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Ringkasan semua laporan peringkat harian dalam tujuh hari terakhir.
+              </p>
+            </div>
             <span className="rounded-full border border-slate-600 bg-slate-800/80 px-3 py-1 text-xs text-slate-300">
-              {weeklyReports.length} laporan
+              {rollingWeekDailyReports.length} laporan
             </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -303,12 +386,24 @@ export default function AdminReportsHub() {
             <Stat label="Kredit" value={formatMoney(weeklySummary.totalCredit)} />
             <Stat label="Bil. Laporan" value={String(weeklySummary.totalReports)} />
           </div>
-          <ReportTable
-            rows={weeklyReports}
+          <DailyReportDataTable
+            rows={rollingWeekDailyReports}
             loading={loading}
-            emptyText="Tiada laporan mingguan."
-            onOpenReportPdf={handleOpenReportPdf}
+            emptyText="Tiada laporan harian dalam tempoh 7 hari lepas."
+            onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
           />
+
+          {weeklyStageReports.length > 0 && (
+            <div className="pt-4 border-t border-slate-700 space-y-2">
+              <h4 className="text-sm font-semibold text-slate-200">Kelulusan peringkat mingguan</h4>
+              <DailyReportDataTable
+                rows={weeklyStageReports}
+                loading={loading}
+                emptyText="Tiada rekod."
+                onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
+              />
+            </div>
+          )}
         </section>
       )}
 
@@ -320,11 +415,11 @@ export default function AdminReportsHub() {
               {monthlyReports.length} laporan
             </span>
           </div>
-          <ReportTable
+          <DailyReportDataTable
             rows={monthlyReports}
             loading={loading}
             emptyText="Tiada laporan month-end."
-            onOpenReportPdf={handleOpenReportPdf}
+            onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
           />
           <div className="rounded-xl border border-slate-700 bg-slate-900/30 p-3">
             <MonthlyReportSupabase />
@@ -340,208 +435,6 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="rounded-xl border border-slate-700 bg-slate-800/70 p-3">
       <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
       <p className="mt-1 text-lg font-bold text-white">{value}</p>
-    </div>
-  );
-}
-
-function ReportTable({
-  rows,
-  loading,
-  emptyText,
-  onOpenReportPdf,
-}: {
-  rows: DailyReport[];
-  loading: boolean;
-  emptyText: string;
-  onOpenReportPdf: (row: DailyReport) => void;
-}) {
-  const [activeExpenseKey, setActiveExpenseKey] = useState<string | null>(null);
-
-  if (loading) return <p className="text-slate-400 text-sm">Memuatkan laporan...</p>;
-
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-950/40">
-      <table className="w-full text-xs">
-        <thead className="bg-slate-900/90 text-slate-300 border-b border-slate-700">
-          <tr>
-            <th className="px-2 py-2 text-left">Tarikh / Masa</th>
-            <th className="px-2 py-2 text-left">Source</th>
-            <th className="px-2 py-2 text-left">PDF</th>
-            <th className="px-2 py-2 text-left">Bukti</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr className="border-b border-slate-800 text-slate-300">
-              <td className="px-2 py-3" colSpan={4}>{emptyText}</td>
-            </tr>
-          ) : (
-            rows.map((row) => (
-              <tr key={row.id} className="border-b border-slate-800 text-slate-200 align-top hover:bg-slate-900/40 transition-colors">
-                <td className="px-2 py-2 min-w-[130px]">
-                  <div className="text-xs text-slate-100">{row.date}</div>
-                  <div className="text-xs text-slate-400">{formatDateTime(row.updatedAt || row.submittedAt)}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">{row.userName} · {row.branch}</div>
-                </td>
-                <td className="px-2 py-2 min-w-[90px]">
-                  <span className="rounded bg-slate-700 px-2 py-1 text-xs uppercase">
-                    {row.source || 'manual'}
-                  </span>
-                </td>
-                <td className="px-2 py-2 min-w-[84px]">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onOpenReportPdf(row)}
-                      className="rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-blue-500"
-                    >
-                      Open PDF
-                    </button>
-                  </div>
-                </td>
-                <td className="px-2 py-2 min-w-[290px]">
-                  {(() => {
-                    const cashCount = Array.isArray(row.cashProofUrls) ? row.cashProofUrls.length : 0;
-                    const bankCount = Array.isArray(row.bankSlipUrls) ? row.bankSlipUrls.length : 0;
-                    const expenseCount = Array.isArray(row.expenseLines) ? row.expenseLines.length : 0;
-                    const receiptCount = Array.isArray(row.expenseLines)
-                      ? row.expenseLines.reduce((sum, line) => sum + (Array.isArray(line.receiptImageUrls) ? line.receiptImageUrls.length : 0), 0)
-                      : 0;
-                    return (
-                      <details className="rounded-md border border-slate-700 bg-slate-900/60">
-                        <summary className="cursor-pointer list-none px-2 py-1.5 flex items-center justify-between">
-                          <span className="text-[11px] text-slate-200">
-                            Cash: {cashCount} | Bank: {bankCount} | Expenses: {expenseCount} | Resit: {receiptCount}
-                          </span>
-                          <span className="text-[11px] text-slate-400">Lihat</span>
-                        </summary>
-                        <div className="px-2 pb-2 space-y-1.5 border-t border-slate-700">
-                          <div className="pt-1.5 flex flex-wrap gap-1">
-                            {(row.cashProofUrls || []).map((url, idx) => (
-                              <button
-                                key={`${row.id}-cash-${idx}`}
-                                type="button"
-                                onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
-                                className="rounded bg-emerald-700/80 px-2 py-0.5 text-[10px] text-white"
-                              >
-                                Cash {idx + 1}
-                              </button>
-                            ))}
-                            {(row.bankSlipUrls || []).map((url, idx) => (
-                              <button
-                                key={`${row.id}-bank-${idx}`}
-                                type="button"
-                                onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
-                                className="rounded bg-blue-700/80 px-2 py-0.5 text-[10px] text-white"
-                              >
-                                Bank {idx + 1}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="space-y-1">
-                            {[
-                              {
-                                key: `${row.id}-cash-proof`,
-                                label: 'Cash',
-                                value: Number(row.totalCash || 0),
-                                proofs: Array.isArray(row.cashProofUrls) ? row.cashProofUrls : [],
-                                color: 'text-emerald-400',
-                                buttonClass: 'bg-emerald-700/80',
-                              },
-                              {
-                                key: `${row.id}-bank-proof`,
-                                label: 'Amount Banking',
-                                value: Number(row.amountBankingManual || 0),
-                                proofs: Array.isArray(row.bankSlipUrls) ? row.bankSlipUrls : [],
-                                color: 'text-blue-400',
-                                buttonClass: 'bg-blue-700/80',
-                              },
-                              {
-                                key: `${row.id}-pt-cash-proof`,
-                                label: 'Balance PT Cash',
-                                value: Number(row.balancePtCashManual || 0),
-                                proofs: Array.isArray(row.cashProofUrls) ? row.cashProofUrls : [],
-                                color: 'text-amber-300',
-                                buttonClass: 'bg-amber-700/80',
-                              },
-                            ].map((item) => {
-                              const open = activeExpenseKey === item.key;
-                              return (
-                                <div key={item.key} className="rounded border border-slate-700/70 bg-slate-900/60 px-2 py-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveExpenseKey(open ? null : item.key)}
-                                    className="w-full flex items-center justify-between text-left"
-                                  >
-                                    <span className="text-[10px] text-slate-200">{item.label}</span>
-                                    <span className={`text-[10px] font-semibold ${item.color}`}>{formatMoney(item.value)}</span>
-                                  </button>
-                                  {open && (
-                                    <div className="mt-1 flex flex-wrap gap-1 border-t border-slate-700 pt-1">
-                                      {item.proofs.length > 0 ? (
-                                        item.proofs.map((url, idx) => (
-                                          <button
-                                            key={`${item.key}-proof-${idx}`}
-                                            type="button"
-                                            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
-                                            className={`rounded px-2 py-0.5 text-[10px] text-white ${item.buttonClass}`}
-                                          >
-                                            Bukti {idx + 1}
-                                          </button>
-                                        ))
-                                      ) : (
-                                        <span className="text-[10px] text-amber-300">Tiada bukti</span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          {Array.isArray(row.expenseLines) && row.expenseLines.map((line, idx) => {
-                            const expenseKey = `${row.id}-exp-${idx}`;
-                            const proofs = Array.isArray(line.receiptImageUrls) ? line.receiptImageUrls : [];
-                            const isOpen = activeExpenseKey === expenseKey;
-                            return (
-                              <div key={expenseKey} className="text-[10px] text-slate-300">
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveExpenseKey(isOpen ? null : expenseKey)}
-                                  className="text-left underline decoration-dotted text-slate-200 hover:text-white"
-                                >
-                                  {idx + 1}. {line.description} ({formatMoney(Number(line.amount || 0))})
-                                </button>
-                                {isOpen && (
-                                  <div className="mt-1 flex flex-wrap gap-1 rounded border border-slate-700 bg-slate-900 p-1.5">
-                                    {proofs.length > 0 ? (
-                                      proofs.map((url, proofIdx) => (
-                                        <button
-                                          key={`${expenseKey}-proof-${proofIdx}`}
-                                          type="button"
-                                          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
-                                          className="rounded bg-indigo-700/80 px-2 py-0.5 text-[10px] text-white hover:bg-indigo-600"
-                                        >
-                                          Bukti {proofIdx + 1}
-                                        </button>
-                                      ))
-                                    ) : (
-                                      <span className="text-[10px] text-amber-300">Tiada bukti resit</span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </details>
-                    );
-                  })()}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
     </div>
   );
 }

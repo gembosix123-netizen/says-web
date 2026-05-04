@@ -16,6 +16,22 @@ function canReview(role?: string) {
   return role === 'Main Admin' || role === 'Admin';
 }
 
+/** Loose branch match — sama seperti /api/sales (KK vs Kota Kinabalu, spacing). */
+function normalizeBranchValue(value?: string | null): string {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function branchMatches(reportBranch: unknown, expectedBranch: unknown): boolean {
+  const left = normalizeBranchValue(reportBranch as string | null);
+  const right = normalizeBranchValue(expectedBranch as string | null);
+  if (!right || right === 'all') return true;
+  if (!left) return false;
+  return left === right;
+}
+
 type DailyStatus = DailyReport['status'];
 
 const LEGACY_STATUS_MAP: Record<string, DailyStatus> = {
@@ -126,7 +142,7 @@ export async function GET(request: NextRequest) {
   const filtered = all.filter((report) => {
     if (status && normalizeStatus(report.status) !== normalizeStatus(status)) return false;
     if (date && report.date !== date) return false;
-    if (branch && branch !== 'all' && report.branch !== branch) return false;
+    if (branch && branch !== 'all' && !branchMatches(report.branch, branch)) return false;
     if (userId && report.userId !== userId) return false;
     if (source && report.source !== source) return false;
     if (approvalStage && report.approvalStage !== approvalStage) return false;
@@ -136,7 +152,7 @@ export async function GET(request: NextRequest) {
       return report.userId === user.id;
     }
     if (user.role === 'Admin' && user.branch) {
-      return report.branch === user.branch;
+      return branchMatches(report.branch, user.branch);
     }
     return true;
   });

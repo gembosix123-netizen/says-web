@@ -227,6 +227,7 @@ const dictionary: Translations = {
   van_loading: { ms: 'Muatan Van', en: 'Van Loading' },
   staff_mgmt: { ms: 'Pengurusan Kakitangan', en: 'Staff Management' },
   database_nav: { ms: 'Pangkalan Data', en: 'Database' },
+  data_archive: { ms: 'Arkib Data', en: 'Data Archive' },
   backdated_import: { ms: 'Import Data Lama', en: 'Backdated Import' },
 
   // Additional Admin & User Info

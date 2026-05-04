@@ -6,11 +6,19 @@ import { logAuditEvent } from '@/lib/audit';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { canAccessSalesRoutes } from '@/lib/permissions';
-import { getCustomersTableByBranch, type Branch } from '@/lib/branchPermissions';
+import {
+  getCustomersTableByBranch,
+  type Branch,
+  branchLabelsEquivalent,
+  buildSalesBranchOrFilter,
+  normalizeBranchLabel,
+} from '@/lib/branchPermissions';
 import { VanInventory } from '@/types';
 
 const SALES_TABLE = 'sales_transactions';
 const SALES_ITEMS_TABLE = 'sales_items';
+/** PostgREST `.in()` with very large UUID lists can fail; keep chunks conservative. */
+const SALES_ITEMS_ID_CHUNK = 100;
 
 function toSafeNumber(value: unknown) {
   const parsed = Number(value);
@@ -29,21 +37,6 @@ function normalizeBranchCode(branch = 'XX') {
   const parts = compact.split(/\s+/).filter(Boolean);
   const initials = parts.map((part) => part[0]).join('').slice(0, 4);
   return initials || compact.slice(0, 4);
-}
-
-function normalizeBranchValue(value?: string | null): string {
-  return String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
-}
-
-function branchMatches(value?: string | null, expected?: string | null): boolean {
-  const left = normalizeBranchValue(value);
-  const right = normalizeBranchValue(expected);
-  if (!right || right === 'all') return true;
-  if (!left) return false;
-  return left === right;
 }
 
 function isMissingColumnError(error: unknown, columnName: string): boolean {
@@ -213,7 +206,7 @@ export async function GET(request: NextRequest) {
       const allTx = await db.transactions.getAll();
       let filtered = (!branch || branch === 'all')
         ? allTx
-        : allTx.filter((t) => branchMatches(t.branch, branch));
+        : allTx.filter((t) => branchLabelsEquivalent(t.branch, branch));
       if (startDate) filtered = filtered.filter((t) => t.createdAt && t.createdAt >= startDate);
       if (endDate)   filtered = filtered.filter((t) => t.createdAt && t.createdAt <= endDate + 'T23:59:59.999Z');
       return NextResponse.json(filtered);
@@ -240,7 +233,12 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false });
 
     if (branch && branch !== 'all') {
-      query = query.ilike('branch', normalizeBranchValue(branch));
+      const orFragment = buildSalesBranchOrFilter(branch);
+      if (orFragment) {
+        query = query.or(orFragment);
+      } else {
+        query = query.ilike('branch', normalizeBranchLabel(branch));
+      }
     }
 
     if (startDate) {
@@ -262,39 +260,54 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch sales data' }, { status: 500 });
     }
 
-    const salesAll = (salesRows || []).filter((sale) => branchMatches(sale.branch, branch));
+    const salesAll = (salesRows || []).filter((sale) => branchLabelsEquivalent(sale.branch, branch));
     const saleIds = salesAll.map((sale) => sale.id);
     const customerIds = Array.from(new Set(salesAll.map((sale) => sale.customer_id).filter(Boolean)));
     const userIds = Array.from(new Set(salesAll.map((sale) => sale.user_id).filter(Boolean)));
 
     let itemsBySaleId: Record<string, Array<Record<string, unknown>>> = {};
     if (saleIds.length > 0) {
-      const { data: itemsRows, error: itemsError } = await supabaseAdmin
-        .from(SALES_ITEMS_TABLE)
-        .select('*')
-        .in('transaction_id', saleIds)
-        .order('created_at', { ascending: true });
+      const mergedRows: Array<Record<string, unknown>> = [];
+      let itemsError: { message?: string } | null = null;
 
-      if (itemsError) {
-        console.error('Supabase error fetching sales items:', itemsError);
-        return NextResponse.json({ error: 'Failed to fetch sales items' }, { status: 500 });
+      for (let i = 0; i < saleIds.length; i += SALES_ITEMS_ID_CHUNK) {
+        const idChunk = saleIds.slice(i, i + SALES_ITEMS_ID_CHUNK);
+        const { data: itemsRows, error: chunkError } = await supabaseAdmin
+          .from(SALES_ITEMS_TABLE)
+          .select('*')
+          .in('transaction_id', idChunk)
+          .order('created_at', { ascending: true });
+
+        if (chunkError) {
+          itemsError = chunkError;
+          console.error('Supabase error fetching sales items:', chunkError);
+          break;
+        }
+        mergedRows.push(...((itemsRows || []) as Array<Record<string, unknown>>));
       }
 
-      itemsBySaleId = (itemsRows || []).reduce<Record<string, Array<Record<string, unknown>>>>((acc, item) => {
-        const transactionId = item.transaction_id;
-        if (!acc[transactionId]) acc[transactionId] = [];
-        acc[transactionId].push({
-          productId: item.product_id,
-          name: item.product_name,
-          quantity: Number(item.quantity || 0),
-          price: Number(item.unit_price || 0),
-          factoryPrice: Number(item.factory_price_at_sale ?? item.unit_price ?? 0),
-          commissionType: item.commission_type ? String(item.commission_type) : null,
-          commissionAmount: Number(item.commission_amount || 0),
-          subtotal: Number(item.subtotal || 0)
-        });
-        return acc;
-      }, {});
+      if (itemsError) {
+        console.warn(
+          '[sales] sales_items unavailable; using line items embedded on sales_transactions rows only.'
+        );
+        itemsBySaleId = {};
+      } else {
+        itemsBySaleId = mergedRows.reduce<Record<string, Array<Record<string, unknown>>>>((acc, item) => {
+          const transactionId = item.transaction_id as string;
+          if (!acc[transactionId]) acc[transactionId] = [];
+          acc[transactionId].push({
+            productId: item.product_id,
+            name: item.product_name,
+            quantity: Number(item.quantity || 0),
+            price: Number(item.unit_price || 0),
+            factoryPrice: Number(item.factory_price_at_sale ?? item.unit_price ?? 0),
+            commissionType: item.commission_type ? String(item.commission_type) : null,
+            commissionAmount: Number(item.commission_amount || 0),
+            subtotal: Number(item.subtotal || 0)
+          });
+          return acc;
+        }, {});
+      }
     }
 
     let customersById: Record<string, string> = {};
@@ -570,8 +583,10 @@ export async function POST(request: NextRequest) {
     let customerFallbackNote = '';
 
     // sales_transactions.customer_id references public.customers in some deployments.
-    // Branch customer tables may contain IDs that are not present in public.customers,
-    // so we pre-validate to avoid runtime FK failures.
+    // Branch customer tables (customers_kb / customers_kk) may contain IDs that are
+    // not present in public.customers, so we pre-validate. When the ID does not
+    // resolve, try a case/whitespace-insensitive name match against public.customers
+    // before giving up — this dramatically reduces NULL customer_id rows for legit sales.
     if (resolvedCustomerId) {
       const { data: canonicalCustomer, error: canonicalCustomerError } = await supabaseAdmin
         .from('customers')
@@ -580,11 +595,28 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (canonicalCustomerError || !canonicalCustomer) {
-        resolvedCustomerId = null;
+        let recoveredId: string | null = null;
         if (fallbackCustomerName) {
-          customerFallbackNote = `[Customer: ${fallbackCustomerName}]`;
+          const normalizedTarget = fallbackCustomerName.toLowerCase().replace(/\s+/g, ' ').trim();
+          const { data: candidates } = await supabaseAdmin
+            .from('customers')
+            .select('id, name');
+          recoveredId = (candidates || []).find((c) => {
+            const key = String(c.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            return key && key === normalizedTarget;
+          })?.id ?? null;
         }
-        console.warn('[sales] customer_id not found in canonical customers table. Falling back to customer_id=null.');
+
+        if (recoveredId) {
+          resolvedCustomerId = recoveredId;
+          console.warn('[sales] customer_id not found in canonical customers; recovered via name match.');
+        } else {
+          resolvedCustomerId = null;
+          if (fallbackCustomerName) {
+            customerFallbackNote = `[Customer: ${fallbackCustomerName}]`;
+          }
+          console.warn('[sales] customer_id not found in canonical customers table. Falling back to customer_id=null.');
+        }
       }
     }
 
@@ -629,6 +661,11 @@ export async function POST(request: NextRequest) {
       branch: validatedData.branch,
       area: body.area?.trim() || null,
       user_id: currentUser.id,
+      // Snapshot salesman name at sale time so commission/reports stay accurate
+      // even if the user record is later renamed or deactivated. The insert
+      // retry loop below silently drops this field on deployments without the
+      // column.
+      salesman_name: currentUser.name || currentUser.username || null,
       customer_id: resolvedCustomerId,
       transaction_date: new Date().toISOString(),
       subtotal_amount: subtotalAmount,
@@ -980,11 +1017,11 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Double check Admin can only delete from their branch
-    if (role === 'Admin' && sale.branch !== currentUser.branch) {
+    if (role === 'Admin' && !branchLabelsEquivalent(sale.branch, currentUser.branch)) {
       return NextResponse.json({ error: 'You cannot delete sales from other branches' }, { status: 403 });
     }
 
-    if (branch && branch !== 'all' && sale.branch !== branch) {
+    if (branch && branch !== 'all' && !branchLabelsEquivalent(sale.branch, branch)) {
       return NextResponse.json({ error: 'Sale does not belong to selected branch' }, { status: 400 });
     }
 

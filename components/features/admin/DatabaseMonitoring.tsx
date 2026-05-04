@@ -1,15 +1,30 @@
 'use client';
 
+import Link from 'next/link';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Database, Download, FileText, Receipt, Search, ShoppingCart } from 'lucide-react';
+import type { DailyReport, Transaction } from '@/types';
+import { DailyReportDataTable } from '@/components/features/admin/DailyReportDataTable';
+import ArchiveSalesTable from '@/components/features/admin/ArchiveSalesTable';
 
-interface SaleRecord {
-  id: string;
-  invoice?: string;
-  total?: number;
-  branch?: string;
-  createdAt?: string;
-  payment?: { method?: string };
+type SaleRow = Transaction & {
+  area?: string | null;
+  transactionDate?: string | null;
+  payment_method?: string | null;
+  customer_name?: string | null;
+};
+
+function getSaleStaffKey(s: SaleRow) {
+  const label = s.salesmanName?.trim() ? s.salesmanName : 'Nama staff tidak direkodkan';
+  return s.salesmanId ? `id:${s.salesmanId}` : `name:${label}`;
+}
+
+function saleTimeMs(s: SaleRow) {
+  const raw = s.transactionDate || s.createdAt;
+  if (!raw) return 0;
+  const t = new Date(raw).getTime();
+  return Number.isNaN(t) ? 0 : t;
 }
 
 interface SettlementRecord {
@@ -19,19 +34,6 @@ interface SettlementRecord {
   totalSales?: number;
   branch?: string;
   submittedAt?: string;
-}
-
-interface DailyReportRecord {
-  id: string;
-  userName?: string;
-  date?: string;
-  status?: string;
-  totalSales?: number;
-  branch?: string;
-  updatedAt?: string;
-  approvalStage?: 'daily' | 'weekly' | 'monthly';
-  amountBankingManual?: number;
-  balancePtCashManual?: number;
 }
 
 type HistoryItem = {
@@ -44,32 +46,69 @@ type HistoryItem = {
   status: string;
 };
 
-export default function DatabaseMonitoring() {
-  const [sales, setSales] = useState<SaleRecord[]>([]);
+type DatabaseMonitoringProps = {
+  /** Kad ringkas di Pangkalan Data → paut ke halaman arkib penuh */
+  cardNav?: boolean;
+};
+
+export default function DatabaseMonitoring({ cardNav = false }: DatabaseMonitoringProps) {
+  const searchParams = useSearchParams();
+  const [sales, setSales] = useState<SaleRow[]>([]);
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
-  const [dailyReports, setDailyReports] = useState<DailyReportRecord[]>([]);
-  const [weeklyReports, setWeeklyReports] = useState<DailyReportRecord[]>([]);
-  const [monthlyReports, setMonthlyReports] = useState<DailyReportRecord[]>([]);
+  const [reportBundle, setReportBundle] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | HistoryItem['type']>('all');
+
+  const [drYear, setDrYear] = useState('all');
+  const [drMonth, setDrMonth] = useState('all');
+  const [drFrom, setDrFrom] = useState('');
+  const [drTo, setDrTo] = useState('');
+  const [drStaff, setDrStaff] = useState('all');
+
+  const [saleYear, setSaleYear] = useState('all');
+  const [saleMonth, setSaleMonth] = useState('all');
+  const [saleStaffKey, setSaleStaffKey] = useState('all');
+  const [saleArea, setSaleArea] = useState('all');
+
+  const dailyReports = useMemo(
+    () => reportBundle.filter((r) => (r.approvalStage || 'daily') === 'daily'),
+    [reportBundle]
+  );
+  const weeklyReports = useMemo(
+    () => reportBundle.filter((r) => r.approvalStage === 'weekly'),
+    [reportBundle]
+  );
+  const monthlyReports = useMemo(
+    () => reportBundle.filter((r) => r.approvalStage === 'monthly'),
+    [reportBundle]
+  );
+
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    if (focus === 'sales' || focus === 'sale') setTypeFilter('sale');
+    else if (focus === 'settlement') setTypeFilter('settlement');
+    else if (focus === 'daily') setTypeFilter('daily_report');
+    else if (focus === 'weekly') setTypeFilter('weekly_end');
+    else if (focus === 'monthly') setTypeFilter('month_end');
+  }, [searchParams]);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError('');
       try {
-        const [salesRes, settlementRes, dailyRes, weeklyRes, monthlyRes] = await Promise.allSettled([
+        const [salesRes, settlementRes, reportsBundle] = await Promise.allSettled([
           fetch('/api/sales').then((r) => (r.ok ? r.json() : Promise.resolve([]))),
           fetch('/api/settlements').then((r) => (r.ok ? r.json() : Promise.resolve([]))),
-          fetch('/api/daily-reports?approvalStage=daily&publishedOnly=true').then((r) => (r.ok ? r.json() : Promise.resolve({ reports: [] }))),
-          fetch('/api/daily-reports?approvalStage=weekly&publishedOnly=true').then((r) => (r.ok ? r.json() : Promise.resolve({ reports: [] }))),
-          fetch('/api/daily-reports?approvalStage=monthly&publishedOnly=true').then((r) => (r.ok ? r.json() : Promise.resolve({ reports: [] }))),
+          fetch('/api/daily-reports', { cache: 'no-store' }).then((r) =>
+            r.ok ? r.json() : Promise.resolve({ reports: [] })
+          ),
         ]);
 
         if (salesRes.status === 'fulfilled' && Array.isArray(salesRes.value)) {
-          setSales(salesRes.value as SaleRecord[]);
+          setSales(salesRes.value as SaleRow[]);
         } else {
           setSales([]);
         }
@@ -80,21 +119,11 @@ export default function DatabaseMonitoring() {
           setSettlements([]);
         }
 
-        if (dailyRes.status === 'fulfilled' && dailyRes.value && Array.isArray(dailyRes.value.reports)) {
-          setDailyReports(dailyRes.value.reports as DailyReportRecord[]);
-        } else {
-          setDailyReports([]);
-        }
-        if (weeklyRes.status === 'fulfilled' && weeklyRes.value && Array.isArray(weeklyRes.value.reports)) {
-          setWeeklyReports(weeklyRes.value.reports as DailyReportRecord[]);
-        } else {
-          setWeeklyReports([]);
-        }
-        if (monthlyRes.status === 'fulfilled' && monthlyRes.value && Array.isArray(monthlyRes.value.reports)) {
-          setMonthlyReports(monthlyRes.value.reports as DailyReportRecord[]);
-        } else {
-          setMonthlyReports([]);
-        }
+        const bundle =
+          reportsBundle.status === 'fulfilled' && reportsBundle.value && Array.isArray(reportsBundle.value.reports)
+            ? (reportsBundle.value.reports as DailyReport[])
+            : [];
+        setReportBundle(bundle);
       } catch {
         setError('Gagal memuatkan rekod data.');
       } finally {
@@ -172,6 +201,107 @@ export default function DatabaseMonitoring() {
     });
   }, [history, search, typeFilter]);
 
+  const showDailyArchive = typeFilter === 'daily_report';
+  const showSalesArchive = typeFilter === 'sale';
+
+  const drYearOptions = useMemo(() => {
+    const ys = new Set<string>();
+    dailyReports.forEach((d) => {
+      if (d.date && d.date.length >= 4) ys.add(d.date.slice(0, 4));
+    });
+    return [...ys].sort((a, b) => b.localeCompare(a));
+  }, [dailyReports]);
+
+  const drStaffOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    dailyReports.forEach((d) => {
+      const n = (d.userName || '').trim();
+      if (n) m.set(n, n);
+    });
+    return [...m.values()].sort((a, b) => a.localeCompare(b, 'ms-MY'));
+  }, [dailyReports]);
+
+  const filteredDailyArchive = useMemo(() => {
+    let rows = dailyReports;
+    const y = drYear !== 'all' ? drYear : null;
+    const mo = drMonth !== 'all' ? drMonth.padStart(2, '0') : null;
+    if (y && mo) {
+      const prefix = `${y}-${mo}`;
+      rows = rows.filter((r) => r.date.startsWith(prefix));
+    } else if (y) {
+      rows = rows.filter((r) => r.date.startsWith(y));
+    }
+    if (drFrom) rows = rows.filter((r) => r.date >= drFrom);
+    if (drTo) rows = rows.filter((r) => r.date <= drTo);
+    if (drStaff !== 'all') {
+      rows = rows.filter((r) => (r.userName || '').trim() === drStaff);
+    }
+    return [...rows].sort((a, b) => {
+      const dc = b.date.localeCompare(a.date);
+      if (dc !== 0) return dc;
+      return (
+        new Date(b.submittedAt || b.updatedAt || 0).getTime() -
+        new Date(a.submittedAt || a.updatedAt || 0).getTime()
+      );
+    });
+  }, [dailyReports, drYear, drMonth, drFrom, drTo, drStaff]);
+
+  const saleYearOptions = useMemo(() => {
+    const ys = new Set<string>();
+    sales.forEach((s) => {
+      const t = saleTimeMs(s);
+      if (t) ys.add(String(new Date(t).getFullYear()));
+    });
+    return [...ys].sort((a, b) => b.localeCompare(a));
+  }, [sales]);
+
+  const saleAreaOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    sales.forEach((s) => {
+      const a = String(s.area || '').trim();
+      if (a) m.set(a, a);
+    });
+    return [...m.values()].sort((a, b) => a.localeCompare(b, 'ms-MY'));
+  }, [sales]);
+
+  const saleStaffOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    sales.forEach((s) => {
+      const key = getSaleStaffKey(s);
+      const label = (s.salesmanName && s.salesmanName.trim()) ? s.salesmanName : 'Nama staff tidak direkodkan';
+      m.set(key, label);
+    });
+    return [...m.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1], 'ms-MY'))
+      .map(([value, label]) => ({ value, label }));
+  }, [sales]);
+
+  const filteredSalesArchive = useMemo(() => {
+    let rows = sales;
+    const y = saleYear !== 'all' ? Number(saleYear) : null;
+    const monthIdx = saleMonth !== 'all' ? Number(saleMonth) - 1 : null;
+    if (y != null && monthIdx != null && monthIdx >= 0 && monthIdx <= 11) {
+      rows = rows.filter((s) => {
+        const t = saleTimeMs(s);
+        if (!t) return false;
+        const d = new Date(t);
+        return d.getFullYear() === y && d.getMonth() === monthIdx;
+      });
+    } else if (y != null) {
+      rows = rows.filter((s) => {
+        const t = saleTimeMs(s);
+        return t && new Date(t).getFullYear() === y;
+      });
+    }
+    if (saleArea !== 'all') {
+      rows = rows.filter((s) => String(s.area || '').trim() === saleArea);
+    }
+    if (saleStaffKey !== 'all') {
+      rows = rows.filter((s) => getSaleStaffKey(s) === saleStaffKey);
+    }
+    return rows;
+  }, [sales, saleYear, saleMonth, saleArea, saleStaffKey]);
+
   const totals = useMemo(() => ({
     sales: sales.length,
     settlements: settlements.length,
@@ -237,25 +367,29 @@ export default function DatabaseMonitoring() {
             icon={<ShoppingCart size={16} className="text-blue-400" />}
             label="Rekod Jualan"
             value={totals.sales}
-            hint="Disimpan dalam Library"
+            hint={cardNav ? 'Klik untuk arkib penuh' : 'Disimpan dalam pangkalan'}
+            href={cardNav ? '/admin/data-archive?focus=sales' : undefined}
           />
           <SummaryCard
             icon={<Receipt size={16} className="text-violet-400" />}
             label="Rekod Settlement"
             value={totals.settlements}
-            hint="Disimpan dalam Library"
+            hint={cardNav ? 'Klik untuk arkib penuh' : 'Disimpan dalam pangkalan'}
+            href={cardNav ? '/admin/data-archive?focus=settlement' : undefined}
           />
           <SummaryCard
             icon={<FileText size={16} className="text-amber-400" />}
             label="Laporan Harian"
             value={totals.dailyReports}
-            hint="Disimpan dalam Library"
+            hint={cardNav ? 'Klik untuk arkib penuh' : 'Disimpan dalam pangkalan'}
+            href={cardNav ? '/admin/data-archive?focus=daily' : undefined}
           />
           <SummaryCard
             icon={<Database size={16} className="text-emerald-400" />}
             label="Jumlah Nilai Rekod"
             value={`RM ${totals.amount.toFixed(2)}`}
-            hint="Semua rekod terkumpul"
+            hint={cardNav ? 'Klik untuk semua jenis' : 'Semua rekod terkumpul'}
+            href={cardNav ? '/admin/data-archive' : undefined}
           />
         </div>
 
@@ -297,6 +431,194 @@ export default function DatabaseMonitoring() {
             </button>
           </div>
         </div>
+
+        {showDailyArchive && (
+          <div className="mb-6 space-y-4 rounded-xl border border-amber-800/50 bg-slate-900/70 p-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-bold text-white">Laporan harian (arkib penuh)</h3>
+              <p className="text-xs text-slate-400">
+                Sama paparan seperti Pusat Laporan — penapis tarikh, bulan, tahun, dan ejen jualan. Data dari{' '}
+                <code className="text-slate-300">/api/daily-reports</code>.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Tahun
+                <select
+                  value={drYear}
+                  onChange={(e) => setDrYear(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-500 min-w-[100px]"
+                >
+                  <option value="all">Semua</option>
+                  {drYearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Bulan
+                <select
+                  value={drMonth}
+                  onChange={(e) => setDrMonth(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-500 min-w-[100px]"
+                >
+                  <option value="all">Semua</option>
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const m = String(i + 1).padStart(2, '0');
+                    return (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Dari tarikh
+                <input
+                  type="date"
+                  value={drFrom}
+                  onChange={(e) => setDrFrom(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-500"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Hingga tarikh
+                <input
+                  type="date"
+                  value={drTo}
+                  onChange={(e) => setDrTo(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-500"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Ejen jualan
+                <select
+                  value={drStaff}
+                  onChange={(e) => setDrStaff(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-500 min-w-[160px]"
+                >
+                  <option value="all">Semua</option>
+                  {drStaffOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrYear('all');
+                  setDrMonth('all');
+                  setDrFrom('');
+                  setDrTo('');
+                  setDrStaff('all');
+                }}
+                className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs text-slate-200 hover:bg-slate-700"
+              >
+                Reset penapis
+              </button>
+            </div>
+            <DailyReportDataTable
+              rows={filteredDailyArchive}
+              loading={loading}
+              emptyText="Tiada laporan harian sepadan dengan penapis (atau pangkalan kosong)."
+            />
+          </div>
+        )}
+
+        {showSalesArchive && (
+          <div className="mb-6 space-y-4 rounded-xl border border-blue-800/50 bg-slate-900/70 p-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-bold text-white">Rekod jualan (arkib terperinci)</h3>
+              <p className="text-xs text-slate-400">
+                Jadual seperti Live Sales — invois, pelanggan, kawasan, staff, bayaran, bukti. Penapis ikut tarikh /
+                ejen / kawasan.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Tahun
+                <select
+                  value={saleYear}
+                  onChange={(e) => setSaleYear(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 min-w-[100px]"
+                >
+                  <option value="all">Semua</option>
+                  {saleYearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Bulan
+                <select
+                  value={saleMonth}
+                  onChange={(e) => setSaleMonth(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 min-w-[100px]"
+                >
+                  <option value="all">Semua</option>
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const m = String(i + 1).padStart(2, '0');
+                    return (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Kawasan
+                <select
+                  value={saleArea}
+                  onChange={(e) => setSaleArea(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 min-w-[140px]"
+                >
+                  <option value="all">Semua</option>
+                  {saleAreaOptions.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                User sales
+                <select
+                  value={saleStaffKey}
+                  onChange={(e) => setSaleStaffKey(e.target.value)}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 min-w-[180px]"
+                >
+                  <option value="all">Semua</option>
+                  {saleStaffOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setSaleYear('all');
+                  setSaleMonth('all');
+                  setSaleArea('all');
+                  setSaleStaffKey('all');
+                }}
+                className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs text-slate-200 hover:bg-slate-700"
+              >
+                Reset penapis
+              </button>
+            </div>
+            <ArchiveSalesTable sales={filteredSalesArchive} loading={loading} />
+          </div>
+        )}
 
         <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
@@ -361,20 +683,35 @@ function SummaryCard({
   label,
   value,
   hint,
+  href,
 }: {
   icon: ReactNode;
   label: string;
   value: string | number;
   hint: string;
+  href?: string;
 }) {
-  return (
-    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+  const inner = (
+    <>
       <div className="flex items-center justify-between mb-2">
         <span className="text-slate-400 text-sm">{label}</span>
         {icon}
       </div>
       <p className="text-xl font-bold text-white">{value}</p>
       <p className="mt-1 text-[11px] text-slate-400">{hint}</p>
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-indigo-500/60 hover:bg-slate-800/90 transition-colors"
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">{inner}</div>;
 }
