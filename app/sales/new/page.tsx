@@ -36,6 +36,8 @@ interface Product {
   id: string;
   name: string;
   price: number;
+  factory_price?: number;
+  cost?: number;
   stock: number;
   unit?: string;
   current_stock?: number;
@@ -56,6 +58,8 @@ interface Customer {
 interface CartItem {
   product: Product;
   quantity: number;
+  unitPrice: number;
+  factoryPrice: number;
 }
 
 interface ReturnItem {
@@ -144,6 +148,21 @@ function getDocumentTitle(paymentMethod: string) {
   };
 
   return labels[paymentMethod] || 'DOKUMEN TRANSAKSI';
+}
+
+function resolveFactoryPrice(product: Product): number {
+  const sell = Number(product.price ?? 0);
+  const sellResolved = Number.isFinite(sell) ? sell : 0;
+
+  for (const key of ['factory_price', 'cost'] as const) {
+    const raw = product[key];
+    if (raw === undefined || raw === null) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) continue;
+    if (value > 0) return value;
+  }
+
+  return sellResolved;
 }
 
 function getDownloadLabel(paymentMethod: string) {
@@ -311,11 +330,19 @@ export default function NewSalePage() {
       if (Array.isArray(rawProducts)) {
         setProducts(rawProducts.map((product) => {
           const resolvedStock = Number(product.stock ?? product.current_stock ?? 0);
+          const factoryRaw = product.factory_price ?? product.factoryPrice;
+          const costRaw = product.cost;
 
           return {
             id: String(product.id || ''),
             name: String(product.name || 'Unnamed Product'),
             price: Number(product.price || 0),
+            factory_price:
+              factoryRaw !== undefined && factoryRaw !== null
+                ? Number(factoryRaw)
+                : undefined,
+            cost:
+              costRaw !== undefined && costRaw !== null ? Number(costRaw) : undefined,
             unit: String(product.unit || 'unit'),
             stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
           };
@@ -419,7 +446,7 @@ export default function NewSalePage() {
           : item
       ));
     } else {
-      setCart([...cart, { product, quantity: 1 }]);
+      setCart([...cart, { product, quantity: 1, unitPrice: Number(product.price || 0), factoryPrice: resolveFactoryPrice(product) }]);
     }
   };
 
@@ -443,11 +470,39 @@ export default function NewSalePage() {
     }).filter(item => item.quantity > 0));
   };
 
+  const setQuantityExact = (productId: string, nextQty: number) => {
+    const existing = cart.find((item) => item.product.id === productId);
+    if (!existing) return;
+
+    const availableStock = getAvailableStock(productId);
+    const normalizedQty = Math.max(0, Math.floor(nextQty));
+
+    if (normalizedQty > availableStock) {
+      alert(`Stok ${existing.product.name} tidak mencukupi. Baki semasa ${availableStock}.`);
+      return;
+    }
+
+    setCart((prev) =>
+      prev
+        .map((item) => (item.product.id === productId ? { ...item, quantity: normalizedQty } : item))
+        .filter((item) => item.quantity > 0)
+    );
+  };
+
   const removeFromCart = (productId: string) => {
     setCart(cart.filter(item => item.product.id !== productId));
   };
 
-  const totalAmount = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  const setItemUnitPrice = (productId: string, nextPrice: number) => {
+    const normalized = Number.isFinite(nextPrice) ? Math.max(0, nextPrice) : 0;
+    setCart((prev) =>
+      prev.map((item) =>
+        item.product.id === productId ? { ...item, unitPrice: normalized } : item
+      )
+    );
+  };
+
+  const totalAmount = cart.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
   const selectedDebt = pendingDebts.find((debt) => debt.id === selectedDebtId) || null;
   const totalOutstanding = pendingDebts.reduce((sum, debt) => sum + Number(debt.amount || 0), 0);
 
@@ -732,9 +787,9 @@ export default function NewSalePage() {
       body: data.items.map((item) => [
         item.product.name,
         item.product.unit || 'unit',
-        item.product.price.toFixed(2),
+        item.unitPrice.toFixed(2),
         item.quantity.toString(),
-        (item.product.price * item.quantity).toFixed(2),
+        (item.unitPrice * item.quantity).toFixed(2),
       ]),
       theme: 'grid',
       styles: {
@@ -952,8 +1007,14 @@ export default function NewSalePage() {
           productId: item.product.id,
           name: item.product.name,
           quantity: item.quantity,
-          price: item.product.price,
-          subtotal: item.product.price * item.quantity,
+          price: item.unitPrice,
+          factoryPrice: item.factoryPrice,
+          commissionType: paymentMethod === 'bill_to_bill' ? 'credit' : 'cash',
+          commissionAmount:
+            paymentMethod === 'bill_to_bill'
+              ? Number((item.unitPrice * item.quantity * 0.004).toFixed(2))
+              : Number((Math.max(0, item.unitPrice - item.factoryPrice) * item.quantity).toFixed(2)),
+          subtotal: item.unitPrice * item.quantity,
           unit: 'unit',
           discount: 0,
           type: 'sale' as const
@@ -1942,7 +2003,18 @@ export default function NewSalePage() {
                             >
                               <Minus size={12} />
                             </button>
-                            <span className="text-white w-8 text-center">{item.quantity}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const raw = Number(e.target.value);
+                                if (!Number.isFinite(raw)) return;
+                                setQuantityExact(item.product.id, raw);
+                              }}
+                              className="w-14 h-6 rounded bg-slate-700 text-white text-center text-sm border border-slate-600 focus:outline-none focus:border-blue-500"
+                            />
                             <button
                               onClick={() => updateQuantity(item.product.id, 1)}
                               className="w-6 h-6 rounded bg-slate-700 flex items-center justify-center text-white hover:bg-slate-600"
@@ -1950,9 +2022,26 @@ export default function NewSalePage() {
                               <Plus size={12} />
                             </button>
                           </div>
-                          <p className="text-blue-400 font-semibold text-sm">
-                            RM {(item.product.price * item.quantity).toFixed(2)}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.unitPrice}
+                              onChange={(e) => setItemUnitPrice(item.product.id, Number(e.target.value))}
+                              className="w-20 h-7 rounded bg-slate-700 text-white text-center text-xs border border-slate-600 focus:outline-none focus:border-blue-500"
+                              title={`Factory: RM ${item.factoryPrice.toFixed(2)}`}
+                            />
+                            <p className="text-blue-400 font-semibold text-sm">
+                              RM {(item.unitPrice * item.quantity).toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-slate-400 flex items-center justify-between">
+                          <span>Factory: RM {item.factoryPrice.toFixed(2)}</span>
+                          <span>
+                            Margin: RM {Math.max(0, (item.unitPrice - item.factoryPrice) * item.quantity).toFixed(2)}
+                          </span>
                         </div>
                       </div>
                     ))}

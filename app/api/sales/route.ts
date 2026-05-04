@@ -288,6 +288,9 @@ export async function GET(request: NextRequest) {
           name: item.product_name,
           quantity: Number(item.quantity || 0),
           price: Number(item.unit_price || 0),
+          factoryPrice: Number(item.factory_price_at_sale ?? item.unit_price ?? 0),
+          commissionType: item.commission_type ? String(item.commission_type) : null,
+          commissionAmount: Number(item.commission_amount || 0),
           subtotal: Number(item.subtotal || 0)
         });
         return acc;
@@ -724,13 +727,34 @@ export async function POST(request: NextRequest) {
       product_name: item.name,
       quantity: item.quantity,
       unit_price: item.price,
+      factory_price_at_sale: Number(item.factoryPrice ?? item.price ?? 0),
+      commission_type: item.commissionType ?? null,
+      commission_amount: Number(item.commissionAmount ?? 0),
       subtotal: item.subtotal,
       created_at: new Date().toISOString()
     }));
 
-    const { error: itemsError } = await supabaseAdmin
-      .from(SALES_ITEMS_TABLE)
-      .insert(saleItems);
+    let itemsError: { message?: string } | null = null;
+    const itemsInsertPayload = saleItems.map((row) => ({ ...row }));
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const result = await supabaseAdmin
+        .from(SALES_ITEMS_TABLE)
+        .insert(itemsInsertPayload);
+
+      itemsError = result.error;
+      if (!itemsError) break;
+
+      const missingColumnMatch = /Could not find the '([^']+)' column/i.exec(String(itemsError.message || ''));
+      if (!missingColumnMatch) break;
+
+      const missingColumn = missingColumnMatch[1];
+      if (!(missingColumn in itemsInsertPayload[0])) break;
+
+      for (const row of itemsInsertPayload as Array<Record<string, unknown>>) {
+        delete row[missingColumn];
+      }
+      console.warn(`[sales] Missing optional sales_items column '${missingColumn}', retrying insert without it.`);
+    }
 
     const createdSaleId = String(createdSale.id || '');
     const createdSaleInvoice = typeof createdSale.invoice === 'string' ? createdSale.invoice : undefined;
@@ -837,6 +861,9 @@ export async function POST(request: NextRequest) {
         name: item.product_name,
         quantity: item.quantity,
         price: item.unit_price,
+        factoryPrice: item.factory_price_at_sale,
+        commissionType: item.commission_type,
+        commissionAmount: item.commission_amount,
         subtotal: item.subtotal
       })),
       status: isCredit ? 'Pending Payment' : 'Completed',

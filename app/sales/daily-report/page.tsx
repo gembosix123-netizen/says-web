@@ -83,6 +83,14 @@ interface DailyData {
   totalCredit: number;
 }
 
+interface SessionUser {
+  id?: string;
+  name?: string;
+  username?: string;
+  email?: string;
+  branch?: string;
+}
+
 // ─── Expense entry ────────────────────────────────────────────────────────────
 
 interface ExpenseEntry {
@@ -190,6 +198,35 @@ export default function DailyReportPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitDone, setSubmitDone] = useState(false);
   const [submitErrors, setSubmitErrors] = useState<string[]>([]);
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const [todaySaleIds, setTodaySaleIds] = useState<string[]>([]);
+  const [manualName, setManualName] = useState('');
+  const [manualKawasan, setManualKawasan] = useState('');
+  const [amountBankingManual, setAmountBankingManual] = useState('');
+  const [balancePtCashManual, setBalancePtCashManual] = useState('');
+
+  const parseMoney = (raw: string) => {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const expenseSum = (category: string) =>
+    expenses.reduce((sum, exp) => (exp.category === category ? sum + parseMoney(exp.amount) : sum), 0);
+
+  const totalExpensesAmount = expenses.reduce((sum, exp) => sum + parseMoney(exp.amount), 0);
+  const petrolAmount = expenseSum('minyak');
+  const foodAmount = expenseSum('makan');
+  const othersAmount = Math.max(0, totalExpensesAmount - petrolAmount - foodAmount);
+
+  const totalAll = (data?.totalCash || 0) + (data?.totalTransfer || 0) + (data?.totalCredit || 0);
+  const amountBankingAuto = (data?.totalCash || 0) + (data?.totalTransfer || 0);
+  const amountBanking = amountBankingManual.trim() ? parseMoney(amountBankingManual) : amountBankingAuto;
+  const balancePtCash = parseMoney(balancePtCashManual);
+
+  const printDocument = () => {
+    setShowDocument(true);
+    setTimeout(() => window.print(), 120);
+  };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -205,6 +242,7 @@ export default function DailyReportPage() {
       const allReturns: ReturnRecord[] = await returnsRes.json().catch(() => []);
       const vanData = await vanRes.json().catch(() => ({}));
       const userInfo = await userRes.json().catch(() => ({}));
+      setSessionUser(userInfo);
 
       // Filter today's sales
       const startMs = new Date(`${date}T00:00:00`).getTime();
@@ -292,6 +330,11 @@ export default function DailyReportPage() {
       const totalCash = cashSalesRaw.reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
       const totalTransfer = transferSalesRaw.reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
       const totalCredit = creditSalesRaw.reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
+      const autoBanking = totalCash + totalTransfer;
+      setTodaySaleIds(todaySales.map((sale) => sale.id).filter(Boolean));
+      setManualName((prev) => prev || String(userInfo?.name || userInfo?.username || userInfo?.email || ''));
+      setManualKawasan((prev) => prev || String(userInfo?.branch || ''));
+      setAmountBankingManual((prev) => prev || (autoBanking > 0 ? autoBanking.toFixed(2) : ''));
 
       const d = new Date(`${date}T12:00:00`);
       setData({
@@ -318,6 +361,14 @@ export default function DailyReportPage() {
     setSubmitting(true);
     setSubmitErrors([]);
     const errors: string[] = [];
+    const expenseLinesPayload: Array<{
+      category: string;
+      description: string;
+      amount: number;
+      receiptImageUrls: string[];
+    }> = [];
+    let bankSlipUrls: string[] = [];
+    let cashProofUrls: string[] = [];
 
     // Submit each expense that has amount > 0
     for (const exp of expenses) {
@@ -337,6 +388,13 @@ export default function DailyReportPage() {
         if (!res.ok) {
           const json = await res.json().catch(() => ({})) as { error?: string };
           errors.push(`${exp.description}: ${json.error || 'Gagal simpan'}`);
+        } else {
+          expenseLinesPayload.push({
+            category: exp.category,
+            description: exp.description,
+            amount: amt,
+            receiptImageUrls: urls,
+          });
         }
       } catch {
         errors.push(`${exp.description}: Ralat semasa upload`);
@@ -345,7 +403,7 @@ export default function DailyReportPage() {
 
     // Submit banking slip
     if (bankSlip.photos.length > 0) {
-      const bankAmt = (data?.totalCash || 0) + (data?.totalTransfer || 0);
+      const bankAmt = amountBanking;
       if (bankAmt > 0) {
         try {
           const urls = await Promise.all(bankSlip.photos.map((f) => uploadProofPhoto(f, `banking/${date}`)));
@@ -355,6 +413,7 @@ export default function DailyReportPage() {
             body: JSON.stringify({ category: 'lain-lain', description: 'Slip Banking', amount: bankAmt, receipt_image_urls: urls, expense_date: date }),
           });
           if (!res.ok) errors.push('Slip Banking: Gagal simpan');
+          else bankSlipUrls = urls;
         } catch {
           errors.push('Slip Banking: Ralat upload');
         }
@@ -372,15 +431,73 @@ export default function DailyReportPage() {
           body: JSON.stringify({ category: 'lain-lain', description: 'Gambar Wang Tunai', amount: cashAmt, receipt_image_urls: urls, expense_date: date }),
         });
         if (!res.ok) errors.push('Gambar Wang: Gagal simpan');
+        else cashProofUrls = urls;
       } catch {
         errors.push('Gambar Wang: Ralat upload');
       }
     }
 
+    if (errors.length === 0) {
+      const userName = manualName.trim() || data?.salesman || sessionUser?.name || sessionUser?.username || sessionUser?.email || 'Unknown';
+      const userBranch = manualKawasan.trim() || data?.kawasan || sessionUser?.branch || 'HQ';
+      const reportPayload = {
+        date,
+        userId: String(sessionUser?.id || ''),
+        userName,
+        branch: userBranch,
+        totalSales: totalAll,
+        totalCash: data?.totalCash || 0,
+        totalCredit: data?.totalCredit || 0,
+        totalTransfer: data?.totalTransfer || 0,
+        amountBankingManual: amountBanking,
+        balancePtCashManual: balancePtCash,
+        expenseLines: expenseLinesPayload,
+        expensesTotal: totalExpensesAmount,
+        bankSlipUrls,
+        cashProofUrls,
+        salesSnapshot: {
+          cashSales: data?.cashSales || [],
+          transferSales: data?.transferSales || [],
+          creditSales: data?.creditSales || [],
+        },
+        source: 'sales',
+        status: 'submitted',
+        liveSalesRefs: todaySaleIds,
+      };
+
+      const reportRes = await fetch('/api/daily-reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reportPayload),
+      });
+
+      if (!reportRes.ok) {
+        const json = await reportRes.json().catch(() => ({})) as { error?: string };
+        errors.push(json.error || 'Gagal hantar laporan harian ke admin');
+      }
+    }
+
     setSubmitErrors(errors);
-    if (errors.length === 0) setSubmitDone(true);
+    if (errors.length === 0) {
+      setSubmitDone(true);
+      setShowDocument(true);
+    }
     setSubmitting(false);
-  }, [expenses, bankSlip, cashProof, date, data]);
+  }, [
+    expenses,
+    bankSlip,
+    cashProof,
+    date,
+    data,
+    amountBanking,
+    balancePtCash,
+    manualName,
+    manualKawasan,
+    sessionUser,
+    totalAll,
+    totalExpensesAmount,
+    todaySaleIds,
+  ]);
 
   useEffect(() => {
     fetchData();
@@ -394,13 +511,11 @@ export default function DailyReportPage() {
     );
   }
 
-  const totalAll = (data?.totalCash || 0) + (data?.totalTransfer || 0) + (data?.totalCredit || 0);
-  const amountBanking = (data?.totalCash || 0) + (data?.totalTransfer || 0);
-
   return (
     <>
       <style>{`
         @media print {
+          @page { size: A4 portrait; margin: 10mm; }
           .no-print { display: none !important; }
           .hidden { display: block !important; }
           body { background: white !important; margin: 0; padding: 0; }
@@ -443,7 +558,7 @@ export default function DailyReportPage() {
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => window.print()}
+                onClick={printDocument}
                 className="flex items-center gap-2"
               >
                 <Printer size={16} /> <span className="hidden sm:inline">Print / PDF</span>
@@ -498,7 +613,7 @@ export default function DailyReportPage() {
               <div className="flex gap-2 mb-1 items-center">
                 <span className="font-semibold w-16">Nama</span>
                 <span>:</span>
-                <span className="flex-1 border-b border-slate-500 pl-1 pb-0.5">{data?.salesman}</span>
+                <span className="flex-1 border-b border-slate-500 pl-1 pb-0.5">{manualName.trim() || data?.salesman}</span>
               </div>
               <div className="flex gap-2 items-center">
                 <span className="font-semibold w-16">Tarikh</span>
@@ -508,7 +623,7 @@ export default function DailyReportPage() {
               <div className="flex gap-2 items-center">
                 <span className="font-semibold w-16">Kawasan</span>
                 <span>:</span>
-                <span className="flex-1 border-b border-slate-500 pl-1 pb-0.5">{data?.kawasan}</span>
+                <span className="flex-1 border-b border-slate-500 pl-1 pb-0.5">{manualKawasan.trim() || data?.kawasan}</span>
               </div>
             </div>
 
@@ -569,16 +684,23 @@ export default function DailyReportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {['Expenses Sales', 'Petrol / Diesel', 'Food & Beverage', 'Advance', 'Others', 'Balance PTCash'].map(
-                    (desc, i) => (
-                      <tr key={i} style={{ height: '18px' }}>
-                        <td className="border border-slate-300 px-2">
-                          {i + 1}. {desc}
-                        </td>
-                        <td className="border border-slate-300 px-2" />
-                      </tr>
-                    )
-                  )}
+                  {[
+                    { desc: 'Expenses Sales', value: totalExpensesAmount },
+                    { desc: 'Petrol / Diesel', value: petrolAmount },
+                    { desc: 'Food & Beverage', value: foodAmount },
+                    { desc: 'Advance', value: 0 },
+                    { desc: 'Others', value: othersAmount },
+                    { desc: 'Balance PTCash', value: balancePtCash },
+                  ].map((row, i) => (
+                    <tr key={row.desc} style={{ height: '18px' }}>
+                      <td className="border border-slate-300 px-2">
+                        {i + 1}. {row.desc}
+                      </td>
+                      <td className="border border-slate-300 px-2 text-right font-medium">
+                        {row.value > 0 ? row.value.toFixed(2) : ''}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
 
@@ -690,6 +812,31 @@ export default function DailyReportPage() {
           </div>
 
           <div className="p-6 space-y-6">
+            {/* ── Maklumat Manual ── */}
+            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Nama (manual)</label>
+                  <input
+                    type="text"
+                    value={manualName}
+                    onChange={(e) => setManualName(e.target.value)}
+                    placeholder="Isi nama"
+                    className="w-full bg-slate-800 text-white text-sm px-3 py-2 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Kawasan (manual)</label>
+                  <input
+                    type="text"
+                    value={manualKawasan}
+                    onChange={(e) => setManualKawasan(e.target.value)}
+                    placeholder="Isi kawasan"
+                    className="w-full bg-slate-800 text-white text-sm px-3 py-2 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
 
             {/* ── Gambar Wang Tunai ── */}
             <div>
@@ -822,6 +969,32 @@ export default function DailyReportPage() {
                   <span className="ml-auto text-blue-300 text-sm font-mono">RM {amountBanking.toFixed(2)}</span>
                 )}
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Jumlah bank-in (manual)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={amountBankingManual}
+                    onChange={(e) => setAmountBankingManual(e.target.value)}
+                    placeholder={amountBankingAuto > 0 ? amountBankingAuto.toFixed(2) : '0.00'}
+                    className="w-full bg-slate-800 text-white text-sm px-3 py-2 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-500 text-right"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Balance PT Cash (manual)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={balancePtCashManual}
+                    onChange={(e) => setBalancePtCashManual(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-slate-800 text-white text-sm px-3 py-2 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-500 text-right"
+                  />
+                </div>
+              </div>
               <label className="flex items-center gap-3 px-4 py-3 bg-slate-800 border border-dashed border-slate-600 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
                 <Upload size={20} className="text-slate-400" />
                 <span className="text-slate-400 text-sm">
@@ -869,11 +1042,27 @@ export default function DailyReportPage() {
 
             {/* ── Submit / Success ── */}
             {submitDone ? (
-              <div className="flex items-center gap-3 px-4 py-4 bg-emerald-900/30 border border-emerald-700/50 rounded-xl">
-                <CheckCircle size={22} className="text-emerald-400 shrink-0" />
-                <div>
-                  <p className="text-emerald-300 font-semibold">Laporan berjaya dihantar!</p>
-                  <p className="text-emerald-400/70 text-sm">Admin akan semak dan approve perbelanjaan anda.</p>
+              <div className="px-4 py-4 bg-emerald-900/30 border border-emerald-700/50 rounded-xl space-y-3">
+                <div className="flex items-center gap-3">
+                  <CheckCircle size={22} className="text-emerald-400 shrink-0" />
+                  <div>
+                    <p className="text-emerald-300 font-semibold">Laporan berjaya dihantar!</p>
+                    <p className="text-emerald-400/70 text-sm">Admin akan semak dan approve perbelanjaan anda.</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setShowDocument(true)}
+                    className="px-3 py-2 text-xs font-medium rounded-lg bg-slate-800 border border-slate-600 text-white hover:border-slate-400 transition-colors"
+                  >
+                    Lihat Dokumen
+                  </button>
+                  <button
+                    onClick={printDocument}
+                    className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                  >
+                    Cetak / PDF
+                  </button>
                 </div>
               </div>
             ) : (

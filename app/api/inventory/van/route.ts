@@ -10,6 +10,8 @@ type ProductRecord = {
   name: string;
   unit?: string | null;
   price?: number | string | null;
+  factory_price?: number | string | null;
+  cost?: number | string | null;
 };
 
 const isPrivilegedRole = (role: string) => role === 'Admin' || role === 'Main Admin';
@@ -30,7 +32,7 @@ const getActiveProducts = async (): Promise<ProductRecord[]> => {
   if (supabaseAdmin) {
     const { data, error } = await supabaseAdmin
       .from('products')
-      .select('id,name,unit,price')
+      .select('id,name,unit,price,factory_price,cost')
       .eq('is_active', true);
 
     if (!error && Array.isArray(data)) {
@@ -39,12 +41,17 @@ const getActiveProducts = async (): Promise<ProductRecord[]> => {
   }
 
   const localProducts = await db.products.getAll();
-  return (localProducts || []).map((item) => ({
-    id: item.id,
-    name: item.name,
-    unit: item.unit,
-    price: item.price,
-  }));
+  return (localProducts || []).map((item) => {
+    const row = item as unknown as Record<string, unknown>;
+    return {
+      id: item.id,
+      name: item.name,
+      unit: item.unit,
+      price: item.price,
+      factory_price: row.factory_price as number | string | null | undefined,
+      cost: row.cost as number | string | null | undefined,
+    };
+  });
 };
 
 export async function GET(request: NextRequest) {
@@ -121,6 +128,8 @@ export async function GET(request: NextRequest) {
           name: product.name,
           unit: product.unit || 'unit',
           price: effectivePrice,
+          factory_price: product.factory_price,
+          cost: product.cost,
           stock: quantity,
         };
       })

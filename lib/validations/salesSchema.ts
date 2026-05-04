@@ -25,6 +25,17 @@ export const saleItemSchema = z.object({
   price: z
     .number()
     .min(0, 'Harga tidak boleh negatif'),
+  factoryPrice: z
+    .number()
+    .min(0, 'Factory price tidak boleh negatif')
+    .optional(),
+  commissionType: z
+    .enum(['cash', 'credit'])
+    .optional(),
+  commissionAmount: z
+    .number()
+    .min(0, 'Komisen tidak boleh negatif')
+    .optional(),
   subtotal: z
     .number()
     .min(0, 'Subtotal tidak boleh negatif'),

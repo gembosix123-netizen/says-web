@@ -48,6 +48,7 @@ const isMissingBranchColumnError = (error: any): boolean => {
 const normalizeProductResponse = (product: Record<string, any>) => {
   const resolvedSku = product.sku ?? product.code ?? null;
   const resolvedStock = Number(product.current_stock ?? product.stock ?? 0);
+  const resolvedFactoryPrice = Number(product.factory_price ?? product.cost ?? product.price ?? 0);
 
   return {
     ...product,
@@ -55,6 +56,7 @@ const normalizeProductResponse = (product: Record<string, any>) => {
     code: resolvedSku,
     stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
     current_stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
+    factory_price: Number.isFinite(resolvedFactoryPrice) ? resolvedFactoryPrice : 0,
   };
 };
 
@@ -63,6 +65,10 @@ const buildProductUpdatePayload = (body: Record<string, any>, product: Record<st
 
   if (body.name !== undefined) payload.name = body.name;
   if (body.price !== undefined) payload.price = body.price;
+  if (body.factoryPrice !== undefined) {
+    if ('factory_price' in product) payload.factory_price = body.factoryPrice;
+    else if ('cost' in product) payload.cost = body.factoryPrice;
+  }
   if (body.cost !== undefined && 'cost' in product) payload.cost = body.cost;
   if (body.unit !== undefined) payload.unit = body.unit;
   if (body.category !== undefined && 'category' in product) payload.category = body.category;
@@ -108,6 +114,11 @@ const buildProductCreatePayload = (
     price: validatedData.price,
     unit: validatedData.unit,
   };
+
+  if (body.factoryPrice !== undefined) {
+    payload.factory_price = Number(body.factoryPrice ?? 0);
+    payload.cost = Number(body.factoryPrice ?? 0);
+  }
 
   payload[options.skuKey] = validatedData.code || validatedData.sku;
   if (options.stockKey) {
@@ -430,6 +441,7 @@ export async function PUT(request: NextRequest) {
       body.name !== undefined ||
       body.sku !== undefined ||
       body.price !== undefined ||
+      body.factoryPrice !== undefined ||
       body.unit !== undefined ||
       body.category !== undefined ||
       body.description !== undefined ||

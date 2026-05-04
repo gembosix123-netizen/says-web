@@ -89,5 +89,54 @@
       "transferSales": [],
       "creditSales": []
     }
+  },
+  {
+    "id": "e17b2d2d-ee4b-4baf-a94d-51a0173d332b",
+    "userId": "5ab2a890-942c-47d5-9ab4-892c62fcf4be",
+    "userName": "allan",
+    "branch": "k.k",
+    "date": "2026-05-05",
+    "totalSales": 0,
+    "totalCash": 0,
+    "totalCredit": 0,
+    "totalTransfer": 0,
+    "amountBankingManual": 20,
+    "balancePtCashManual": 10,
+    "expenseLines": [
+      {
+        "category": "minyak",
+        "description": "Petrol / Diesel",
+        "amount": 20,
+        "receiptImageUrls": [
+          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/expenses/2026-05-05/1777919607272_bt9r09.png"
+        ]
+      },
+      {
+        "category": "makan",
+        "description": "Makan / F&B",
+        "amount": 50,
+        "receiptImageUrls": [
+          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/expenses/2026-05-05/1777919607780_e3khan.png"
+        ]
+      }
+    ],
+    "expensesTotal": 70,
+    "bankSlipUrls": [
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/banking/2026-05-05/1777919608179_10j1zn.png"
+    ],
+    "cashProofUrls": [
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-05-05/1777919608548_92qdo9.png"
+    ],
+    "salesSnapshot": {
+      "cashSales": [],
+      "transferSales": [],
+      "creditSales": []
+    },
+    "status": "submitted_daily",
+    "source": "sales",
+    "approvalStage": "daily",
+    "liveSalesRefs": [],
+    "submittedAt": "2026-05-04T18:31:46.370Z",
+    "updatedAt": "2026-05-04T18:33:28.918Z"
   }
 ]

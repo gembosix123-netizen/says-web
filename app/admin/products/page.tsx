@@ -24,9 +24,14 @@ interface SalesmanUser {
   branch: string;
 }
 
+interface ProductRecord extends Product {
+  factory_price?: number;
+  cost?: number;
+}
+
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [form, setForm] = useState({ name: '', price: 0, stock: 0, sku: '' });
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [form, setForm] = useState({ name: '', price: 0, factoryPrice: 0, stock: 0, sku: '' });
   const [expandedPricing, setExpandedPricing] = useState<string | null>(null);
   const [pricingTab, setPricingTab] = useState<Record<string, 'branch' | 'salesman'>>({});
   const [priceOverrides, setPriceOverrides] = useState<Record<string, PriceOverride[]>>({});
@@ -53,6 +58,16 @@ export default function AdminProductsPage() {
   const [stockEditNew, setStockEditNew] = useState('');
   const [stockEditReason, setStockEditReason] = useState('');
   const [stockEditSaving, setStockEditSaving] = useState(false);
+  const [productEditModal, setProductEditModal] = useState<{
+    id: string;
+    name: string;
+    sku: string;
+    price: number;
+    factoryPrice: number;
+    unit: string;
+  } | null>(null);
+  const [productEditPassword, setProductEditPassword] = useState('');
+  const [productEditSaving, setProductEditSaving] = useState(false);
   const [finishSessionSaving, setFinishSessionSaving] = useState(false);
   /** Banner selepas sesi tamat: manual = pengguna tekan Selesai; expired = masa habis */
   const [sessionEndedKind, setSessionEndedKind] = useState<'manual' | 'expired' | null>(null);
@@ -162,6 +177,54 @@ export default function AdminProductsPage() {
     setFinishSessionSaving(false);
   };
 
+  const openProductEdit = (p: ProductRecord) => {
+    const fp = p.factory_price ?? p.cost;
+    setProductEditModal({
+      id: p.id,
+      name: p.name || '',
+      sku: String(p.sku ?? p.code ?? ''),
+      price: Number(p.price ?? 0),
+      factoryPrice:
+        fp !== undefined && fp !== null && Number(fp) > 0 ? Number(fp) : Number(p.price ?? 0),
+      unit: String(p.unit || 'pkt'),
+    });
+    setProductEditPassword('');
+  };
+
+  const saveProductEdit = async () => {
+    if (!productEditModal) return;
+    if (!productEditModal.name.trim()) return addToast('Nama produk wajib diisi', 'error');
+    if (productEditModal.price <= 0) return addToast('Harga jualan mesti lebih dari 0', 'error');
+    if (!productEditPassword.trim()) return addToast('Password Main Admin wajib untuk kemaskini produk', 'error');
+    setProductEditSaving(true);
+    try {
+      const res = await fetch('/api/products', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: productEditModal.id,
+          name: productEditModal.name.trim(),
+          sku: productEditModal.sku.trim(),
+          price: productEditModal.price,
+          factoryPrice: productEditModal.factoryPrice,
+          unit: productEditModal.unit.trim() || 'pkt',
+          password: productEditPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Gagal kemaskini');
+      }
+      addToast('Produk dikemaskini', 'success');
+      setProductEditModal(null);
+      setProductEditPassword('');
+      load();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Gagal kemaskini', 'error');
+    }
+    setProductEditSaving(false);
+  };
+
   const create = async () => {
     if (!form.name.trim()) return addToast('Nama produk wajib diisi', 'error');
     if (form.price <= 0) return addToast('Harga mesti lebih dari 0', 'error');
@@ -172,7 +235,7 @@ export default function AdminProductsPage() {
       return addToast(`${data?.error || 'Failed'}${details}`, 'error');
     }
     addToast('Produk berjaya dicipta', 'success');
-    setForm({ name: '', price: 0, stock: 0, sku: '' });
+    setForm({ name: '', price: 0, factoryPrice: 0, stock: 0, sku: '' });
     load();
   };
 
@@ -610,10 +673,127 @@ export default function AdminProductsPage() {
         </div>
       )}
 
+      {/* Edit product (Main Admin + password) */}
+      {productEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-white font-semibold flex items-center gap-2">
+                <Pencil size={18} className="text-amber-400" /> Kemaskini produk
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setProductEditModal(null);
+                  setProductEditPassword('');
+                }}
+                className="text-slate-500 hover:text-white"
+                aria-label="Tutup">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-400">
+              Set harga kilang lebih rendah daripada harga jualan untuk margin yang betul. Perubahan memerlukan password Main Admin.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1 sm:col-span-2">
+                <label className="text-xs text-slate-400">Nama produk</label>
+                <input
+                  value={productEditModal.name}
+                  onChange={(e) =>
+                    setProductEditModal((m) => (m ? { ...m, name: e.target.value } : m))
+                  }
+                  className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-amber-500 outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-400">Kod SKU</label>
+                <input
+                  value={productEditModal.sku}
+                  onChange={(e) =>
+                    setProductEditModal((m) => (m ? { ...m, sku: e.target.value } : m))
+                  }
+                  className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-amber-500 outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-400">Unit</label>
+                <input
+                  value={productEditModal.unit}
+                  onChange={(e) =>
+                    setProductEditModal((m) => (m ? { ...m, unit: e.target.value } : m))
+                  }
+                  className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-amber-500 outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-400">Harga jualan (RM)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={productEditModal.price}
+                  onChange={(e) =>
+                    setProductEditModal((m) =>
+                      m ? { ...m, price: parseFloat(e.target.value || '0') } : m
+                    )
+                  }
+                  className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-amber-500 outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-400">Harga kilang / factory (RM)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={productEditModal.factoryPrice}
+                  onChange={(e) =>
+                    setProductEditModal((m) =>
+                      m ? { ...m, factoryPrice: parseFloat(e.target.value || '0') } : m
+                    )
+                  }
+                  className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-amber-500 outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1 sm:col-span-2">
+                <label className="text-xs text-slate-400">Password Main Admin</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={productEditPassword}
+                  onChange={(e) => setProductEditPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-amber-500 outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setProductEditModal(null);
+                  setProductEditPassword('');
+                }}
+                className="flex-1 py-2 rounded bg-slate-700 text-slate-300 text-sm hover:bg-slate-600">
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={productEditSaving}
+                onClick={() => void saveProductEdit()}
+                className="flex-1 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-semibold">
+                {productEditSaving ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create Form */}
       <div className="p-5 rounded-xl bg-slate-900 border border-slate-700 space-y-4">
         <h3 className="text-white font-semibold">Tambah Produk Baru</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-400 font-medium">Nama Produk <span className="text-red-400">*</span></label>
             <input
@@ -645,6 +825,18 @@ export default function AdminProductsPage() {
             />
           </div>
           <div className="flex flex-col gap-1">
+            <label className="text-xs text-slate-400 font-medium">Factory Price (RM)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              value={form.factoryPrice}
+              onChange={(e) => setForm({ ...form, factoryPrice: parseFloat(e.target.value || '0') })}
+              className="p-2 bg-slate-800 text-white rounded border border-slate-700 focus:border-blue-500 outline-none"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-400 font-medium">Kuantiti Stok Freezer (unit)</label>
             <input
               type="number"
@@ -671,6 +863,7 @@ export default function AdminProductsPage() {
                 <th className="pb-3 px-2 text-slate-400 font-medium">Nama Produk</th>
                 <th className="pb-3 px-2 text-slate-400 font-medium">Kod SKU</th>
                 <th className="pb-3 px-2 text-slate-400 font-medium">Harga Jualan (RM)</th>
+                <th className="pb-3 px-2 text-slate-400 font-medium">Factory Price (RM)</th>
                 <th className="pb-3 px-2 text-slate-400 font-medium">Stok Freezer (unit)</th>
                 <th className="pb-3 px-2 text-slate-400 font-medium">Tindakan</th>
               </tr>
@@ -691,6 +884,9 @@ export default function AdminProductsPage() {
                         {expandedPricing === p.id ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                       </button>
                     </div>
+                  </td>
+                  <td className="px-2 py-2.5 text-amber-300 font-medium">
+                    RM {Number(p.factory_price ?? p.cost ?? p.price ?? 0).toFixed(2)}
                   </td>
                   <td className="px-2 py-2.5">
                     <div className="flex items-center gap-2">
@@ -718,16 +914,26 @@ export default function AdminProductsPage() {
                     </div>
                   </td>
                   <td className="px-2 py-2.5">
-                    <button onClick={() => del(p.id)} className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs text-white font-medium transition-colors">
-                      Padam
-                    </button>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {isMainAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => openProductEdit(p)}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-amber-600/25 hover:bg-amber-600/45 text-amber-300 rounded text-xs font-medium transition-colors">
+                          <Pencil size={10} /> Kemaskini
+                        </button>
+                      )}
+                      <button onClick={() => del(p.id)} className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs text-white font-medium transition-colors">
+                        Padam
+                      </button>
+                    </div>
                   </td>
                 </tr>
 
                 {/* Pricing Panel */}
                 {expandedPricing === p.id && (
                   <tr>
-                    <td colSpan={5} className="bg-slate-800/60 px-4 py-4">
+                    <td colSpan={6} className="bg-slate-800/60 px-4 py-4">
                       {/* Tabs */}
                       <div className="flex gap-1 mb-4">
                         <button
@@ -868,7 +1074,7 @@ export default function AdminProductsPage() {
               </React.Fragment>
             ))}
             {products.length === 0 && (
-                <tr><td colSpan={5} className="px-2 py-8 text-center text-slate-500">Tiada produk lagi</td></tr>
+                <tr><td colSpan={6} className="px-2 py-8 text-center text-slate-500">Tiada produk lagi</td></tr>
               )}
             </tbody>
           </table>

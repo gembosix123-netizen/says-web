@@ -34,6 +34,11 @@ export const createProductSchema = z.object({
     .number()
     .min(0, 'Harga tidak boleh negatif')
     .max(999999.99, 'Harga terlalu tinggi'),
+  factoryPrice: z
+    .number()
+    .min(0, 'Factory price tidak boleh negatif')
+    .max(999999.99, 'Factory price terlalu tinggi')
+    .optional(),
   unit: z
     .string()
     .max(20, 'Unit ' + errorMessages.maxLength(20))
@@ -93,6 +98,11 @@ export const updateProductSchema = z.object({
     .number()
     .min(0, 'Harga tidak boleh negatif')
     .max(999999.99, 'Harga terlalu tinggi')
+    .optional(),
+  factoryPrice: z
+    .number()
+    .min(0, 'Factory price tidak boleh negatif')
+    .max(999999.99, 'Factory price terlalu tinggi')
     .optional(),
   unit: z
     .string()

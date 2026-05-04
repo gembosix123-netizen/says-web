@@ -27,6 +27,9 @@ interface SalesApiItem {
   quantity?: number;
   subtotal?: number;
   price?: number;
+  factoryPrice?: number;
+  commissionType?: string | null;
+  commissionAmount?: number;
 }
 
 interface SalesApiRecord {
@@ -36,6 +39,7 @@ interface SalesApiRecord {
   customer?: { id?: string; name?: string };
   total?: number;
   total_amount?: number;
+  payment_method?: string;
   created_at?: string;
   createdAt?: string;
   items?: SalesApiItem[];
@@ -54,6 +58,11 @@ interface StatsData {
   weeklyData: WeeklyData[];
   monthlyTarget: number;
   monthlyAchieved: number;
+  monthlyCommission: {
+    total: number;
+    cash: number;
+    credit: number;
+  };
   topCustomers: { name: string; totalSpent: number; orders: number }[];
   topProducts: { name: string; quantity: number; revenue: number }[];
 }
@@ -126,6 +135,35 @@ export default function SalesStatsPage() {
 
       // Calculate monthly stats
       const monthRevenue = month.reduce((sum, s) => sum + (s.total_amount || 0), 0);
+      const monthCommission = month.reduce(
+        (acc, sale) => {
+          const mode = sale.payment_method === 'bill_to_bill' ? 'credit' : 'cash';
+          const itemCommission = (sale.items || []).reduce((sum, item) => {
+            const explicit = Number(item.commissionAmount || 0);
+            if (explicit > 0) return sum + explicit;
+
+            const qty = Number(item.quantity || 0);
+            const unitPrice = Number(item.price || 0);
+            const sub = Number(item.subtotal || unitPrice * qty);
+            const rawFp = item.factoryPrice;
+            const factory =
+              rawFp !== undefined &&
+              rawFp !== null &&
+              Number.isFinite(Number(rawFp)) &&
+              Number(rawFp) > 0
+                ? Number(rawFp)
+                : unitPrice;
+            if (mode === 'credit') return sum + (sub * 0.004);
+            return sum + Math.max(0, (unitPrice - factory) * qty);
+          }, 0);
+
+          if (mode === 'credit') acc.credit += itemCommission;
+          else acc.cash += itemCommission;
+          acc.total += itemCommission;
+          return acc;
+        },
+        { total: 0, cash: 0, credit: 0 }
+      );
 
       // Weekly data by day
       const dayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'];
@@ -195,6 +233,7 @@ export default function SalesStatsPage() {
         weeklyData,
         monthlyTarget: 50000, // Set your target here
         monthlyAchieved: monthRevenue,
+        monthlyCommission: monthCommission,
         topCustomers,
         topProducts
       });
@@ -341,6 +380,30 @@ export default function SalesStatsPage() {
                   </p>
                 </div>
               </div>
+            </Card>
+
+            <Card className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Target size={20} className="text-cyan-400" />
+                <h3 className="font-semibold text-white">Komisen Bulan Ini</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-lg bg-slate-900/50 border border-slate-700 p-3">
+                  <p className="text-xs text-slate-400">Jumlah Komisen</p>
+                  <p className="text-lg font-bold text-cyan-300">{formatCurrency(stats.monthlyCommission.total)}</p>
+                </div>
+                <div className="rounded-lg bg-slate-900/50 border border-slate-700 p-3">
+                  <p className="text-xs text-slate-400">Komisen Tunai</p>
+                  <p className="text-lg font-bold text-emerald-300">{formatCurrency(stats.monthlyCommission.cash)}</p>
+                </div>
+                <div className="rounded-lg bg-slate-900/50 border border-slate-700 p-3">
+                  <p className="text-xs text-slate-400">Komisen Kredit</p>
+                  <p className="text-lg font-bold text-amber-300">{formatCurrency(stats.monthlyCommission.credit)}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 mt-3">
+                Tunai dikira dari margin (harga jual - factory), kredit dikira 0.4% sementara menunggu payout rasmi.
+              </p>
             </Card>
 
             {/* Weekly Chart */}
