@@ -105,6 +105,10 @@ export function normalizeBranchLabel(value?: string | null): string {
     .toLowerCase();
 }
 
+function compactBranchLabel(value: string): string {
+  return value.replace(/[^a-z0-9]+/g, '');
+}
+
 /**
  * True when two branch labels refer to the same operating branch.
  * Treats KK ↔ Kota Kinabalu and KB ↔ Kinabatangan as equivalent (legacy/alternate spellings).
@@ -113,6 +117,7 @@ function isKotaKinabaluBucket(n: string): boolean {
   if (!n) return false;
   if (n === 'kota kinabalu') return true;
   if (n.includes('kota') && n.includes('kinabalu')) return true;
+  if (compactBranchLabel(n) === 'kk') return true;
   return /\bkk\b/.test(n);
 }
 
@@ -120,6 +125,7 @@ function isKinabatanganBucket(n: string): boolean {
   if (!n) return false;
   if (n === 'kinabatangan') return true;
   if (n.includes('kinabatangan')) return true;
+  if (compactBranchLabel(n) === 'kb') return true;
   return /\bkb\b/.test(n);
 }
 
@@ -134,6 +140,15 @@ export function branchLabelsEquivalent(a?: string | null, b?: string | null): bo
   if (isKinabatanganBucket(left) && isKinabatanganBucket(right)) return true;
 
   return false;
+}
+
+export function canonicalBranchLabel(value?: string | null): Branch | undefined {
+  const normalized = normalizeBranchLabel(value);
+  if (!normalized) return undefined;
+  if (isKotaKinabaluBucket(normalized)) return 'Kota Kinabalu';
+  if (isKinabatanganBucket(normalized)) return 'Kinabatangan';
+  if (normalized === 'hq' || normalized === 'headquarters') return 'HQ';
+  return undefined;
 }
 
 /**

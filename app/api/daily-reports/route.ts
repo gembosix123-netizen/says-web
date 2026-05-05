@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { DailyReport } from '@/types';
+import { branchLabelsEquivalent, canonicalBranchLabel } from '@/lib/branchPermissions';
 
 function getSessionUser(request: Request): { id: string; role: string; branch?: string; name?: string } | null {
   try {
@@ -16,20 +17,23 @@ function canReview(role?: string) {
   return role === 'Main Admin' || role === 'Admin';
 }
 
-/** Loose branch match — sama seperti /api/sales (KK vs Kota Kinabalu, spacing). */
-function normalizeBranchValue(value?: string | null): string {
-  return String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
+function branchMatches(reportBranch: unknown, expectedBranch: unknown): boolean {
+  return branchLabelsEquivalent(
+    typeof reportBranch === 'string' ? reportBranch : String(reportBranch || ''),
+    typeof expectedBranch === 'string' ? expectedBranch : String(expectedBranch || '')
+  );
 }
 
-function branchMatches(reportBranch: unknown, expectedBranch: unknown): boolean {
-  const left = normalizeBranchValue(reportBranch as string | null);
-  const right = normalizeBranchValue(expectedBranch as string | null);
-  if (!right || right === 'all') return true;
-  if (!left) return false;
-  return left === right;
+function resolveReportBranch(user: { role: string; branch?: string }, bodyBranch: unknown, existingBranch?: string): DailyReport['branch'] {
+  const sessionBranch = canonicalBranchLabel(user.branch);
+  const submittedBranch = canonicalBranchLabel(typeof bodyBranch === 'string' ? bodyBranch : undefined);
+  const previousBranch = canonicalBranchLabel(existingBranch);
+
+  if (user.role === 'Sales' || user.role === 'Merchandiser') {
+    return (sessionBranch || submittedBranch || previousBranch || 'HQ') as DailyReport['branch'];
+  }
+
+  return (submittedBranch || sessionBranch || previousBranch || 'HQ') as DailyReport['branch'];
 }
 
 type DailyStatus = DailyReport['status'];
@@ -217,7 +221,7 @@ export async function POST(request: NextRequest) {
     id: existing?.id || crypto.randomUUID(),
     userId: reportUserId,
     userName: String(body.userName || user.name || existing?.userName || 'Unknown'),
-    branch: (body.branch || user.branch || existing?.branch || 'HQ') as DailyReport['branch'],
+    branch: resolveReportBranch(user, body.branch, existing?.branch),
     date: String(body.date),
     totalSales: Number(body.totalSales ?? existing?.totalSales ?? 0),
     totalCash: Number(body.totalCash ?? existing?.totalCash ?? 0),
