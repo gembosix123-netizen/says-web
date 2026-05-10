@@ -6,6 +6,21 @@ import { canManageProducts } from '@/lib/permissions';
 
 type BranchName = 'Kota Kinabalu' | 'Kinabatangan' | 'HQ';
 
+const toMoney = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** Minimum selling price from product row (factory floor). */
+const getProductFactoryFloor = (product: Record<string, unknown>): number => {
+  const fp = toMoney(product.factory_price);
+  if (Number.isFinite(fp) && fp > 0) return fp;
+  const cost = toMoney(product.cost);
+  if (Number.isFinite(cost) && cost > 0) return cost;
+  const list = toMoney(product.price);
+  return Number.isFinite(list) ? list : 0;
+};
+
 const normalizeBranch = (value: unknown): BranchName | null => {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw) return null;
@@ -20,8 +35,9 @@ const normalizeBranch = (value: unknown): BranchName | null => {
  * Returns price overrides. If product_id given, returns all overrides for that product.
  *
  * POST /api/products/prices
- * Body: { product_id, branch?, salesman_id?, price, notes? }
- * Upserts a price override.
+ * Body (legacy): { product_id, branch?, salesman_id?, price, notes? }
+ * Body (tiers): { product_id, branch?, salesman_id?, price_high, price_medium, price_low, notes? }
+ *   — validates tiers >= product factory price and high >= medium >= low; sets legacy `price` = medium.
  *
  * DELETE /api/products/prices?id=X
  * Removes a price override (revert to default).
@@ -71,7 +87,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { product_id, branch, salesman_id, price, notes } = body;
+  const { product_id, branch, salesman_id, price, price_high, price_medium, price_low, notes } = body;
   const requestedBranch = normalizeBranch(branch);
   const branchScope = role === 'Main Admin' ? requestedBranch : userBranch;
 
@@ -82,22 +98,90 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Tidak dibenarkan akses branch lain' }, { status: 403 });
   }
 
-  if (!product_id || price == null) {
-    return NextResponse.json({ error: 'product_id and price required' }, { status: 400 });
+  if (!product_id) {
+    return NextResponse.json({ error: 'product_id required' }, { status: 400 });
   }
 
-  if (Number(price) < 0) {
-    return NextResponse.json({ error: 'Harga tidak boleh negatif' }, { status: 400 });
-  }
-
-  const record = {
-    product_id,
-    branch: branchScope,
-    salesman_id: salesman_id || null,
-    price: Number(price),
-    notes: notes || null,
-    created_by: user.id,
+  const tierFieldProvided = (v: unknown) => {
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'string' && v.trim() === '') return false;
+    return true;
   };
+
+  const useTiers =
+    tierFieldProvided(price_high) && tierFieldProvided(price_medium) && tierFieldProvided(price_low);
+
+  if (!useTiers && price == null) {
+    return NextResponse.json({ error: 'product_id and price required (or price_high/medium/low)' }, { status: 400 });
+  }
+
+  const { data: productRow, error: productErr } = await supabaseAdmin
+    .from('products')
+    .select('id,factory_price,cost,price')
+    .eq('id', product_id)
+    .maybeSingle();
+
+  if (productErr || !productRow) {
+    return NextResponse.json({ error: 'Produk tidak dijumpai' }, { status: 404 });
+  }
+
+  const floor = getProductFactoryFloor(productRow as Record<string, unknown>);
+
+  let record: Record<string, unknown>;
+
+  if (useTiers) {
+    const h = Number(price_high);
+    const m = Number(price_medium);
+    const l = Number(price_low);
+
+    if (![h, m, l].every((n) => Number.isFinite(n) && n >= 0)) {
+      return NextResponse.json({ error: 'Harga tier tidak sah' }, { status: 400 });
+    }
+    if (l < floor || m < floor || h < floor) {
+      return NextResponse.json(
+        { error: `Semua tier mesti ≥ harga kilang (RM ${floor.toFixed(2)})` },
+        { status: 400 },
+      );
+    }
+    if (!(h >= m && m >= l)) {
+      return NextResponse.json({ error: 'Susunan tier: Tinggi ≥ Sederhana ≥ Rendah' }, { status: 400 });
+    }
+
+    record = {
+      product_id,
+      branch: branchScope,
+      salesman_id: salesman_id || null,
+      price: m,
+      price_high: h,
+      price_medium: m,
+      price_low: l,
+      notes: notes || null,
+      created_by: user.id,
+    };
+  } else {
+    const p = Number(price);
+    if (!Number.isFinite(p) || p < 0) {
+      return NextResponse.json({ error: 'Harga tidak boleh negatif' }, { status: 400 });
+    }
+    if (p < floor) {
+      return NextResponse.json(
+        { error: `Harga mesti ≥ harga kilang (RM ${floor.toFixed(2)})` },
+        { status: 400 },
+      );
+    }
+
+    record = {
+      product_id,
+      branch: branchScope,
+      salesman_id: salesman_id || null,
+      price: p,
+      price_high: null,
+      price_medium: null,
+      price_low: null,
+      notes: notes || null,
+      created_by: user.id,
+    };
+  }
 
   const { data, error } = await supabaseAdmin
     .from('product_prices')

@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Camera,
   X,
+  ChevronDown,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import jsPDF from 'jspdf';
@@ -42,6 +43,11 @@ interface Product {
   unit?: string;
   current_stock?: number;
   category?: string;
+  /** When true (van API), salesman must pick Tinggi/Sederhana/Rendah/Kilang — no free typing */
+  has_tier_pricing?: boolean;
+  price_high?: number;
+  price_medium?: number;
+  price_low?: number;
 }
 
 interface Customer {
@@ -55,11 +61,15 @@ interface Customer {
   branch?: string;
 }
 
+type CartPriceTier = 'high' | 'medium' | 'low' | 'factory' | 'list';
+
 interface CartItem {
   product: Product;
   quantity: number;
   unitPrice: number;
   factoryPrice: number;
+  /** Tier chosen for this line (controls unitPrice) */
+  priceTier: CartPriceTier;
 }
 
 interface ReturnItem {
@@ -252,6 +262,8 @@ export default function NewSalePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  /** Tarikan string semasa user taip qty (elak input nombor 'terjatuh' / tak boleh kosong sebentar) */
+  const [quantityDraft, setQuantityDraft] = useState<Record<string, string>>({});
   const [searchCustomer, setSearchCustomer] = useState('');
   const [searchProduct, setSearchProduct] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -332,6 +344,7 @@ export default function NewSalePage() {
           const resolvedStock = Number(product.stock ?? product.current_stock ?? 0);
           const factoryRaw = product.factory_price ?? product.factoryPrice;
           const costRaw = product.cost;
+          const hasTiers = Boolean(product.has_tier_pricing);
 
           return {
             id: String(product.id || ''),
@@ -345,6 +358,10 @@ export default function NewSalePage() {
               costRaw !== undefined && costRaw !== null ? Number(costRaw) : undefined,
             unit: String(product.unit || 'unit'),
             stock: Number.isFinite(resolvedStock) ? resolvedStock : 0,
+            has_tier_pricing: hasTiers,
+            price_high: hasTiers ? Number(product.price_high ?? product.price) : undefined,
+            price_medium: hasTiers ? Number(product.price_medium ?? product.price) : undefined,
+            price_low: hasTiers ? Number(product.price_low ?? product.price) : undefined,
           };
         }));
       }
@@ -446,8 +463,31 @@ export default function NewSalePage() {
           : item
       ));
     } else {
-      setCart([...cart, { product, quantity: 1, unitPrice: Number(product.price || 0), factoryPrice: resolveFactoryPrice(product) }]);
+      const fp = resolveFactoryPrice(product);
+      const useTiers = Boolean(product.has_tier_pricing);
+      const defaultUnit = useTiers
+        ? Number(product.price_medium ?? product.price ?? 0)
+        : Number(product.price || 0);
+      setCart([
+        ...cart,
+        {
+          product,
+          quantity: 1,
+          unitPrice: defaultUnit,
+          factoryPrice: fp,
+          priceTier: useTiers ? 'medium' : 'list',
+        },
+      ]);
     }
+  };
+
+  const clearQuantityDraft = (productId: string) => {
+    setQuantityDraft((prev) => {
+      if (!(productId in prev)) return prev;
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
   };
 
   const updateQuantity = (productId: string, delta: number) => {
@@ -460,6 +500,8 @@ export default function NewSalePage() {
         return;
       }
     }
+
+    clearQuantityDraft(productId);
 
     setCart(cart.map(item => {
       if (item.product.id === productId) {
@@ -482,6 +524,8 @@ export default function NewSalePage() {
       return;
     }
 
+    clearQuantityDraft(productId);
+
     setCart((prev) =>
       prev
         .map((item) => (item.product.id === productId ? { ...item, quantity: normalizedQty } : item))
@@ -490,15 +534,29 @@ export default function NewSalePage() {
   };
 
   const removeFromCart = (productId: string) => {
+    clearQuantityDraft(productId);
     setCart(cart.filter(item => item.product.id !== productId));
   };
 
-  const setItemUnitPrice = (productId: string, nextPrice: number) => {
-    const normalized = Number.isFinite(nextPrice) ? Math.max(0, nextPrice) : 0;
+  const setCartPriceTier = (productId: string, tier: CartPriceTier) => {
     setCart((prev) =>
-      prev.map((item) =>
-        item.product.id === productId ? { ...item, unitPrice: normalized } : item
-      )
+      prev.map((item) => {
+        if (item.product.id !== productId) return item;
+        const p = item.product;
+        let nextPrice = item.unitPrice;
+        if (tier === 'factory') {
+          nextPrice = item.factoryPrice;
+        } else if (tier === 'list') {
+          nextPrice = Number(p.price || 0);
+        } else if (tier === 'high') {
+          nextPrice = Number(p.price_high ?? p.price ?? 0);
+        } else if (tier === 'medium') {
+          nextPrice = Number(p.price_medium ?? p.price ?? 0);
+        } else if (tier === 'low') {
+          nextPrice = Number(p.price_low ?? p.price ?? 0);
+        }
+        return { ...item, unitPrice: nextPrice, priceTier: tier };
+      })
     );
   };
 
@@ -1579,7 +1637,16 @@ export default function NewSalePage() {
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <p className="font-semibold text-white">{product.name}</p>
-                          <p className="text-purple-400 font-bold">RM {product.price?.toFixed(2)}</p>
+                          {product.has_tier_pricing &&
+                          product.price_low != null &&
+                          product.price_high != null ? (
+                            <p className="text-purple-400 font-bold text-xs leading-tight">
+                              RM {product.price_low.toFixed(2)} – {product.price_high.toFixed(2)}
+                              <span className="block text-white/40 font-normal">3 tier + kilang</span>
+                            </p>
+                          ) : (
+                            <p className="text-purple-400 font-bold">RM {product.price?.toFixed(2)}</p>
+                          )}
                           <p className="text-white/30 text-xs uppercase tracking-wide mt-1">{product.unit || 'unit'}</p>
                         </div>
                         <Button
@@ -1989,58 +2056,130 @@ export default function NewSalePage() {
                         <div className="flex justify-between items-start mb-2">
                           <p className="font-medium text-white text-sm">{item.product.name}</p>
                           <button
+                            type="button"
                             onClick={() => removeFromCart(item.product.id)}
                             className="text-red-400 hover:text-red-300"
                           >
                             <Trash2 size={14} />
                           </button>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-600/50 bg-slate-900/40 px-1 py-0.5">
                             <button
+                              type="button"
+                              aria-label="Kurang kuantiti"
                               onClick={() => updateQuantity(item.product.id, -1)}
-                              className="w-6 h-6 rounded bg-slate-700 flex items-center justify-center text-white hover:bg-slate-600"
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-700 text-white hover:bg-slate-600 active:bg-slate-500"
                             >
-                              <Minus size={12} />
+                              <Minus size={14} strokeWidth={2.5} />
                             </button>
                             <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={item.quantity}
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              aria-label="Kuantiti"
+                              value={
+                                quantityDraft[item.product.id] !== undefined
+                                  ? quantityDraft[item.product.id]
+                                  : String(item.quantity)
+                              }
                               onChange={(e) => {
-                                const raw = Number(e.target.value);
-                                if (!Number.isFinite(raw)) return;
-                                setQuantityExact(item.product.id, raw);
+                                const v = e.target.value;
+                                if (v === '' || /^\d+$/.test(v)) {
+                                  setQuantityDraft((prev) => ({
+                                    ...prev,
+                                    [item.product.id]: v,
+                                  }));
+                                }
                               }}
-                              className="w-14 h-6 rounded bg-slate-700 text-white text-center text-sm border border-slate-600 focus:outline-none focus:border-blue-500"
+                              onFocus={(e) => e.target.select()}
+                              onBlur={() => {
+                                const id = item.product.id;
+                                setQuantityDraft((prev) => {
+                                  const raw = prev[id];
+                                  const next = { ...prev };
+                                  delete next[id];
+                                  if (raw !== undefined) {
+                                    const t = String(raw).trim();
+                                    if (t !== '') {
+                                      const n = parseInt(t, 10);
+                                      if (Number.isFinite(n) && n >= 0) {
+                                        queueMicrotask(() => setQuantityExact(id, n));
+                                      }
+                                    }
+                                  }
+                                  return next;
+                                });
+                              }}
+                              className="h-8 w-11 min-w-[2.75rem] rounded-md border border-slate-600 bg-slate-800 px-1 text-center text-sm font-semibold tabular-nums text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/35"
                             />
                             <button
+                              type="button"
+                              aria-label="Tambah kuantiti"
                               onClick={() => updateQuantity(item.product.id, 1)}
-                              className="w-6 h-6 rounded bg-slate-700 flex items-center justify-center text-white hover:bg-slate-600"
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-700 text-white hover:bg-slate-600 active:bg-slate-500"
                             >
-                              <Plus size={12} />
+                              <Plus size={14} strokeWidth={2.5} />
                             </button>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={item.unitPrice}
-                              onChange={(e) => setItemUnitPrice(item.product.id, Number(e.target.value))}
-                              className="w-20 h-7 rounded bg-slate-700 text-white text-center text-xs border border-slate-600 focus:outline-none focus:border-blue-500"
-                              title={`Factory: RM ${item.factoryPrice.toFixed(2)}`}
+                          <p className="shrink-0 text-right text-sm font-semibold tabular-nums text-blue-400">
+                            RM {(item.unitPrice * item.quantity).toFixed(2)}
+                          </p>
+                        </div>
+                        <div className="mt-2">
+                          <span className="mb-1 block text-[10px] uppercase tracking-wide text-slate-400">
+                            Harga unit
+                          </span>
+                          <div className="relative">
+                            <select
+                              aria-label="Pilih harga unit"
+                              value={item.priceTier}
+                              onChange={(e) =>
+                                setCartPriceTier(item.product.id, e.target.value as CartPriceTier)
+                              }
+                              className="w-full appearance-none rounded-lg border border-slate-600 bg-slate-900 py-2 pl-2.5 pr-9 text-xs text-white outline-none transition-colors hover:border-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+                            >
+                              {item.product.has_tier_pricing ? (
+                                <>
+                                  <option value="high">
+                                    Tinggi — RM {Number(item.product.price_high ?? 0).toFixed(2)}
+                                  </option>
+                                  <option value="medium">
+                                    Sederhana — RM {Number(item.product.price_medium ?? 0).toFixed(2)}
+                                  </option>
+                                  <option value="low">
+                                    Rendah — RM {Number(item.product.price_low ?? 0).toFixed(2)}
+                                  </option>
+                                  <option value="factory">
+                                    Kilang — RM {item.factoryPrice.toFixed(2)}
+                                  </option>
+                                </>
+                              ) : (
+                                <>
+                                  <option value="list">
+                                    Jual — RM {Number(item.product.price ?? 0).toFixed(2)}
+                                  </option>
+                                  <option value="factory">
+                                    Kilang — RM {item.factoryPrice.toFixed(2)}
+                                  </option>
+                                </>
+                              )}
+                            </select>
+                            <ChevronDown
+                              size={14}
+                              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                              aria-hidden
                             />
-                            <p className="text-blue-400 font-semibold text-sm">
-                              RM {(item.unitPrice * item.quantity).toFixed(2)}
-                            </p>
                           </div>
                         </div>
                         <div className="mt-2 text-xs text-slate-400 flex items-center justify-between">
                           <span>Factory: RM {item.factoryPrice.toFixed(2)}</span>
                           <span>
-                            Margin: RM {Math.max(0, (item.unitPrice - item.factoryPrice) * item.quantity).toFixed(2)}
+                            Margin: RM{' '}
+                            {Math.max(
+                              0,
+                              (item.unitPrice - item.factoryPrice) * item.quantity,
+                            ).toFixed(2)}
                           </span>
                         </div>
                       </div>

@@ -15,6 +15,9 @@ interface PriceOverride {
   salesman_id: string | null;
   salesman_name?: string;
   price: number;
+  price_high?: number | null;
+  price_medium?: number | null;
+  price_low?: number | null;
   notes?: string;
 }
 
@@ -37,7 +40,9 @@ export default function AdminProductsPage() {
   const [priceOverrides, setPriceOverrides] = useState<Record<string, PriceOverride[]>>({});
   const [salesmen, setSalesmen] = useState<SalesmanUser[]>([]);
   const [newPriceForm, setNewPriceForm] = useState<Record<string, { branch: string; price: string; notes: string }>>({}); 
-  const [newSalesmanPriceForm, setNewSalesmanPriceForm] = useState<Record<string, { salesman_id: string; price: string; notes: string }>>({});
+  const [newSalesmanPriceForm, setNewSalesmanPriceForm] = useState<
+    Record<string, { salesman_id: string; price_high: string; price_medium: string; price_low: string; notes: string }>
+  >({});
   const [stockInModal, setStockInModal] = useState<{ id: string; name: string; current: number } | null>(null);
   const [stockInQty, setStockInQty] = useState('');
   const [stockInNotes, setStockInNotes] = useState('');
@@ -272,23 +277,49 @@ export default function AdminProductsPage() {
       setExpandedPricing(productId);
       await Promise.all([loadPriceOverrides(productId), loadSalesmen()]);
       setNewPriceForm((prev) => ({ ...prev, [productId]: { branch: ALL_BRANCHES[0], price: '', notes: '' } }));
-      setNewSalesmanPriceForm((prev) => ({ ...prev, [productId]: { salesman_id: '', price: '', notes: '' } }));
+      setNewSalesmanPriceForm((prev) => ({
+        ...prev,
+        [productId]: { salesman_id: '', price_high: '', price_medium: '', price_low: '', notes: '' },
+      }));
       setPricingTab((prev) => ({ ...prev, [productId]: prev[productId] || 'branch' }));
     }
   };
 
-  const saveSalesmanPriceOverride = async (productId: string) => {
+  const saveSalesmanPriceOverride = async (productId: string, factoryFloor: number) => {
     const f = newSalesmanPriceForm[productId];
     if (!f?.salesman_id) return addToast('Sila pilih salesman', 'error');
-    if (!f?.price || Number(f.price) <= 0) return addToast('Harga khas mesti lebih dari 0', 'error');
+    const h = Number(f.price_high);
+    const m = Number(f.price_medium);
+    const l = Number(f.price_low);
+    if (![h, m, l].every((n) => Number.isFinite(n) && n > 0)) {
+      return addToast('Isi Tinggi, Sederhana, dan Rendah (RM)', 'error');
+    }
+    if (l < factoryFloor || m < factoryFloor || h < factoryFloor) {
+      return addToast(`Semua tier mesti ≥ harga kilang RM ${factoryFloor.toFixed(2)}`, 'error');
+    }
+    if (!(h >= m && m >= l)) {
+      return addToast('Susunan: Tinggi ≥ Sederhana ≥ Rendah', 'error');
+    }
+    const sm = salesmen.find((s) => s.id === f.salesman_id);
+    const branchForRow = sm?.branch?.trim();
+    if (!branchForRow) return addToast('Salesman tiada cawangan — tidak boleh simpan harga', 'error');
+
     const res = await fetch('/api/products/prices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_id: productId, salesman_id: f.salesman_id, branch: null, price: Number(f.price), notes: f.notes || null }),
+      body: JSON.stringify({
+        product_id: productId,
+        salesman_id: f.salesman_id,
+        branch: branchForRow,
+        price_high: h,
+        price_medium: m,
+        price_low: l,
+        notes: f.notes?.trim() || null,
+      }),
     });
     const data = await res.json();
     if (!res.ok) return addToast(data?.error || 'Gagal simpan harga', 'error');
-    addToast('Harga khas salesman disimpan', 'success');
+    addToast('Harga tier salesman disimpan', 'success');
     await loadPriceOverrides(productId);
   };
 
@@ -1010,23 +1041,43 @@ export default function AdminProductsPage() {
                       )}
 
                       {/* Salesman Pricing Tab */}
-                      {pricingTab[p.id] === 'salesman' && (
+                      {pricingTab[p.id] === 'salesman' && (() => {
+                        const factoryFloor =
+                          Number(p.factory_price ?? p.cost ?? 0) > 0
+                            ? Number(p.factory_price ?? p.cost)
+                            : Number(p.price ?? 0);
+                        return (
                         <div>
-                          <p className="text-xs text-slate-400 mb-3">
-                            Harga khas untuk salesman tertentu — mengatasi harga cawangan dan harga default.
+                          <p className="text-xs text-slate-400 mb-2">
+                            Tetapkan 3 tier jualan untuk salesman — semua mesti ≥ harga kilang produk (RM {factoryFloor.toFixed(2)}).
+                            Mengatasi harga cawangan dan default.
                           </p>
                           {(priceOverrides[p.id] || []).filter(ov => ov.salesman_id).length > 0 ? (
                             <div className="flex flex-wrap gap-2 mb-3">
                               {priceOverrides[p.id].filter(ov => ov.salesman_id).map((ov) => {
                                 const salesman = salesmen.find(s => s.id === ov.salesman_id);
+                                const tierRow =
+                                  ov.price_high != null &&
+                                  ov.price_medium != null &&
+                                  ov.price_low != null;
                                 return (
-                                  <div key={ov.id} className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded-lg text-sm">
-                                    <span className="text-orange-300 font-medium">{salesman?.name || ov.salesman_id}</span>
-                                    {salesman?.branch && <span className="text-slate-500 text-xs">({salesman.branch})</span>}
-                                    <span className="text-green-400 font-bold">RM {Number(ov.price).toFixed(2)}</span>
+                                  <div key={ov.id} className="flex flex-col gap-1 px-3 py-2 bg-slate-700 rounded-lg text-sm min-w-[200px]">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-orange-300 font-medium">{salesman?.name || ov.salesman_id}</span>
+                                      {salesman?.branch && <span className="text-slate-500 text-xs">({salesman.branch})</span>}
+                                      <button type="button" onClick={() => deletePriceOverride(p.id, ov.id)}
+                                        className="text-red-400 hover:text-red-300 ml-auto"><X size={12} /></button>
+                                    </div>
+                                    {tierRow ? (
+                                      <div className="text-xs text-slate-300 space-x-2">
+                                        <span>T: <span className="text-green-400 font-semibold">RM {Number(ov.price_high).toFixed(2)}</span></span>
+                                        <span>S: <span className="text-green-400 font-semibold">RM {Number(ov.price_medium).toFixed(2)}</span></span>
+                                        <span>R: <span className="text-green-400 font-semibold">RM {Number(ov.price_low).toFixed(2)}</span></span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-green-400 font-bold">RM {Number(ov.price).toFixed(2)} <span className="text-slate-500 font-normal text-xs">(legacy)</span></span>
+                                    )}
                                     {ov.notes && <span className="text-slate-500 text-xs">({ov.notes})</span>}
-                                    <button onClick={() => deletePriceOverride(p.id, ov.id)}
-                                      className="text-red-400 hover:text-red-300 ml-1"><X size={12} /></button>
                                   </div>
                                 );
                               })}
@@ -1039,7 +1090,16 @@ export default function AdminProductsPage() {
                               <label className="text-xs text-slate-400">Salesman</label>
                               <select
                                 value={newSalesmanPriceForm[p.id]?.salesman_id || ''}
-                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({ ...prev, [p.id]: { ...prev[p.id], salesman_id: e.target.value } }))}
+                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({
+                                  ...prev,
+                                  [p.id]: {
+                                    salesman_id: e.target.value,
+                                    price_high: prev[p.id]?.price_high ?? '',
+                                    price_medium: prev[p.id]?.price_medium ?? '',
+                                    price_low: prev[p.id]?.price_low ?? '',
+                                    notes: prev[p.id]?.notes ?? '',
+                                  },
+                                }))}
                                 className="p-1.5 rounded bg-slate-700 text-white border border-slate-600 text-sm outline-none min-w-[160px]">
                                 <option value="">-- Pilih Salesman --</option>
                                 {salesmen.map((s) => (
@@ -1048,26 +1108,41 @@ export default function AdminProductsPage() {
                               </select>
                             </div>
                             <div className="flex flex-col gap-1">
-                              <label className="text-xs text-slate-400">Harga Khas (RM)</label>
+                              <label className="text-xs text-slate-400">Tinggi (RM)</label>
                               <input type="number" min="0" step="0.01" placeholder="0.00"
-                                value={newSalesmanPriceForm[p.id]?.price || ''}
-                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({ ...prev, [p.id]: { ...prev[p.id], price: e.target.value } }))}
-                                className="w-28 p-1.5 rounded bg-slate-700 text-white border border-slate-600 text-sm outline-none" />
+                                value={newSalesmanPriceForm[p.id]?.price_high || ''}
+                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({ ...prev, [p.id]: { ...prev[p.id], salesman_id: prev[p.id]?.salesman_id ?? '', price_high: e.target.value, price_medium: prev[p.id]?.price_medium ?? '', price_low: prev[p.id]?.price_low ?? '', notes: prev[p.id]?.notes ?? '' } }))}
+                                className="w-24 p-1.5 rounded bg-slate-700 text-white border border-slate-600 text-sm outline-none" />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs text-slate-400">Sederhana (RM)</label>
+                              <input type="number" min="0" step="0.01" placeholder="0.00"
+                                value={newSalesmanPriceForm[p.id]?.price_medium || ''}
+                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({ ...prev, [p.id]: { ...prev[p.id], salesman_id: prev[p.id]?.salesman_id ?? '', price_high: prev[p.id]?.price_high ?? '', price_medium: e.target.value, price_low: prev[p.id]?.price_low ?? '', notes: prev[p.id]?.notes ?? '' } }))}
+                                className="w-24 p-1.5 rounded bg-slate-700 text-white border border-slate-600 text-sm outline-none" />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs text-slate-400">Rendah (RM)</label>
+                              <input type="number" min="0" step="0.01" placeholder="0.00"
+                                value={newSalesmanPriceForm[p.id]?.price_low || ''}
+                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({ ...prev, [p.id]: { ...prev[p.id], salesman_id: prev[p.id]?.salesman_id ?? '', price_high: prev[p.id]?.price_high ?? '', price_medium: prev[p.id]?.price_medium ?? '', price_low: e.target.value, notes: prev[p.id]?.notes ?? '' } }))}
+                                className="w-24 p-1.5 rounded bg-slate-700 text-white border border-slate-600 text-sm outline-none" />
                             </div>
                             <div className="flex flex-col gap-1">
                               <label className="text-xs text-slate-400">Nota (pilihan)</label>
-                              <input placeholder="cth: harga vip"
+                              <input placeholder="cth: set SKU X"
                                 value={newSalesmanPriceForm[p.id]?.notes || ''}
-                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({ ...prev, [p.id]: { ...prev[p.id], notes: e.target.value } }))}
+                                onChange={(e) => setNewSalesmanPriceForm((prev) => ({ ...prev, [p.id]: { ...prev[p.id], salesman_id: prev[p.id]?.salesman_id ?? '', price_high: prev[p.id]?.price_high ?? '', price_medium: prev[p.id]?.price_medium ?? '', price_low: prev[p.id]?.price_low ?? '', notes: e.target.value } }))}
                                 className="w-36 p-1.5 rounded bg-slate-700 text-white border border-slate-600 text-sm outline-none" />
                             </div>
-                            <button onClick={() => saveSalesmanPriceOverride(p.id)}
+                            <button type="button" onClick={() => saveSalesmanPriceOverride(p.id, factoryFloor)}
                               className="flex items-center gap-1 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded text-sm font-medium transition-colors">
                               <Plus size={14} /> Simpan Harga
                             </button>
                           </div>
                         </div>
-                      )}
+                        );
+                      })()}
                     </td>
                   </tr>
                 )}

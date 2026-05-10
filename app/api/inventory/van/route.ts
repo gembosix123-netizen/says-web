@@ -88,30 +88,58 @@ export async function GET(request: NextRequest) {
     const products = await getActiveProducts();
     const productsById = new Map(products.map((product) => [product.id, product]));
 
-    // Load branch/salesman price overrides from Supabase
-    const priceOverrides: Record<string, number> = {};
+    // Load branch/salesman price overrides from Supabase (single price and/or H/M/L tiers)
+    const branchTierByProduct: Record<string, { h: number; m: number; l: number }> = {};
+    const branchPriceByProduct: Record<string, number> = {};
+    const smTierByProduct: Record<string, { h: number; m: number; l: number }> = {};
+    const smPriceByProduct: Record<string, number> = {};
+
+    const hasFullTiers = (row: {
+      price_high?: unknown;
+      price_medium?: unknown;
+      price_low?: unknown;
+    }) =>
+      row.price_high != null &&
+      row.price_medium != null &&
+      row.price_low != null;
+
     if (supabaseAdmin) {
-      // Priority 1: salesman-specific price
       const { data: salesmanPrices } = await supabaseAdmin
         .from('product_prices')
-        .select('product_id, price')
+        .select('product_id, price, price_high, price_medium, price_low')
         .eq('salesman_id', userId);
 
-      // Priority 2: branch-level price
       const { data: branchPrices } = user.branch
         ? await supabaseAdmin
             .from('product_prices')
-            .select('product_id, price')
+            .select('product_id, price, price_high, price_medium, price_low')
             .eq('branch', user.branch)
             .is('salesman_id', null)
         : { data: [] };
 
-      // Apply branch prices first, then salesman prices override on top
       for (const row of branchPrices || []) {
-        priceOverrides[row.product_id] = toSafeNumber(row.price);
+        const pid = row.product_id as string;
+        if (hasFullTiers(row)) {
+          branchTierByProduct[pid] = {
+            h: toSafeNumber(row.price_high),
+            m: toSafeNumber(row.price_medium),
+            l: toSafeNumber(row.price_low),
+          };
+        } else {
+          branchPriceByProduct[pid] = toSafeNumber(row.price);
+        }
       }
       for (const row of salesmanPrices || []) {
-        priceOverrides[row.product_id] = toSafeNumber(row.price);
+        const pid = row.product_id as string;
+        if (hasFullTiers(row)) {
+          smTierByProduct[pid] = {
+            h: toSafeNumber(row.price_high),
+            m: toSafeNumber(row.price_medium),
+            l: toSafeNumber(row.price_low),
+          };
+        } else {
+          smPriceByProduct[pid] = toSafeNumber(row.price);
+        }
       }
     }
 
@@ -121,13 +149,26 @@ export async function GET(request: NextRequest) {
         const product = productsById.get(productId);
         if (!product) return null;
 
-        const effectivePrice = priceOverrides[productId] ?? toSafeNumber(product.price);
+        const listDefault = toSafeNumber(product.price);
+
+        const tiers = smTierByProduct[productId] || branchTierByProduct[productId];
+        const singleOverride =
+          smPriceByProduct[productId] !== undefined
+            ? smPriceByProduct[productId]
+            : branchPriceByProduct[productId];
+
+        const effectivePrice = tiers ? tiers.m : (singleOverride !== undefined ? singleOverride : listDefault);
+        const hasTierPricing = Boolean(tiers);
 
         return {
           id: product.id,
           name: product.name,
           unit: product.unit || 'unit',
           price: effectivePrice,
+          price_high: hasTierPricing ? tiers.h : effectivePrice,
+          price_medium: hasTierPricing ? tiers.m : effectivePrice,
+          price_low: hasTierPricing ? tiers.l : effectivePrice,
+          has_tier_pricing: hasTierPricing,
           factory_price: product.factory_price,
           cost: product.cost,
           stock: quantity,
