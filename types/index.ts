@@ -249,6 +249,8 @@ export interface DailyReport {
   approvedMonthlyBy?: string;
   weeklySubmittedAt?: string;
   monthlySubmittedAt?: string;
+  /** Set when branch admin saves expenses into the report form (required before Send to Main Admin). */
+  branchExpensesSyncedAt?: string;
   updatedAt: string;
 }
 

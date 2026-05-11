@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { DailyReport } from '@/types';
+import { normalizeRole, type NormalizedRole } from '@/lib/roles';
+import {
+  canFinalApproveDailyReport,
+  canForwardDailyReportToHQ,
+  canSaveBranchDailyReport,
+} from '@/lib/permissions';
+import { branchLabelsEquivalent } from '@/lib/branchPermissions';
 
 function getSessionUser(request: Request): { id: string; role: string; branch?: string; name?: string } | null {
   try {
@@ -12,24 +19,13 @@ function getSessionUser(request: Request): { id: string; role: string; branch?: 
   }
 }
 
-function canReview(role?: string) {
-  return role === 'Main Admin' || role === 'Admin';
+function canReview(role: NormalizedRole | string) {
+  const r = typeof role === 'string' ? normalizeRole(role) : role;
+  return r === 'Main Admin' || r === 'Admin';
 }
 
-/** Loose branch match — sama seperti /api/sales (KK vs Kota Kinabalu, spacing). */
-function normalizeBranchValue(value?: string | null): string {
-  return String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
-}
-
-function branchMatches(reportBranch: unknown, expectedBranch: unknown): boolean {
-  const left = normalizeBranchValue(reportBranch as string | null);
-  const right = normalizeBranchValue(expectedBranch as string | null);
-  if (!right || right === 'all') return true;
-  if (!left) return false;
-  return left === right;
+function sessionRole(user: { role: string }): NormalizedRole {
+  return normalizeRole(user.role);
 }
 
 type DailyStatus = DailyReport['status'];
@@ -142,17 +138,18 @@ export async function GET(request: NextRequest) {
   const filtered = all.filter((report) => {
     if (status && normalizeStatus(report.status) !== normalizeStatus(status)) return false;
     if (date && report.date !== date) return false;
-    if (branch && branch !== 'all' && !branchMatches(report.branch, branch)) return false;
+    if (branch && branch !== 'all' && !branchLabelsEquivalent(report.branch, branch)) return false;
     if (userId && report.userId !== userId) return false;
     if (source && report.source !== source) return false;
     if (approvalStage && report.approvalStage !== approvalStage) return false;
     if (publishedOnly && !String(report.status).startsWith('approved_')) return false;
 
-    if (user.role === 'Sales' || user.role === 'Merchandiser') {
+    const r = sessionRole(user);
+    if (r === 'Sales' || r === 'Merchandiser') {
       return report.userId === user.id;
     }
-    if (user.role === 'Admin' && user.branch) {
-      return branchMatches(report.branch, user.branch);
+    if (r === 'Admin' && user.branch) {
+      return branchLabelsEquivalent(report.branch, user.branch);
     }
     return true;
   });
@@ -182,6 +179,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'date is required' }, { status: 400 });
   }
 
+  const normRole = sessionRole(user);
   const now = new Date().toISOString();
   const approvalStage = body.approvalStage === 'weekly' || body.approvalStage === 'monthly'
     ? body.approvalStage
@@ -189,7 +187,52 @@ export async function POST(request: NextRequest) {
   const source = body.source === 'sales' || body.source === 'merch' || body.source === 'settlement'
     ? body.source
     : 'manual';
-  const status = body.status === 'draft' ? 'draft' : getSubmittedStatus(approvalStage);
+
+  const reportUserId = String(body.userId || user.id);
+  if (normRole === 'Sales' && source === 'sales' && reportUserId !== user.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (normRole === 'Merchandiser' && source === 'merch' && reportUserId !== user.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const all = (await db.dailyReports.getAll()).map(mapLegacyRead);
+  const existing = all.find(
+    (item) =>
+      item.userId === reportUserId &&
+      item.date === String(body.date) &&
+      item.source === source
+  );
+
+  let status: DailyStatus;
+  let clearBranchSync = false;
+  if (normRole === 'Sales' && source === 'sales') {
+    if (
+      existing &&
+      existing.userId === user.id &&
+      !['draft', 'returned_daily'].includes(String(existing.status))
+    ) {
+      return NextResponse.json({ error: 'Laporan sudah diproses admin/HQ.' }, { status: 409 });
+    }
+    status = 'draft';
+    if (existing?.status === 'returned_daily' && existing.userId === user.id) {
+      clearBranchSync = true;
+    }
+  } else if (normRole === 'Merchandiser' && source === 'merch') {
+    if (
+      existing &&
+      existing.userId === user.id &&
+      !['draft', 'returned_daily'].includes(String(existing.status))
+    ) {
+      return NextResponse.json({ error: 'Laporan sudah diproses.' }, { status: 409 });
+    }
+    status = 'draft';
+    if (existing?.status === 'returned_daily' && existing.userId === user.id) {
+      clearBranchSync = true;
+    }
+  } else {
+    status = body.status === 'draft' ? 'draft' : getSubmittedStatus(approvalStage);
+  }
   const expenseLines = Array.isArray(body.expenseLines)
     ? body.expenseLines.map((line: Record<string, unknown>) => ({
       category: String(line.category || 'lain-lain'),
@@ -203,14 +246,6 @@ export async function POST(request: NextRequest) {
   const salesSnapshot = body.salesSnapshot && typeof body.salesSnapshot === 'object'
     ? body.salesSnapshot as DailyReport['salesSnapshot']
     : undefined;
-  const reportUserId = String(body.userId || user.id);
-  const all = (await db.dailyReports.getAll()).map(mapLegacyRead);
-  const existing = all.find(
-    (item) =>
-      item.userId === reportUserId &&
-      item.date === String(body.date) &&
-      item.source === source
-  );
 
   const newReport: DailyReport = {
     ...(existing || {}),
@@ -242,6 +277,7 @@ export async function POST(request: NextRequest) {
     liveSalesRefs: Array.isArray(body.liveSalesRefs)
       ? body.liveSalesRefs.map((id: unknown) => String(id))
       : (existing?.liveSalesRefs || []),
+    branchExpensesSyncedAt: clearBranchSync ? undefined : existing?.branchExpensesSyncedAt,
     submittedAt: existing?.submittedAt || now,
     weeklySubmittedAt: approvalStage === 'weekly' ? now : existing?.weeklySubmittedAt,
     monthlySubmittedAt: approvalStage === 'monthly' ? now : existing?.monthlySubmittedAt,
@@ -269,7 +305,9 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Report not found' }, { status: 404 });
   }
 
-  if ((user.role === 'Sales' || user.role === 'Merchandiser') && existing.userId !== user.id) {
+  const normRole = sessionRole(user);
+
+  if ((normRole === 'Sales' || normRole === 'Merchandiser') && existing.userId !== user.id) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -280,30 +318,116 @@ export async function PUT(request: NextRequest) {
   const requestedStatus = body.status ? normalizeStatus(body.status) : undefined;
   let nextStatus: DailyStatus = requestedStatus || existing.status;
 
-  if (action === 'submit_stage') {
-    if (user.role !== 'Sales' && user.role !== 'Merchandiser' && !canReview(user.role)) {
-      return NextResponse.json({ error: 'Only staff can submit reports' }, { status: 403 });
+  if (action === 'save_branch_report') {
+    if (!canSaveBranchDailyReport(normRole)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    nextStatus = getSubmittedStatus(approvalStage);
+    if (normRole === 'Admin' && user.branch && !branchLabelsEquivalent(existing.branch, user.branch)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    const stage = existing.approvalStage || 'daily';
+    const st = String(existing.status);
+    if (stage !== 'daily' || !['draft', 'returned_daily'].includes(st)) {
+      return NextResponse.json({ error: 'Invalid state for branch expense save' }, { status: 400 });
+    }
+    const expenseLines = Array.isArray(body.expenseLines)
+      ? body.expenseLines.map((line: Record<string, unknown>) => ({
+          category: String(line.category || 'lain-lain'),
+          description: String(line.description || ''),
+          amount: Number(line.amount || 0),
+          receiptImageUrls: Array.isArray(line.receiptImageUrls)
+            ? line.receiptImageUrls.map((url) => String(url))
+            : [],
+        }))
+      : existing.expenseLines || [];
+    const updatedSave: DailyReport = {
+      ...existing,
+      approvalStage,
+      expenseLines,
+      expensesTotal: computeExpensesTotal(expenseLines),
+      bankSlipUrls: Array.isArray(body.bankSlipUrls)
+        ? body.bankSlipUrls.map((url: unknown) => String(url))
+        : existing.bankSlipUrls || [],
+      cashProofUrls: Array.isArray(body.cashProofUrls)
+        ? body.cashProofUrls.map((url: unknown) => String(url))
+        : existing.cashProofUrls || [],
+      amountBankingManual: Number(body.amountBankingManual ?? existing.amountBankingManual ?? 0),
+      balancePtCashManual: Number(body.balancePtCashManual ?? existing.balancePtCashManual ?? 0),
+      totalTransfer: Number(body.totalTransfer ?? existing.totalTransfer ?? 0),
+      branchExpensesSyncedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await db.dailyReports.save(updatedSave);
+    return NextResponse.json({ success: true, report: updatedSave });
+  }
+
+  if (action === 'submit_stage') {
+    if (approvalStage === 'daily') {
+      const st = String(existing.status);
+      if (st === 'draft' || st === 'returned_daily') {
+        if (!canForwardDailyReportToHQ(normRole)) {
+          return NextResponse.json({ error: 'Hanya admin cawangan boleh hantar ke HQ.' }, { status: 403 });
+        }
+        if (normRole === 'Admin' && user.branch && !branchLabelsEquivalent(existing.branch, user.branch)) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+        if (!existing.branchExpensesSyncedAt) {
+          return NextResponse.json(
+            { error: 'Sila simpan perbelanjaan ke dalam laporan dahulu (admin cawangan).' },
+            { status: 400 }
+          );
+        }
+        nextStatus = 'submitted_daily';
+      } else {
+        return NextResponse.json({ error: 'Invalid submit transition for daily report' }, { status: 400 });
+      }
+    } else {
+      if (normRole !== 'Sales' && normRole !== 'Merchandiser' && !canReview(normRole)) {
+        return NextResponse.json({ error: 'Only staff can submit reports' }, { status: 403 });
+      }
+      nextStatus = getSubmittedStatus(approvalStage);
+    }
   } else if (action === 'approve_stage') {
-    if (!canReview(user.role)) {
+    if (approvalStage === 'daily') {
+      if (!canFinalApproveDailyReport(normRole)) {
+        return NextResponse.json({ error: 'Hanya Main Admin boleh lulus laporan harian.' }, { status: 403 });
+      }
+    } else if (!canReview(normRole)) {
       return NextResponse.json({ error: 'Only admin roles can approve reports' }, { status: 403 });
     }
     nextStatus = getApprovedStatus(approvalStage);
   } else if (action === 'return_stage') {
-    if (!canReview(user.role)) {
+    if (approvalStage === 'daily') {
+      if (!canFinalApproveDailyReport(normRole)) {
+        return NextResponse.json({ error: 'Hanya Main Admin boleh pulangkan laporan harian.' }, { status: 403 });
+      }
+    } else if (!canReview(normRole)) {
       return NextResponse.json({ error: 'Only admin roles can return reports' }, { status: 403 });
     }
     if (!String(body.reviewNotes || '').trim()) {
       return NextResponse.json({ error: 'Return reason is required' }, { status: 400 });
     }
     nextStatus = getReturnedStatus(approvalStage);
-  } else if (!requestedStatus) {
+  } else if (requestedStatus) {
+    if (normRole === 'Sales' || normRole === 'Merchandiser') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (
+      approvalStage === 'daily' &&
+      (String(requestedStatus).includes('approved') || String(requestedStatus).includes('returned'))
+    ) {
+      if (!canFinalApproveDailyReport(normRole)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+    } else if (
+      (String(requestedStatus).includes('approved') || String(requestedStatus).includes('returned')) &&
+      !canReview(normRole)
+    ) {
+      return NextResponse.json({ error: 'Only admin roles can review reports' }, { status: 403 });
+    }
+    nextStatus = requestedStatus;
+  } else {
     return NextResponse.json({ error: 'action or status is required' }, { status: 400 });
-  }
-
-  if ((String(nextStatus).includes('approved') || String(nextStatus).includes('returned')) && !canReview(user.role)) {
-    return NextResponse.json({ error: 'Only admin roles can review reports' }, { status: 403 });
   }
 
   const updated: DailyReport = {
@@ -328,6 +452,9 @@ export async function PUT(request: NextRequest) {
     returnedReason: String(nextStatus).startsWith('returned_')
       ? String(body.reviewNotes || existing.returnedReason || '')
       : existing.returnedReason,
+    branchExpensesSyncedAt: String(nextStatus).startsWith('returned_')
+      ? undefined
+      : existing.branchExpensesSyncedAt,
     updatedAt: new Date().toISOString(),
   };
 

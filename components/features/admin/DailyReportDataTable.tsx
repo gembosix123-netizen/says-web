@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import type { DailyReport } from '@/types';
+import type { NormalizedRole } from '@/lib/roles';
 import { openDailyReportPdfWindow } from '@/lib/dailyReportPdf';
 
 function formatMoney(value: number) {
@@ -30,20 +31,99 @@ type Row = Omit<Partial<DailyReport>, 'branch' | 'expenseLines'> & {
     amount: number;
     receiptImageUrls?: string[];
   }>;
+  status?: string;
+  branchExpensesSyncedAt?: string;
 };
+
+function statusBadge(st?: string) {
+  const s = String(st || '');
+  type BadgeCfg = { label: string; className: string; title?: string };
+  const map: Record<string, BadgeCfg> = {
+    draft: {
+      label: 'Draf',
+      title: 'Laporan draf cawangan — isi perbelanjaan, kemudian hantar ke Main Admin.',
+      className: 'bg-amber-950/60 text-amber-50 border-amber-500/50',
+    },
+    submitted_daily: {
+      label: 'Pending',
+      title: 'Menunggu kelulusan Main Admin',
+      className: 'bg-orange-950/55 text-orange-100 border-orange-600/50',
+    },
+    submitted: {
+      label: 'Pending',
+      title: 'Menunggu kelulusan Main Admin',
+      className: 'bg-orange-950/55 text-orange-100 border-orange-600/50',
+    },
+    reviewed: {
+      label: 'Pending',
+      title: 'Menunggu kelulusan Main Admin',
+      className: 'bg-orange-950/55 text-orange-100 border-orange-600/50',
+    },
+    approved_daily: {
+      label: 'Diluluskan',
+      title: 'Laporan telah diluluskan',
+      className: 'bg-green-950/65 text-green-50 border-green-500/55 shadow-sm shadow-green-900/20',
+    },
+    approved: {
+      label: 'Diluluskan',
+      title: 'Laporan telah diluluskan',
+      className: 'bg-green-950/65 text-green-50 border-green-500/55 shadow-sm shadow-green-900/20',
+    },
+    returned_daily: {
+      label: 'Ditolak',
+      title: 'Ditolak / dipulangkan ke cawangan',
+      className: 'bg-red-950/65 text-red-50 border-red-500/55 shadow-sm shadow-red-900/20',
+    },
+    returned: {
+      label: 'Ditolak',
+      title: 'Ditolak / dipulangkan ke cawangan',
+      className: 'bg-red-950/65 text-red-50 border-red-500/55 shadow-sm shadow-red-900/20',
+    },
+  };
+  const cfg: BadgeCfg = map[s] || {
+    label: s || '-',
+    className: 'bg-slate-800 text-slate-200 border-slate-600',
+  };
+  return (
+    <span
+      title={cfg.title}
+      className={`inline-flex max-w-full items-center justify-center whitespace-nowrap rounded-md border px-2 py-1 text-[10px] font-semibold leading-none tracking-wide ${cfg.className}`}
+    >
+      {cfg.label}
+    </span>
+  );
+}
 
 export function DailyReportDataTable({
   rows,
   loading,
   emptyText,
   onOpenReportPdf = openDailyReportPdfWindow,
+  showWorkflow = false,
+  viewerRole = '',
+  busyReportId = null,
+  onEditBranchExpenses,
+  onSendToHQ,
+  onApprove,
+  onReject,
+  onDetails,
 }: {
   rows: Row[];
   loading: boolean;
   emptyText: string;
   onOpenReportPdf?: (row: Row) => void;
+  showWorkflow?: boolean;
+  viewerRole?: NormalizedRole | '';
+  busyReportId?: string | null;
+  onEditBranchExpenses?: (row: Row) => void;
+  onSendToHQ?: (row: Row) => void;
+  onApprove?: (row: Row) => void;
+  onReject?: (row: Row) => void;
+  onDetails?: (row: Row) => void;
 }) {
   const [activeExpenseKey, setActiveExpenseKey] = useState<string | null>(null);
+
+  const colCount = showWorkflow ? 6 : 4;
 
   if (loading) return <p className="text-slate-400 text-sm">Memuatkan laporan...</p>;
 
@@ -54,14 +134,16 @@ export function DailyReportDataTable({
           <tr>
             <th className="px-2 py-2 text-left">Tarikh / Masa</th>
             <th className="px-2 py-2 text-left">Source</th>
+            {showWorkflow && <th className="px-2 py-2 text-left">Status</th>}
             <th className="px-2 py-2 text-left">PDF</th>
             <th className="px-2 py-2 text-left">Bukti</th>
+            {showWorkflow && <th className="px-2 py-2 text-left">Tindakan</th>}
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr className="border-b border-slate-800 text-slate-300">
-              <td className="px-2 py-3" colSpan={4}>
+              <td className="px-2 py-3" colSpan={colCount}>
                 {emptyText}
               </td>
             </tr>
@@ -78,6 +160,11 @@ export function DailyReportDataTable({
                 <td className="px-2 py-2 min-w-[90px]">
                   <span className="rounded bg-slate-700 px-2 py-1 text-xs uppercase">{(row as DailyReport).source || 'manual'}</span>
                 </td>
+                {showWorkflow && (
+                  <td className="px-2 py-2 align-top min-w-[100px]">
+                    {statusBadge(String((row as DailyReport).status))}
+                  </td>
+                )}
                 <td className="px-2 py-2 min-w-[84px]">
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -231,6 +318,78 @@ export function DailyReportDataTable({
                     );
                   })()}
                 </td>
+                {showWorkflow && (
+                  <td className="px-2 py-2 align-top min-w-[120px]">
+                    <div className="flex flex-col gap-1">
+                      {onDetails && (
+                        <button
+                          type="button"
+                          onClick={() => onDetails(row)}
+                          className="rounded border border-slate-600 bg-slate-800 px-2 py-1 text-[10px] text-slate-200 hover:bg-slate-700"
+                        >
+                          Semak butiran
+                        </button>
+                      )}
+                      {(viewerRole === 'Admin' || viewerRole === 'Main Admin') &&
+                        (row.status === 'draft' || row.status === 'returned_daily') && (
+                          <>
+                            {onEditBranchExpenses && (
+                              <button
+                                type="button"
+                                disabled={busyReportId === row.id}
+                                onClick={() => onEditBranchExpenses(row)}
+                                className="rounded bg-amber-700/90 px-2 py-1 text-[10px] font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+                              >
+                                Isi perbelanjaan
+                              </button>
+                            )}
+                            {onSendToHQ && (
+                              <button
+                                type="button"
+                                disabled={
+                                  busyReportId === row.id ||
+                                  !(row as DailyReport).branchExpensesSyncedAt
+                                }
+                                title={
+                                  (row as DailyReport).branchExpensesSyncedAt
+                                    ? 'Hantar ke Main Admin'
+                                    : 'Simpan perbelanjaan ke laporan dahulu'
+                                }
+                                onClick={() => onSendToHQ(row)}
+                                className="rounded bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
+                              >
+                                Hantar ke Main Admin
+                              </button>
+                            )}
+                          </>
+                        )}
+                      {viewerRole === 'Main Admin' && row.status === 'submitted_daily' && (
+                        <>
+                          {onApprove && (
+                            <button
+                              type="button"
+                              disabled={busyReportId === row.id}
+                              onClick={() => onApprove(row)}
+                              className="rounded bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                            >
+                              Lulus
+                            </button>
+                          )}
+                          {onReject && (
+                            <button
+                              type="button"
+                              disabled={busyReportId === row.id}
+                              onClick={() => onReject(row)}
+                              className="rounded bg-rose-700 px-2 py-1 text-[10px] font-semibold text-white hover:bg-rose-600 disabled:opacity-50"
+                            >
+                              Tolak
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </td>
+                )}
               </tr>
             ))
           )}

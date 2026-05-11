@@ -91,25 +91,6 @@ interface SessionUser {
   branch?: string;
 }
 
-// ─── Expense entry ────────────────────────────────────────────────────────────
-
-interface ExpenseEntry {
-  category: string;
-  description: string;
-  amount: string;
-  photos: File[];
-  photoPreviews: string[];
-}
-
-const EXPENSE_CATS = [
-  { value: 'minyak', label: 'Petrol / Diesel' },
-  { value: 'makan', label: 'Makan / F&B' },
-  { value: 'tol', label: 'Tol / Parking' },
-  { value: 'penginapan', label: 'Penginapan' },
-  { value: 'peralatan', label: 'Peralatan' },
-  { value: 'lain-lain', label: 'Lain-lain' },
-];
-
 async function uploadProofPhoto(file: File, folder: string): Promise<string> {
   const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
   const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
@@ -188,10 +169,6 @@ export default function DailyReportPage() {
   const [loading, setLoading] = useState(true);
 
   // Submission state
-  const [expenses, setExpenses] = useState<ExpenseEntry[]>([
-    { category: 'minyak', description: 'Petrol / Diesel', amount: '', photos: [], photoPreviews: [] },
-    { category: 'makan', description: 'Makan / F&B', amount: '', photos: [], photoPreviews: [] },
-  ]);
   const [bankSlip, setBankSlip] = useState<{ photos: File[]; previews: string[] }>({ photos: [], previews: [] });
   const [cashProof, setCashProof] = useState<{ photos: File[]; previews: string[] }>({ photos: [], previews: [] });
   const [showDocument, setShowDocument] = useState(false);
@@ -210,13 +187,9 @@ export default function DailyReportPage() {
     return Number.isFinite(n) ? n : 0;
   };
 
-  const expenseSum = (category: string) =>
-    expenses.reduce((sum, exp) => (exp.category === category ? sum + parseMoney(exp.amount) : sum), 0);
-
-  const totalExpensesAmount = expenses.reduce((sum, exp) => sum + parseMoney(exp.amount), 0);
-  const petrolAmount = expenseSum('minyak');
-  const foodAmount = expenseSum('makan');
-  const othersAmount = Math.max(0, totalExpensesAmount - petrolAmount - foodAmount);
+  const petrolAmount = 0;
+  const foodAmount = 0;
+  const othersAmount = 0;
 
   const totalAll = (data?.totalCash || 0) + (data?.totalTransfer || 0) + (data?.totalCredit || 0);
   const amountBankingAuto = (data?.totalCash || 0) + (data?.totalTransfer || 0);
@@ -361,77 +334,27 @@ export default function DailyReportPage() {
     setSubmitting(true);
     setSubmitErrors([]);
     const errors: string[] = [];
-    const expenseLinesPayload: Array<{
-      category: string;
-      description: string;
-      amount: number;
-      receiptImageUrls: string[];
-    }> = [];
     let bankSlipUrls: string[] = [];
     let cashProofUrls: string[] = [];
 
-    // Submit each expense that has amount > 0
-    for (const exp of expenses) {
-      const amt = Number(exp.amount);
-      if (amt <= 0) continue;
-      if (exp.photos.length === 0) {
-        errors.push(`${exp.description}: wajib upload gambar resit`);
-        continue;
-      }
-      try {
-        const urls = await Promise.all(exp.photos.map((f) => uploadProofPhoto(f, `expenses/${date}`)));
-        const res = await fetch('/api/expenses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category: exp.category, description: exp.description, amount: amt, receipt_image_urls: urls, expense_date: date }),
-        });
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({})) as { error?: string };
-          errors.push(`${exp.description}: ${json.error || 'Gagal simpan'}`);
-        } else {
-          expenseLinesPayload.push({
-            category: exp.category,
-            description: exp.description,
-            amount: amt,
-            receiptImageUrls: urls,
-          });
-        }
-      } catch {
-        errors.push(`${exp.description}: Ralat semasa upload`);
-      }
-    }
-
-    // Submit banking slip
+    // Banking slip — upload bukti sahaja
     if (bankSlip.photos.length > 0) {
       const bankAmt = amountBanking;
       if (bankAmt > 0) {
         try {
           const urls = await Promise.all(bankSlip.photos.map((f) => uploadProofPhoto(f, `banking/${date}`)));
-          const res = await fetch('/api/expenses', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category: 'lain-lain', description: 'Slip Banking', amount: bankAmt, receipt_image_urls: urls, expense_date: date }),
-          });
-          if (!res.ok) errors.push('Slip Banking: Gagal simpan');
-          else bankSlipUrls = urls;
+          bankSlipUrls = urls;
         } catch {
           errors.push('Slip Banking: Ralat upload');
         }
       }
     }
 
-    // Submit cash proof photo
+    // Cash proof — upload bukti sahaja
     if (cashProof.photos.length > 0) {
-      const cashAmt = (data?.totalCash || 0) > 0 ? data!.totalCash : 1;
       try {
         const urls = await Promise.all(cashProof.photos.map((f) => uploadProofPhoto(f, `cash-proof/${date}`)));
-        const res = await fetch('/api/expenses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category: 'lain-lain', description: 'Gambar Wang Tunai', amount: cashAmt, receipt_image_urls: urls, expense_date: date }),
-        });
-        if (!res.ok) errors.push('Gambar Wang: Gagal simpan');
-        else cashProofUrls = urls;
+        cashProofUrls = urls;
       } catch {
         errors.push('Gambar Wang: Ralat upload');
       }
@@ -451,8 +374,8 @@ export default function DailyReportPage() {
         totalTransfer: data?.totalTransfer || 0,
         amountBankingManual: amountBanking,
         balancePtCashManual: balancePtCash,
-        expenseLines: expenseLinesPayload,
-        expensesTotal: totalExpensesAmount,
+        expenseLines: [],
+        expensesTotal: 0,
         bankSlipUrls,
         cashProofUrls,
         salesSnapshot: {
@@ -461,7 +384,7 @@ export default function DailyReportPage() {
           creditSales: data?.creditSales || [],
         },
         source: 'sales',
-        status: 'submitted',
+        status: 'draft',
         liveSalesRefs: todaySaleIds,
       };
 
@@ -484,7 +407,6 @@ export default function DailyReportPage() {
     }
     setSubmitting(false);
   }, [
-    expenses,
     bankSlip,
     cashProof,
     date,
@@ -495,7 +417,6 @@ export default function DailyReportPage() {
     manualKawasan,
     sessionUser,
     totalAll,
-    totalExpensesAmount,
     todaySaleIds,
   ]);
 
@@ -685,7 +606,7 @@ export default function DailyReportPage() {
                 </thead>
                 <tbody>
                   {[
-                    { desc: 'Expenses Sales', value: totalExpensesAmount },
+                    { desc: 'Perbelanjaan (diisi oleh admin cawangan — tidak oleh jurujual)', value: null as number | null },
                     { desc: 'Petrol / Diesel', value: petrolAmount },
                     { desc: 'Food & Beverage', value: foodAmount },
                     { desc: 'Advance', value: 0 },
@@ -697,7 +618,7 @@ export default function DailyReportPage() {
                         {i + 1}. {row.desc}
                       </td>
                       <td className="border border-slate-300 px-2 text-right font-medium">
-                        {row.value > 0 ? row.value.toFixed(2) : ''}
+                        {row.value === null ? '' : row.value > 0 ? row.value.toFixed(2) : ''}
                       </td>
                     </tr>
                   ))}
@@ -806,8 +727,8 @@ export default function DailyReportPage() {
               <Send size={16} className="text-white" />
             </div>
             <div>
-              <h2 className="text-white font-semibold text-lg">Hantar Laporan Hari</h2>
-              <p className="text-slate-400 text-sm">Upload bukti &amp; perbelanjaan sebelum tutup hari</p>
+              <h2 className="text-white font-semibold text-lg">Hantar ke admin cawangan</h2>
+              <p className="text-slate-400 text-sm">Muat naik bukti wang tunai &amp; slip bank — perbelanjaan diisi admin cawangan</p>
             </div>
           </div>
 
@@ -878,86 +799,6 @@ export default function DailyReportPage() {
                   ))}
                 </div>
               )}
-            </div>
-
-            {/* ── Perbelanjaan ── */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <Upload size={16} className="text-green-400" />
-                  <span className="text-white font-medium text-sm">Perbelanjaan Hari Ini</span>
-                </div>
-                <button
-                  onClick={() => setExpenses((prev) => [...prev, { category: 'lain-lain', description: 'Lain-lain', amount: '', photos: [], photoPreviews: [] }])}
-                  className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 px-3 py-1 rounded-lg border border-blue-700 hover:border-blue-500 transition-colors"
-                >
-                  + Tambah
-                </button>
-              </div>
-              <div className="space-y-3">
-                {expenses.map((exp, i) => (
-                  <div key={i} className="bg-slate-800 rounded-xl p-3 border border-slate-700">
-                    <div className="flex items-center gap-2 mb-2">
-                      <select
-                        value={exp.category}
-                        onChange={(e) => {
-                          const cat = EXPENSE_CATS.find((c) => c.value === e.target.value);
-                          setExpenses((prev) => prev.map((x, j) => j === i ? { ...x, category: e.target.value, description: cat?.label || x.description } : x));
-                        }}
-                        className="flex-1 bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-500"
-                      >
-                        {EXPENSE_CATS.map((c) => (
-                          <option key={c.value} value={c.value}>{c.label}</option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        placeholder="RM 0.00"
-                        value={exp.amount}
-                        onChange={(e) => setExpenses((prev) => prev.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
-                        className="w-28 bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-600 focus:outline-none focus:border-blue-500 text-right"
-                      />
-                      {expenses.length > 1 && (
-                        <button
-                          onClick={() => setExpenses((prev) => prev.filter((_, j) => j !== i))}
-                          className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-900/40 hover:bg-red-900/70 text-red-400 transition-colors"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                    </div>
-                    <label className="flex items-center gap-2 px-3 py-2 bg-slate-700/50 border border-dashed border-slate-600 rounded-lg cursor-pointer hover:border-green-500 text-xs text-slate-400 hover:text-green-400 transition-colors">
-                      <Camera size={14} />
-                      {exp.photos.length > 0 ? `${exp.photos.length} gambar resit` : 'Upload gambar resit (wajib)'}
-                      <input
-                        type="file" accept="image/*" capture="environment" multiple className="hidden"
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files || []);
-                          if (!files.length) return;
-                          const previews = files.map((f) => URL.createObjectURL(f));
-                          setExpenses((prev) => prev.map((x, j) => j === i ? { ...x, photos: [...x.photos, ...files], photoPreviews: [...x.photoPreviews, ...previews] } : x));
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                    {exp.photoPreviews.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {exp.photoPreviews.map((src, pi) => (
-                          <div key={pi} className="relative">
-                            <img src={src} alt="" className="w-12 h-12 object-cover rounded-lg border border-slate-600" />
-                            <button
-                              onClick={() => setExpenses((prev) => prev.map((x, j) => j === i ? { ...x, photos: x.photos.filter((_, k) => k !== pi), photoPreviews: x.photoPreviews.filter((_, k) => k !== pi) } : x))}
-                              className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center"
-                            >
-                              <X size={8} className="text-white" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
 
             {/* ── Slip Banking ── */}
@@ -1046,8 +887,8 @@ export default function DailyReportPage() {
                 <div className="flex items-center gap-3">
                   <CheckCircle size={22} className="text-emerald-400 shrink-0" />
                   <div>
-                    <p className="text-emerald-300 font-semibold">Laporan berjaya dihantar!</p>
-                    <p className="text-emerald-400/70 text-sm">Admin akan semak dan approve perbelanjaan anda.</p>
+                    <p className="text-emerald-300 font-semibold">Laporan disimpan dan dihantar ke admin cawangan</p>
+                    <p className="text-emerald-400/70 text-sm">Admin cawangan akan isi perbelanjaan dan hantar ke HQ untuk kelulusan Main Admin.</p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1074,7 +915,7 @@ export default function DailyReportPage() {
                 {submitting ? (
                   <><RefreshCw size={18} className="animate-spin" /> Menghantar...</>
                 ) : (
-                  <><Send size={18} /> Hantar Laporan Hari</>
+                  <><Send size={18} /> Hantar ke admin cawangan</>
                 )}
               </button>
             )}

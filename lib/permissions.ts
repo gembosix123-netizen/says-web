@@ -84,6 +84,31 @@ export function canManageExpenses(role: NormalizedRole): boolean {
   return role === 'Main Admin' || role === 'Admin';
 }
 
+/** Create expense rows in Supabase (branch / HQ). Sales are not allowed. */
+export function canCreateExpenseRecords(role: NormalizedRole): boolean {
+  return role === 'Main Admin' || role === 'Admin';
+}
+
+/** Approve, reject, or mark paid — Main Admin only. */
+export function canApproveExpenseRecords(role: NormalizedRole): boolean {
+  return role === 'Main Admin';
+}
+
+/** Branch admin: save expenses into daily report draft / returned. */
+export function canSaveBranchDailyReport(role: NormalizedRole): boolean {
+  return role === 'Main Admin' || role === 'Admin';
+}
+
+/** Branch admin: forward draft to HQ (submitted_daily). */
+export function canForwardDailyReportToHQ(role: NormalizedRole): boolean {
+  return role === 'Main Admin' || role === 'Admin';
+}
+
+/** Final approve or return daily-stage report at HQ. */
+export function canFinalApproveDailyReport(role: NormalizedRole): boolean {
+  return role === 'Main Admin';
+}
+
 export function canViewWeeklyReports(role: NormalizedRole): boolean {
   return role === 'Main Admin' || role === 'Admin';
 }

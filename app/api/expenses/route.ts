@@ -6,6 +6,12 @@ import { logAuditEvent } from '@/lib/audit';
 
 const EXPENSES_TABLE = 'expenses';
 
+function branchMatchesExpense(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = String(a || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const right = String(b || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return left === right;
+}
+
 const ALLOWED_CATEGORIES = [
   'minyak', 'tol', 'parking', 'makan', 'penginapan',
   'telefon', 'peralatan', 'lain-lain',
@@ -66,7 +72,10 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const role = normalizeRole(user.role);
-  if (!['Sales', 'Admin', 'Main Admin'].includes(role)) {
+  if (role === 'Sales') {
+    return NextResponse.json({ error: 'Jurujual tidak boleh menghantar expense. Sila hubungi admin cawangan.' }, { status: 403 });
+  }
+  if (role !== 'Admin' && role !== 'Main Admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -82,7 +91,26 @@ export async function POST(request: NextRequest) {
     related_invoice,
     expense_date,
     district,
+    salesman_id,
   } = body;
+
+  if (!salesman_id || typeof salesman_id !== 'string') {
+    return NextResponse.json({ error: 'Medan salesman_id diperlukan (jurujual yang berkaitan).' }, { status: 400 });
+  }
+
+  const { data: targetUser, error: userErr } = await supabaseAdmin
+    .from('users')
+    .select('id, name, branch, role')
+    .eq('id', salesman_id)
+    .maybeSingle();
+
+  if (userErr || !targetUser) {
+    return NextResponse.json({ error: 'salesman_id tidak dijumpai.' }, { status: 400 });
+  }
+
+  if (role === 'Admin' && user.branch && !branchMatchesExpense(targetUser.branch as string, user.branch)) {
+    return NextResponse.json({ error: 'Jurujual mesti dari cawangan anda.' }, { status: 403 });
+  }
 
   // Validation
   if (!category || !ALLOWED_CATEGORIES.includes(category)) {
@@ -101,10 +129,10 @@ export async function POST(request: NextRequest) {
   }
 
   const record = {
-    branch: role === 'Sales' ? user.branch : (body.branch || user.branch),
+    branch: (body.branch as string) || (targetUser.branch as string) || user.branch,
     district: district || null,
-    salesman_id: user.id,
-    salesman_name: user.name || user.username,
+    salesman_id: targetUser.id as string,
+    salesman_name: (targetUser.name as string) || String(salesman_id),
     related_sale_id: related_sale_id || null,
     related_invoice: related_invoice || null,
     category,
@@ -150,8 +178,8 @@ export async function PATCH(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const role = normalizeRole(user.role);
-  if (role !== 'Admin' && role !== 'Main Admin') {
-    return NextResponse.json({ error: 'Hanya Admin boleh approve/reject perbelanjaan.' }, { status: 403 });
+  if (role !== 'Main Admin') {
+    return NextResponse.json({ error: 'Hanya Main Admin boleh approve/reject/mark paid perbelanjaan.' }, { status: 403 });
   }
 
   if (!supabaseAdmin) return NextResponse.json({ error: 'Database not available' }, { status: 500 });

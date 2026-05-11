@@ -1,48 +1,16 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { BarChart2, RefreshCw } from 'lucide-react';
+import { BarChart2, RefreshCw, X } from 'lucide-react';
 import MonthlyReportSupabase from '@/components/features/admin/MonthlyReportSupabase';
 import { DailyReportDataTable } from '@/components/features/admin/DailyReportDataTable';
+import { BranchDailyReportPanel } from '@/components/features/admin/BranchDailyReportPanel';
 import { openDailyReportPdfWindow } from '@/lib/dailyReportPdf';
-
-type DailyReport = {
-  id: string;
-  userName: string;
-  branch: string;
-  date: string;
-  submittedAt?: string;
-  updatedAt?: string;
-  totalSales: number;
-  totalCash: number;
-  totalTransfer?: number;
-  totalCredit: number;
-  amountBankingManual?: number;
-  balancePtCashManual?: number;
-  expenseLines?: { description: string; amount: number; receiptImageUrls?: string[] }[];
-  bankSlipUrls?: string[];
-  cashProofUrls?: string[];
-  salesSnapshot?: {
-    cashSales?: Array<{ customer: string; item: string; qn: number | string; price: number | string; amount: number | string; billNo: string }>;
-    transferSales?: Array<{ customer: string; item: string; qn: number | string; price: number | string; amount: number | string; billNo: string }>;
-    creditSales?: Array<{ customer: string; item: string; qn: number | string; price: number | string; amount: number | string; billNo: string }>;
-  };
-  status:
-    | 'draft'
-    | 'submitted_daily'
-    | 'approved_daily'
-    | 'returned_daily'
-    | 'submitted_weekly'
-    | 'approved_weekly'
-    | 'returned_weekly'
-    | 'submitted_monthly'
-    | 'approved_monthly'
-    | 'returned_monthly';
-  approvalStage?: 'daily' | 'weekly' | 'monthly';
-  source?: 'manual' | 'settlement' | 'sales' | 'merch';
-};
+import type { DailyReport } from '@/types';
+import { normalizeRole, type NormalizedRole } from '@/lib/roles';
+import { fetchViewerInfo } from '@/lib/clientViewerSession';
 
 type ReportTab = 'daily' | 'weekly' | 'monthly';
 
@@ -74,8 +42,13 @@ export default function AdminReportsHub() {
   const [reports, setReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [dailyViewDate, setDailyViewDate] = useState(() => toLocalDateInput(new Date()));
+  const [viewerRole, setViewerRole] = useState<NormalizedRole | ''>('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [branchPanelReportId, setBranchPanelReportId] = useState<string | null>(null);
+  const [detailsReport, setDetailsReport] = useState<DailyReport | null>(null);
+  const [busyReportId, setBusyReportId] = useState<string | null>(null);
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/daily-reports', { cache: 'no-store' });
@@ -84,10 +57,17 @@ export default function AdminReportsHub() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void fetchReports();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const { role } = await fetchViewerInfo();
+      setViewerRole(role);
+    })();
   }, []);
 
   useEffect(() => {
@@ -142,6 +122,16 @@ export default function AdminReportsHub() {
     [dailyReports, allowedDailyStatuses]
   );
 
+  const filteredDailyQueue = useMemo(() => {
+    if (statusFilter === 'all') return dailyQueue;
+    return dailyQueue.filter((item) => String(item.status) === statusFilter);
+  }, [dailyQueue, statusFilter]);
+
+  const branchPanelReport = useMemo(
+    () => reports.find((r) => r.id === branchPanelReportId) ?? null,
+    [reports, branchPanelReportId]
+  );
+
   /** Semua hantaran peringkat harian (untuk jadual “terkini”) — max 50, tarikh paling baru dahulu. */
   const recentDailyAllDates = useMemo(() => {
     const rows = reports.filter(
@@ -174,27 +164,108 @@ export default function AdminReportsHub() {
     if (datesWithDailyData.length === 0) return;
     didAlignInitialDate.current = true;
     if (!datesWithDailyData.includes(dailyViewDate)) {
-      setDailyViewDate(datesWithDailyData[0]);
+      const fallback =
+        datesWithDailyData.includes(todayStr) ? todayStr : datesWithDailyData[0];
+      setDailyViewDate(fallback);
     }
-  }, [loading, datesWithDailyData, dailyViewDate]);
+  }, [loading, datesWithDailyData, dailyViewDate, todayStr]);
+
+  const dailyApprovedRows = useMemo(
+    () => dailyReports.filter((item) => item.status === 'approved_daily'),
+    [dailyReports]
+  );
 
   const dailySummary = useMemo(() => {
     return {
-      totalSales: dailyReports.reduce((sum, item) => sum + Number(item.totalSales || 0), 0),
-      totalCash: dailyReports.reduce((sum, item) => sum + Number(item.totalCash || 0), 0),
-      totalCredit: dailyReports.reduce((sum, item) => sum + Number(item.totalCredit || 0), 0),
-      totalReports: dailyReports.length,
+      totalSales: dailyApprovedRows.reduce((sum, item) => sum + Number(item.totalSales || 0), 0),
+      totalCash: dailyApprovedRows.reduce((sum, item) => sum + Number(item.totalCash || 0), 0),
+      totalCredit: dailyApprovedRows.reduce((sum, item) => sum + Number(item.totalCredit || 0), 0),
+      totalReports: dailyApprovedRows.length,
     };
-  }, [dailyReports]);
+  }, [dailyApprovedRows]);
+
+  const rollingWeekApproved = useMemo(
+    () => rollingWeekDailyReports.filter((item) => item.status === 'approved_daily'),
+    [rollingWeekDailyReports]
+  );
 
   const weeklySummary = useMemo(() => {
     return {
-      totalSales: rollingWeekDailyReports.reduce((sum, item) => sum + Number(item.totalSales || 0), 0),
-      totalCash: rollingWeekDailyReports.reduce((sum, item) => sum + Number(item.totalCash || 0), 0),
-      totalCredit: rollingWeekDailyReports.reduce((sum, item) => sum + Number(item.totalCredit || 0), 0),
-      totalReports: rollingWeekDailyReports.length,
+      totalSales: rollingWeekApproved.reduce((sum, item) => sum + Number(item.totalSales || 0), 0),
+      totalCash: rollingWeekApproved.reduce((sum, item) => sum + Number(item.totalCash || 0), 0),
+      totalCredit: rollingWeekApproved.reduce((sum, item) => sum + Number(item.totalCredit || 0), 0),
+      totalReports: rollingWeekApproved.length,
     };
-  }, [rollingWeekDailyReports]);
+  }, [rollingWeekApproved]);
+
+  const putDailyReport = useCallback(
+    async (body: Record<string, unknown>) => {
+      const res = await fetch('/api/daily-reports', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert((data as { error?: string }).error || 'Permintaan gagal');
+        return false;
+      }
+      await fetchReports();
+      return true;
+    },
+    [fetchReports]
+  );
+
+  const handleSendToHQ = useCallback(
+    async (row: DailyReport) => {
+      if (!window.confirm('Hantar laporan ini ke Main Admin untuk kelulusan akhir?')) return;
+      setBusyReportId(row.id);
+      try {
+        const ok = await putDailyReport({
+          id: row.id,
+          action: 'submit_stage',
+          approvalStage: 'daily',
+        });
+        if (ok) setBranchPanelReportId(null);
+      } finally {
+        setBusyReportId(null);
+      }
+    },
+    [putDailyReport]
+  );
+
+  const handleApprove = useCallback(
+    async (row: DailyReport) => {
+      setBusyReportId(row.id);
+      try {
+        await putDailyReport({ id: row.id, action: 'approve_stage', approvalStage: 'daily' });
+      } finally {
+        setBusyReportId(null);
+      }
+    },
+    [putDailyReport]
+  );
+
+  const handleReject = useCallback(
+    async (row: DailyReport) => {
+      const notes = window.prompt('Nyatakan sebab penolakan / pulangan:');
+      if (!notes?.trim()) return;
+      setBusyReportId(row.id);
+      try {
+        await putDailyReport({
+          id: row.id,
+          action: 'return_stage',
+          approvalStage: 'daily',
+          reviewNotes: notes.trim(),
+        });
+      } finally {
+        setBusyReportId(null);
+      }
+    },
+    [putDailyReport]
+  );
+
+  const showWorkflow = viewerRole === 'Admin' || viewerRole === 'Main Admin';
 
   return (
     <div className="space-y-6">
@@ -267,10 +338,19 @@ export default function AdminReportsHub() {
                 </button>
               )}
               <span className="rounded-full border border-slate-600 bg-slate-800/80 px-3 py-1 text-xs text-slate-300">
-                {dailyQueue.length} laporan
+                {filteredDailyQueue.length} laporan
               </span>
             </div>
           </div>
+
+          {showWorkflow && (
+            <div className="rounded-lg border border-sky-800/50 bg-sky-950/35 px-3 py-2.5 text-[11px] text-sky-100/90 leading-relaxed">
+              <strong className="text-sky-200">Aliran:</strong> pada baris <strong>Draf</strong> / <strong>Tolak</strong> (pulangan),{' '}
+              <strong>Isi perbelanjaan</strong> dahulu, simpan ke laporan, kemudian <strong>Hantar ke Main Admin</strong>{' '}
+              (butang aktif selepas simpan perbelanjaan). <strong>Main Admin:</strong> tapis <strong>Pending</strong>, kemudian{' '}
+              <strong>Lulus</strong> / <strong>Tolak</strong> pada lajur Tindakan.
+            </div>
+          )}
 
           {datesWithDailyData.length > 0 && (
             <div className="rounded-lg border border-slate-700 bg-slate-950/50 px-3 py-2">
@@ -312,24 +392,81 @@ export default function AdminReportsHub() {
 
           <div className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-3 py-2 mb-1">
             <p className="text-xs text-slate-400 leading-relaxed">
-              <span className="font-medium text-slate-300">Apa kad ini?</span> Ia menjumlahkan field{' '}
-              <strong className="text-slate-200">laporan harian</strong> yang dihantar staff untuk{' '}
-              <span className="font-mono text-amber-200/90">{dailyViewDate}</span> sahaja —{' '}
-              <em>bukan</em> jumlah jualan live dari Supabase. Jika RM 0.00, tiada laporan untuk tarikh itu atau jumlah
-              memang sifar dalam borang.
+              <span className="font-medium text-slate-300">Apa kad ini?</span> Jumlah{' '}
+              <strong className="text-slate-200">Jumlah Sales / Tunai / Kredit</strong> di bawah adalah{' '}
+              <strong className="text-emerald-200/90">laporan harian yang sudah diluluskan (Main Admin)</strong> untuk{' '}
+              <span className="font-mono text-amber-200/90">{dailyViewDate}</span> sahaja — bukan jumlah live dari
+              Supabase.
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <Stat label="Jumlah Sales" value={formatMoney(dailySummary.totalSales)} />
-            <Stat label="Tunai" value={formatMoney(dailySummary.totalCash)} />
-            <Stat label="Kredit" value={formatMoney(dailySummary.totalCredit)} />
-            <Stat label="Bil. Laporan" value={String(dailySummary.totalReports)} />
+            <Stat label="Jumlah Sales (diluluskan)" value={formatMoney(dailySummary.totalSales)} />
+            <Stat label="Tunai (diluluskan)" value={formatMoney(dailySummary.totalCash)} />
+            <Stat label="Kredit (diluluskan)" value={formatMoney(dailySummary.totalCredit)} />
+            <Stat label="Bil. Laporan diluluskan" value={String(dailySummary.totalReports)} />
           </div>
+
+          {showWorkflow && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-slate-500">Tapis status:</span>
+              {(
+                [
+                  { id: 'all', label: 'Semua' },
+                  { id: 'draft', label: 'Draf' },
+                  { id: 'submitted_daily', label: 'Pending' },
+                  { id: 'approved_daily', label: 'Lulus' },
+                  { id: 'returned_daily', label: 'Tolak' },
+                ] as const
+              ).map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => setStatusFilter(chip.id)}
+                  className={`rounded-full px-3 py-1 text-[11px] font-medium border transition-colors ${
+                    statusFilter === chip.id
+                      ? 'bg-blue-600 border-blue-500 text-white'
+                      : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-500'
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {branchPanelReport &&
+            showWorkflow &&
+            (branchPanelReport.status === 'draft' || branchPanelReport.status === 'returned_daily') && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-slate-400">
+                    Panel perbelanjaan: <span className="text-white font-mono">{branchPanelReport.date}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setBranchPanelReportId(null)}
+                    className="text-[11px] text-slate-500 hover:text-white"
+                  >
+                    Tutup panel
+                  </button>
+                </div>
+                <BranchDailyReportPanel report={branchPanelReport} onSaved={() => void fetchReports()} />
+              </div>
+            )}
+
           <DailyReportDataTable
-            rows={dailyQueue}
+            rows={filteredDailyQueue}
             loading={loading}
-            emptyText={`Tiada laporan untuk tarikh ${dailyViewDate}.`}
-            onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
+            emptyText={`Tiada laporan untuk tarikh ${dailyViewDate}${statusFilter !== 'all' ? ' (tapis semasa)' : ''}.`}
+            onOpenReportPdf={(row) => openDailyReportPdfWindow(row as DailyReport)}
+            showWorkflow={showWorkflow}
+            viewerRole={viewerRole}
+            busyReportId={busyReportId}
+            onEditBranchExpenses={(row) => setBranchPanelReportId(row.id)}
+            onSendToHQ={(row) => void handleSendToHQ(row as DailyReport)}
+            onApprove={(row) => void handleApprove(row as DailyReport)}
+            onReject={(row) => void handleReject(row as DailyReport)}
+            onDetails={(row) => setDetailsReport(row as DailyReport)}
           />
 
           {recentDailyAllDates.length > 0 && (
@@ -342,8 +479,61 @@ export default function AdminReportsHub() {
                 rows={recentDailyAllDates}
                 loading={loading}
                 emptyText="Tiada data."
-                onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
+                onOpenReportPdf={(row) => openDailyReportPdfWindow(row as DailyReport)}
+                showWorkflow={showWorkflow}
+                viewerRole={viewerRole}
+                busyReportId={busyReportId}
+                onEditBranchExpenses={(row) => setBranchPanelReportId(row.id)}
+                onSendToHQ={(row) => void handleSendToHQ(row as DailyReport)}
+                onApprove={(row) => void handleApprove(row as DailyReport)}
+                onReject={(row) => void handleReject(row as DailyReport)}
+                onDetails={(row) => setDetailsReport(row as DailyReport)}
               />
+            </div>
+          )}
+
+          {detailsReport && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+              <div className="max-w-lg w-full rounded-2xl border border-slate-600 bg-slate-900 p-5 shadow-xl space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <h4 className="text-lg font-semibold text-white">Butiran laporan</h4>
+                  <button
+                    type="button"
+                    onClick={() => setDetailsReport(null)}
+                    className="rounded-lg p-1 text-slate-400 hover:text-white hover:bg-slate-800"
+                    aria-label="Tutup"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <p className="text-sm text-slate-300">
+                  {detailsReport.userName} · {detailsReport.branch}
+                </p>
+                <p className="text-xs text-slate-500 font-mono">
+                  {detailsReport.date} · Status: {String(detailsReport.status)}
+                </p>
+                {detailsReport.returnedReason && (
+                  <p className="text-xs text-rose-300">Sebab: {detailsReport.returnedReason}</p>
+                )}
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openDailyReportPdfWindow(detailsReport);
+                    }}
+                    className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white"
+                  >
+                    Buka PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetailsReport(null)}
+                    className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </section>
@@ -381,16 +571,24 @@ export default function AdminReportsHub() {
             </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <Stat label="Jumlah Sales" value={formatMoney(weeklySummary.totalSales)} />
-            <Stat label="Tunai" value={formatMoney(weeklySummary.totalCash)} />
-            <Stat label="Kredit" value={formatMoney(weeklySummary.totalCredit)} />
-            <Stat label="Bil. Laporan" value={String(weeklySummary.totalReports)} />
+            <Stat label="Jumlah Sales (diluluskan)" value={formatMoney(weeklySummary.totalSales)} />
+            <Stat label="Tunai (diluluskan)" value={formatMoney(weeklySummary.totalCash)} />
+            <Stat label="Kredit (diluluskan)" value={formatMoney(weeklySummary.totalCredit)} />
+            <Stat label="Bil. Laporan diluluskan" value={String(weeklySummary.totalReports)} />
           </div>
           <DailyReportDataTable
             rows={rollingWeekDailyReports}
             loading={loading}
             emptyText="Tiada laporan harian dalam tempoh 7 hari lepas."
-            onOpenReportPdf={(row) => openDailyReportPdfWindow(row as import('@/types').DailyReport)}
+            onOpenReportPdf={(row) => openDailyReportPdfWindow(row as DailyReport)}
+            showWorkflow={showWorkflow}
+            viewerRole={viewerRole}
+            busyReportId={busyReportId}
+            onEditBranchExpenses={(row) => setBranchPanelReportId(row.id)}
+            onSendToHQ={(row) => void handleSendToHQ(row as DailyReport)}
+            onApprove={(row) => void handleApprove(row as DailyReport)}
+            onReject={(row) => void handleReject(row as DailyReport)}
+            onDetails={(row) => setDetailsReport(row as DailyReport)}
           />
 
           {weeklyStageReports.length > 0 && (

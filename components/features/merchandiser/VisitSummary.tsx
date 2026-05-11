@@ -53,7 +53,7 @@ export function VisitSummary() {
           totalCash: 0,
           totalCredit: 0,
           source: 'merch',
-          status: 'submitted',
+          status: 'draft',
         };
 
         const checkParams = new URLSearchParams({
@@ -63,16 +63,21 @@ export function VisitSummary() {
         const checkRes = await fetch(`/api/daily-reports?${checkParams.toString()}`);
         const checkData = await checkRes.json().catch(() => ({}));
         const existingReports = Array.isArray(checkData?.reports) ? checkData.reports : [];
+        const existing = existingReports[0];
+        const canWrite =
+          !existing ||
+          existing.status === 'draft' ||
+          existing.status === 'returned_daily';
 
-        if (existingReports.length === 0) {
+        if (canWrite) {
           await fetch('/api/daily-reports', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(reportPayload),
           });
-          setSubmitMessage('Laporan merch berjaya dihantar kepada admin untuk semakan.');
+          setSubmitMessage('Laporan merch disimpan (draf) untuk admin cawangan.');
         } else {
-          setSubmitMessage('Laporan merch untuk hari ini sudah pernah dihantar.');
+          setSubmitMessage('Laporan merch untuk hari ini sudah diproses admin/HQ.');
         }
       } catch (error) {
         console.error('Failed to submit merch report:', error);

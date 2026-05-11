@@ -198,5 +198,77 @@
     ],
     "submittedAt": "2026-05-04T18:31:46.370Z",
     "updatedAt": "2026-05-04T20:21:30.538Z"
+  },
+  {
+    "id": "9bf0bfb1-7013-46f7-a261-4e3a722e52f5",
+    "userId": "5ab2a890-942c-47d5-9ab4-892c62fcf4be",
+    "userName": "Allan",
+    "branch": "kk dan pp",
+    "date": "2026-05-12",
+    "totalSales": 0,
+    "totalCash": 0,
+    "totalCredit": 0,
+    "totalTransfer": 0,
+    "amountBankingManual": 0,
+    "balancePtCashManual": 0,
+    "expenseLines": [
+      {
+        "category": "minyak",
+        "description": "petrol",
+        "amount": 0,
+        "receiptImageUrls": [
+          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/branch-expenses/2026-05-12/9bf0bfb1-7013-46f7-a261-4e3a722e52f5/1778523596387_a2k963.png"
+        ]
+      }
+    ],
+    "expensesTotal": 0,
+    "bankSlipUrls": [],
+    "cashProofUrls": [
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-05-12/1778521987805_rh824u.png"
+    ],
+    "salesSnapshot": {
+      "cashSales": [],
+      "transferSales": [],
+      "creditSales": []
+    },
+    "status": "submitted_daily",
+    "source": "sales",
+    "approvalStage": "daily",
+    "liveSalesRefs": [],
+    "submittedAt": "2026-05-11T16:06:41.506Z",
+    "updatedAt": "2026-05-11T18:20:01.204Z",
+    "branchExpensesSyncedAt": "2026-05-11T18:19:57.565Z"
+  },
+  {
+    "id": "984c274e-817a-419a-b295-a2d242fbddc6",
+    "userId": "8ca919f4-aa6c-4127-afab-54f4b0972a12",
+    "userName": "sell",
+    "branch": "qwe",
+    "date": "2026-05-12",
+    "totalSales": 0,
+    "totalCash": 0,
+    "totalCredit": 0,
+    "totalTransfer": 0,
+    "amountBankingManual": 1,
+    "balancePtCashManual": 0.5,
+    "expenseLines": [],
+    "expensesTotal": 0,
+    "bankSlipUrls": [
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/banking/2026-05-12/1778515756955_gz3302.png"
+    ],
+    "cashProofUrls": [
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-05-12/1778515757258_0lwfsr.png"
+    ],
+    "salesSnapshot": {
+      "cashSales": [],
+      "transferSales": [],
+      "creditSales": []
+    },
+    "status": "draft",
+    "source": "sales",
+    "approvalStage": "daily",
+    "liveSalesRefs": [],
+    "submittedAt": "2026-05-11T16:09:18.408Z",
+    "updatedAt": "2026-05-11T16:09:18.408Z"
   }
 ]
