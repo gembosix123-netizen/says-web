@@ -3,20 +3,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { 
-  Plus, 
-  History, 
-  FileText, 
-  BarChart3, 
+import {
+  Plus,
+  History,
+  FileText,
+  BarChart3,
   ShoppingCart,
   DollarSign,
   Users,
   TrendingUp,
   LogOut,
   Home,
-  User
+  User,
+  Send,
+  AlertCircle,
+  Archive,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { normalizeRole } from '@/lib/roles';
 
 export default function SalesHubPage() {
   const router = useRouter();
@@ -38,6 +42,16 @@ export default function SalesHubPage() {
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<{ name: string; role: string; branch: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [newSaleGateBlocked, setNewSaleGateBlocked] = useState(false);
+  const [newSaleGateCopy, setNewSaleGateCopy] = useState<{
+    titleMs: string;
+    titleEn: string;
+    bodyMs: string;
+    bodyEn: string;
+    /** YYYY-MM-DD — laporan tertunggak untuk deep-link ke /sales/daily-report */
+    dateYmd: string;
+  } | null>(null);
+  const [showNewSaleGateModal, setShowNewSaleGateModal] = useState(false);
 
   const fetchUserInfo = useCallback(async () => {
     try {
@@ -171,6 +185,45 @@ export default function SalesHubPage() {
     fetchMyCustomers();
   }, [fetchTodayStats, fetchUserInfo, fetchMyCustomers]);
 
+  useEffect(() => {
+    if (!userInfo?.role) return;
+    if (normalizeRole(userInfo.role) !== 'Sales') {
+      setNewSaleGateBlocked(false);
+      setNewSaleGateCopy(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/sales/new-sale-eligibility', { credentials: 'same-origin', cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (res.ok && data.blocked === true && data.titleMs && data.bodyMs) {
+          const dateYmd = typeof data.dateYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.dateYmd) ? data.dateYmd : '';
+          setNewSaleGateBlocked(true);
+          setNewSaleGateCopy({
+            titleMs: data.titleMs,
+            titleEn: data.titleEn,
+            bodyMs: data.bodyMs,
+            bodyEn: data.bodyEn,
+            dateYmd,
+          });
+        } else {
+          setNewSaleGateBlocked(false);
+          setNewSaleGateCopy(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setNewSaleGateBlocked(false);
+          setNewSaleGateCopy(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userInfo?.role]);
+
   const areaOptions = useMemo(() => {
     return Array.from(new Set(myCustomerRows.map((row) => row.area))).sort((a, b) => a.localeCompare(b, 'ms'));
   }, [myCustomerRows]);
@@ -215,6 +268,14 @@ export default function SalesHubPage() {
       borderColor: 'border-emerald-500/50'
     },
     {
+      title: 'Perpustakaan laporan',
+      description: 'Sejarah & status — data laporan tersimpan di sini',
+      icon: Archive,
+      href: '/sales/daily-report/library',
+      color: 'from-cyan-500 to-cyan-600',
+      borderColor: 'border-cyan-500/50'
+    },
+    {
       title: 'Statistik',
       description: 'Analisis prestasi jualan',
       icon: BarChart3,
@@ -223,6 +284,14 @@ export default function SalesHubPage() {
       borderColor: 'border-orange-500/50'
     }
   ];
+
+  const openNewSaleOrModal = () => {
+    if (newSaleGateBlocked && newSaleGateCopy) {
+      setShowNewSaleGateModal(true);
+      return;
+    }
+    router.push('/sales/new');
+  };
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -365,20 +434,57 @@ export default function SalesHubPage() {
           </Card>
         </div>
 
+        {/* Hantar laporan harian — CTA utama */}
+        <Card className="p-5 border-2 border-emerald-500/40 bg-gradient-to-r from-emerald-950/50 to-slate-900/80">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-600/30 border border-emerald-500/40">
+                <Send size={22} className="text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Hantar laporan harian</h3>
+                <p className="text-sm text-white/60 mt-1">
+                  Ringkasan jualan, bukti tunai &amp; slip bank kepada admin cawangan — wajib jika ada aktiviti jualan.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="primary"
+              size="lg"
+              className="shrink-0 w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 border-0"
+              onClick={() => router.push('/sales/daily-report')}
+            >
+              <Send size={18} className="mr-2" />
+              Buka borang &amp; hantar
+            </Button>
+          </div>
+        </Card>
+
         {/* Main Menu Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {menuItems.map((item) => (
             <div
               key={item.title}
               className="cursor-pointer"
-              onClick={() => router.push(item.href)}
+              onClick={() => {
+                if (item.href === '/sales/new') openNewSaleOrModal();
+                else router.push(item.href);
+              }}
             >
-              <Card className={`p-6 hover:bg-white/5 transition-all group border-2 border-transparent hover:${item.borderColor}`}>
+              <Card className={`relative p-6 hover:bg-white/5 transition-all group border-2 border-transparent hover:${item.borderColor}`}>
+                {item.href === '/sales/new' && newSaleGateBlocked ? (
+                  <div
+                    className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/40"
+                    aria-hidden
+                  >
+                    <AlertCircle size={18} strokeWidth={2.5} />
+                  </div>
+                ) : null}
                 <div className="flex items-start gap-4">
                   <div className={`p-4 rounded-xl bg-gradient-to-br ${item.color} group-hover:scale-110 transition-transform`}>
                     <item.icon size={28} className="text-white" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 pr-8">
                     <h2 className="text-xl font-bold text-white mb-1">{item.title}</h2>
                     <p className="text-white/60 text-sm">{item.description}</p>
                   </div>
@@ -395,7 +501,7 @@ export default function SalesHubPage() {
               <h3 className="text-xl font-bold text-white">My Customer (Bulan Ini)</h3>
               <p className="text-white/60 text-sm">Kedai sendiri: sudah pergi vs belum pergi</p>
             </div>
-            <Button variant="primary" size="sm" onClick={() => router.push('/sales/new')}>
+            <Button variant="primary" size="sm" onClick={openNewSaleOrModal}>
               <Plus size={16} className="mr-2" />
               Jualan Baru
             </Button>
@@ -471,6 +577,66 @@ export default function SalesHubPage() {
         </Card>
         </div>
       </div>
+
+      {showNewSaleGateModal && newSaleGateCopy ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-sale-gate-title"
+        >
+          <Card className="max-w-lg w-full border border-amber-500/30 bg-slate-900 p-6 shadow-xl">
+            <div className="flex gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400">
+                <AlertCircle size={28} strokeWidth={2.25} />
+              </div>
+              <div className="min-w-0 flex-1 space-y-3">
+                <h2 id="new-sale-gate-title" className="text-lg font-bold text-white">
+                  {newSaleGateCopy.titleMs}
+                </h2>
+                <p className="text-sm text-white/90 leading-relaxed whitespace-pre-wrap">{newSaleGateCopy.bodyMs}</p>
+                <div className="border-t border-slate-700 pt-3 mt-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/40 mb-1">English</p>
+                  <p className="text-sm font-semibold text-white/90">{newSaleGateCopy.titleEn}</p>
+                  <p className="text-sm text-white/75 mt-1 leading-relaxed whitespace-pre-wrap">{newSaleGateCopy.bodyEn}</p>
+                </div>
+                <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                  <Button variant="ghost" size="sm" type="button" onClick={() => setShowNewSaleGateModal(false)}>
+                    Tutup / Close
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    className="text-cyan-300 hover:text-cyan-200 hover:bg-cyan-950/50"
+                    onClick={() => {
+                      setShowNewSaleGateModal(false);
+                      router.push('/sales/daily-report/library');
+                    }}
+                  >
+                    Perpustakaan laporan
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    type="button"
+                    className="bg-emerald-600 hover:bg-emerald-500 border-0"
+                    onClick={() => {
+                      setShowNewSaleGateModal(false);
+                      const q = newSaleGateCopy.dateYmd
+                        ? `?date=${encodeURIComponent(newSaleGateCopy.dateYmd)}`
+                        : '';
+                      router.push(`/sales/daily-report${q}`);
+                    }}
+                  >
+                    Buka Laporan Harian
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      ) : null}
 
       {/* Click outside to close menu */}
       {showUserMenu && (

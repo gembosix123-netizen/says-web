@@ -199,6 +199,7 @@ export interface DailyReport {
       price: number | string;
       amount: number | string;
       billNo: string;
+      isVoid?: boolean;
     }[];
     transferSales?: {
       customer: string;
@@ -207,6 +208,7 @@ export interface DailyReport {
       price: number | string;
       amount: number | string;
       billNo: string;
+      isVoid?: boolean;
     }[];
     creditSales?: {
       customer: string;
@@ -215,6 +217,17 @@ export interface DailyReport {
       price: number | string;
       amount: number | string;
       billNo: string;
+      isVoid?: boolean;
+    }[];
+    /** Tunai terima daripada pelanggan untuk invois kredit / hutang (kutipan hari ini) */
+    cashPaidCustomer?: {
+      customer: string;
+      item: string;
+      qn: number | string;
+      price: number | string;
+      amount: number | string;
+      billNo: string;
+      isVoid?: boolean;
     }[];
   };
   status:

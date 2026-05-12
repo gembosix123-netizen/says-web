@@ -3,16 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { logAuditEvent } from '@/lib/audit';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
+import { generateUniqueInvoiceNo } from '@/lib/invoiceNumbers';
 
 const INVOICES_TABLE = 'invoices';
 const INVOICE_ITEMS_TABLE = 'invoice_items';
 const CUSTOMERS_TABLE = 'customers';
-
-function generateInvoiceNo(branchCode = 'XX') {
-  const timestamp = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `INV-${branchCode.toUpperCase().replace(/\s+/g, '_')}-${timestamp}-${rand}`;
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -193,7 +188,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const invoiceNo = generateInvoiceNo(branch);
+    const invoiceNo = await generateUniqueInvoiceNo(supabaseAdmin, branch);
 
     // Calculate totals
     const subtotal = items.reduce((sum: number, item: any) => {

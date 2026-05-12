@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Transaction } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
-import { RefreshCw, Printer, ExternalLink } from 'lucide-react';
+import { RefreshCw, Printer, ExternalLink, Ban, Copy } from 'lucide-react';
 import { normalizeRole } from '@/lib/roles';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -64,6 +64,9 @@ type Sale = Transaction & {
   proofPhotoUrl?: string | null;
   proofPhotoUrls?: string[] | null;
   transactionDate?: string | null;
+  voidedAt?: string | null;
+  voidRemarks?: string | null;
+  originalGrandTotal?: number | null;
 };
 
 type QuickRange = 'day' | 'week' | 'month' | 'overall';
@@ -107,6 +110,7 @@ function normalizePaymentCategory(method?: string | null) {
 }
 
 function normalizeOutstandingStatus(sale: Sale) {
+  if (sale.voidedAt || String(sale.status || '').toLowerCase() === 'voided') return 'void';
   const status = String(sale.paymentStatus || sale.status || '').toLowerCase().trim();
   if (status.includes('pending')) return 'unpaid';
   if (status === 'paid' || status === 'completed') return 'paid';
@@ -118,6 +122,13 @@ function normalizeOutstandingStatus(sale: Sale) {
 
 export default function AdminLiveSalesPage() {
   const [sales, setSales] = useState<Sale[]>([]);
+  const [userRole, setUserRole] = useState<string>('');
+  const [voidTarget, setVoidTarget] = useState<Sale | null>(null);
+  const [voidRemarks, setVoidRemarks] = useState('');
+  const [voidOtp, setVoidOtp] = useState('');
+  const [generatedVoidOtp, setGeneratedVoidOtp] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [voidOtpRequired, setVoidOtpRequired] = useState(false);
+  const [voidSubmitting, setVoidSubmitting] = useState(false);
   const [branch, setBranch] = useState('all');
   const [salesStaff, setSalesStaff] = useState('all');
   const [area, setArea] = useState('all');
@@ -137,6 +148,8 @@ export default function AdminLiveSalesPage() {
 
         const user = await response.json();
         const normalized = normalizeRole(user?.role || '');
+        setUserRole(normalized);
+        setVoidOtpRequired(Boolean(user?.voidOtpRequired));
 
         if (normalized === 'Admin' && user?.branch) {
           setBranch(String(user.branch));
@@ -152,8 +165,11 @@ export default function AdminLiveSalesPage() {
   const load = useCallback(async (spinner = true) => {
     if (spinner) setLoading(true);
     try {
-      const q = branch !== 'all' ? `?branch=${encodeURIComponent(branch)}` : '';
-      const res = await fetch(`/api/sales${q}`, { cache: 'no-store' });
+      const params = new URLSearchParams();
+      if (branch !== 'all') params.set('branch', branch);
+      params.set('includeVoided', 'true');
+      const q = params.toString();
+      const res = await fetch(`/api/sales${q ? `?${q}` : ''}`, { cache: 'no-store' });
       const data = await res.json().catch(() => []);
       if (!res.ok) throw new Error(data?.error ?? 'Gagal memuatkan data');
       const rows: Sale[] = Array.isArray(data) ? data : [];
@@ -251,7 +267,11 @@ export default function AdminLiveSalesPage() {
 
   const filteredSales = React.useMemo(() => {
     if (outstandingStatus === 'all') return baseFilteredSales;
-    return baseFilteredSales.filter((sale) => normalizeOutstandingStatus(sale) === outstandingStatus);
+    return baseFilteredSales.filter((sale) => {
+      const st = normalizeOutstandingStatus(sale);
+      if (st === 'void') return false;
+      return st === outstandingStatus;
+    });
   }, [baseFilteredSales, outstandingStatus]);
 
   const tallySummary = React.useMemo(() => {
@@ -261,6 +281,7 @@ export default function AdminLiveSalesPage() {
     let paidAmount = 0;
 
     baseFilteredSales.forEach((sale) => {
+      if (normalizeOutstandingStatus(sale) === 'void') return;
       const amount = Number(sale.total ?? 0);
       if (normalizeOutstandingStatus(sale) === 'unpaid') {
         unpaidCount += 1;
@@ -357,6 +378,44 @@ export default function AdminLiveSalesPage() {
       </body></html>`);
     win.document.close();
     setTimeout(() => win.print(), 300);
+  };
+
+  const canVoidSale =
+    userRole === 'Admin' || userRole === 'Main Admin';
+
+  const submitVoid = async () => {
+    if (!voidTarget || !voidRemarks.trim()) return;
+    setVoidSubmitting(true);
+    try {
+      const res = await fetch(`/api/sales/${voidTarget.id}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          remarks: voidRemarks.trim(),
+          ...(voidOtp.trim() ? { otp: voidOtp.trim() } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string; details?: string };
+      if (!res.ok) {
+        const base = typeof data.error === 'string' ? data.error : 'Gagal membatalkan';
+        const detail =
+          typeof data.details === 'string' && data.details.trim() && !base.includes(data.details.trim())
+            ? ` ${data.details.trim()}`
+            : '';
+        throw new Error(`${base}${detail}`);
+      }
+      setVoidTarget(null);
+      setVoidRemarks('');
+      setVoidOtp('');
+      setGeneratedVoidOtp(null);
+      await load(false);
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : 'Ralat membatal');
+    } finally {
+      setVoidSubmitting(false);
+    }
   };
 
   return (
@@ -527,11 +586,19 @@ export default function AdminLiveSalesPage() {
                   <th className="px-4 py-3">Bukti</th>
                   <th className="px-4 py-3 text-right">Jumlah</th>
                   <th className="px-4 py-3 text-center">Print</th>
+                  {(canVoidSale) && (
+                    <th className="px-4 py-3 text-center">Void</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredSales.map(sale => (
-                  <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                  <tr
+                    key={sale.id}
+                    className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                      sale.voidedAt ? 'opacity-75 bg-slate-50/80 dark:bg-slate-900/50' : ''
+                    }`}
+                  >
                     <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400 whitespace-nowrap">{sale.invoice || sale.id}</td>
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{getCustomerName(sale)}</td>
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{sale.area || '–'}</td>
@@ -543,7 +610,11 @@ export default function AdminLiveSalesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {normalizeOutstandingStatus(sale) === 'unpaid' ? (
+                      {normalizeOutstandingStatus(sale) === 'void' ? (
+                        <span className="inline-block rounded-full bg-slate-200 dark:bg-slate-700 px-2.5 py-1 text-xs text-slate-700 dark:text-slate-200">
+                          Dibatalkan
+                        </span>
+                      ) : normalizeOutstandingStatus(sale) === 'unpaid' ? (
                         <span className="inline-block rounded-full bg-amber-100 dark:bg-amber-900/30 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300">
                           Belum Dibayar
                         </span>
@@ -568,12 +639,33 @@ export default function AdminLiveSalesPage() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <button
+                        type="button"
                         onClick={() => handlePrint(sale)}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
                       >
                         <Printer size={13} /> Print
                       </button>
                     </td>
+                    {canVoidSale && (
+                      <td className="px-4 py-3 text-center">
+                        {sale.voidedAt ? (
+                          <span className="text-xs text-slate-400">—</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVoidRemarks('');
+                              setVoidOtp('');
+                              setGeneratedVoidOtp(null);
+                              setVoidTarget(sale);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-300 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                          >
+                            <Ban size={13} /> Batalkan
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -581,6 +673,147 @@ export default function AdminLiveSalesPage() {
           </div>
         )}
       </div>
+
+      {voidTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Batalkan invois</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 font-mono">{voidTarget.invoice || voidTarget.id}</p>
+            <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+              Rekod kekal untuk audit; jumlah akan ditetapkan kepada RM0 dan stok van dikembalikan. Nyatakan sebab:
+            </p>
+            <textarea
+              value={voidRemarks}
+              onChange={(e) => setVoidRemarks(e.target.value)}
+              rows={4}
+              className="mt-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+              placeholder="Sebab pembatalan (wajib)"
+            />
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-600 dark:bg-slate-800/80">
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">OTP void (sekali guna)</p>
+              {voidOtpRequired ? (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                  Tetapan pelayan: OTP <strong>wajib</strong>. Klik <strong>Jana OTP</strong> — kod 6 digit dipaparkan di kotak hijau di bawah; taip kod yang sama dalam medan sebelum sahkan.
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Pilihan: klik <strong>Jana OTP</strong> — kod dipaparkan di kotak hijau. Set <code className="rounded bg-slate-200 px-0.5 dark:bg-slate-700">VOID_OTP_REQUIRED=true</code> untuk wajibkan OTP sebelum sahkan.
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={voidSubmitting}
+                  onClick={async () => {
+                    if (!voidTarget) return;
+                    try {
+                      const res = await fetch(`/api/sales/${voidTarget.id}/void/otp`, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                      });
+                      const data = (await res.json().catch(() => ({}))) as {
+                        code?: string;
+                        expiresAt?: string;
+                        error?: string;
+                        message?: string;
+                      };
+                      if (!res.ok) {
+                        throw new Error(data.error || data.message || 'Gagal jana OTP');
+                      }
+                      if (data.code) {
+                        setVoidOtp('');
+                        const expiresAt =
+                          typeof data.expiresAt === 'string' && data.expiresAt.trim()
+                            ? data.expiresAt
+                            : new Date(Date.now() + 15 * 60 * 1000).toISOString();
+                        setGeneratedVoidOtp({ code: data.code, expiresAt });
+                      }
+                    } catch (e) {
+                      alert(e instanceof Error ? e.message : 'Ralat OTP');
+                    }
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                >
+                  Jana OTP
+                </button>
+              </div>
+              {generatedVoidOtp && (
+                <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-800/60 dark:bg-emerald-950/40">
+                  <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">Kod untuk invois ini</p>
+                  <p className="mt-2 text-center font-mono text-2xl font-bold tracking-[0.35em] text-emerald-950 dark:text-emerald-100">
+                    {generatedVoidOtp.code}
+                  </p>
+                  <p className="mt-2 text-center text-xs text-emerald-800 dark:text-emerald-300/90">
+                    Luput: {fmtTime(generatedVoidOtp.expiresAt)}
+                  </p>
+                  <p className="mt-1 text-center text-xs text-emerald-700/90 dark:text-emerald-400/90">
+                    Hantar melalui WhatsApp jika admin lain yang sahkan; taip kod yang sama dalam medan di bawah.
+                  </p>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(generatedVoidOtp.code);
+                        } catch {
+                          alert(`Kod: ${generatedVoidOtp.code}`);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 dark:border-emerald-500 dark:bg-emerald-900 dark:text-emerald-100 dark:hover:bg-emerald-800"
+                    >
+                      <Copy size={14} /> Salin kod
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVoidOtp(generatedVoidOtp.code)}
+                      className="rounded-lg border border-emerald-600 bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+                    >
+                      Isi medan
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-600 dark:text-slate-400">Taip kod:</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={8}
+                  value={voidOtp}
+                  onChange={(e) => setVoidOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6 digit"
+                  className="w-28 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm tracking-widest dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setVoidTarget(null);
+                  setVoidRemarks('');
+                  setVoidOtp('');
+                  setGeneratedVoidOtp(null);
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                disabled={voidSubmitting || !voidRemarks.trim() || (voidOtpRequired && voidOtp.trim().length < 6)}
+                onClick={() => {
+                  void submitVoid();
+                }}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {voidSubmitting ? 'Memproses…' : 'Sahkan batalkan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

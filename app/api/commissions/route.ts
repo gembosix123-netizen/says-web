@@ -7,8 +7,11 @@ const SALES_TABLE = 'sales_transactions';
 
 interface SalesRecord {
   salesman_id?: string;
+  user_id?: string;
+  voided_at?: string | null;
   total_amount?: number | string;
   amount?: number | string;
+  grand_total?: number | string;
 }
 
 interface CommissionPayoutRecord {
@@ -115,14 +118,15 @@ export async function GET(request: NextRequest) {
 
     // Calculate commission for each sales user
     const commissions: CommissionSummary[] = (salesUsers || []).map(user => {
-      // Filter sales by this user
-      const userSales = allSales.filter((s) => 
-        s.salesman_id === user.id || 
-        s.salesman_id === user.username
-      );
+      // Filter sales by this user — exclude voided; match user_id or salesman_id
+      const userSales = allSales.filter((s) => {
+        if (s.voided_at) return false;
+        const sid = s.user_id ?? s.salesman_id;
+        return sid === user.id || s.salesman_id === user.username;
+      });
 
-      const totalSales = userSales.reduce((sum, s) => 
-        sum + Number(s.total_amount ?? s.amount ?? 0), 0
+      const totalSales = userSales.reduce((sum, s) =>
+        sum + Number(s.grand_total ?? s.total_amount ?? s.amount ?? 0), 0
       );
 
       const commissionRate = user.commission_rate || 0.05; // Default 5%

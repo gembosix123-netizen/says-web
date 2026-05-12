@@ -14,6 +14,8 @@ import {
   normalizeBranchLabel,
 } from '@/lib/branchPermissions';
 import { VanInventory } from '@/types';
+import { generateUniqueInvoiceNo, normalizeBranchCode } from '@/lib/invoiceNumbers';
+import { evaluateSalesNewSaleBlocked } from '@/lib/salesDailyReportGate';
 
 const SALES_TABLE = 'sales_transactions';
 const SALES_ITEMS_TABLE = 'sales_items';
@@ -23,20 +25,6 @@ const SALES_ITEMS_ID_CHUNK = 100;
 function toSafeNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizeBranchCode(branch = 'XX') {
-  const compact = branch
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, ' ')
-    .trim();
-
-  if (!compact) return 'XX';
-
-  const parts = compact.split(/\s+/).filter(Boolean);
-  const initials = parts.map((part) => part[0]).join('').slice(0, 4);
-  return initials || compact.slice(0, 4);
 }
 
 function isMissingColumnError(error: unknown, columnName: string): boolean {
@@ -163,10 +151,6 @@ function normalizeItemsFromSaleRow(sale: Record<string, unknown>) {
   }).filter((item) => item.name || item.quantity > 0 || item.price > 0 || item.subtotal > 0);
 }
 
-function generateInvoice(branchCode = 'XX') {
-  return generateDocumentNumber('INV', branchCode);
-}
-
 function generatePaymentReference(paymentMethod: string, branch: string) {
   const prefixMap: Record<string, string> = {
     bill_to_bill: 'B2B',
@@ -193,6 +177,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     let branch: string | null = searchParams.get('branch');
+    const includeVoided = searchParams.get('includeVoided') === 'true';
     const startDate: string | null = searchParams.get('startDate');
     const endDate: string | null = searchParams.get('endDate');
     const date: string | null = searchParams.get('date');
@@ -260,7 +245,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch sales data' }, { status: 500 });
     }
 
-    const salesAll = (salesRows || []).filter((sale) => branchLabelsEquivalent(sale.branch, branch));
+    const branchFiltered = (salesRows || []).filter((sale) => branchLabelsEquivalent(sale.branch, branch));
+    const salesAll = includeVoided
+      ? branchFiltered
+      : branchFiltered.filter((sale) => !sale.voided_at);
     const saleIds = salesAll.map((sale) => sale.id);
     const customerIds = Array.from(new Set(salesAll.map((sale) => sale.customer_id).filter(Boolean)));
     const userIds = Array.from(new Set(salesAll.map((sale) => sale.user_id).filter(Boolean)));
@@ -311,27 +299,49 @@ export async function GET(request: NextRequest) {
     }
 
     let customersById: Record<string, string> = {};
+    /** Kawasan paparan: `area` pelanggan, else `district` (rekod jualan tiada area) */
+    let customerAreaById: Record<string, string> = {};
+
+    const mergeCustomerRows = (rows: Array<{ id: string; name?: string; area?: string | null; district?: string | null }> | null) => {
+      for (const customer of rows || []) {
+        const id = String(customer.id || '');
+        if (!id) continue;
+        if (customer.name) customersById[id] = customer.name;
+        const loc =
+          String(customer.area || '').trim() ||
+          String(customer.district || '').trim();
+        if (loc) customerAreaById[id] = loc;
+      }
+    };
+
     if (customerIds.length > 0) {
       const customersTable = getCustomersTableByBranch(currentUser.branch as Branch | undefined);
-      const { data: customerRows } = await supabaseAdmin
+      const { data: customerRows, error: custErr } = await supabaseAdmin
         .from(customersTable)
-        .select('id,name')
+        .select('id,name,area,district')
         .in('id', customerIds);
 
-      customersById = (customerRows || []).reduce<Record<string, string>>((acc, customer) => {
-        acc[customer.id] = customer.name;
-        return acc;
-      }, {});
+      if (!custErr) {
+        mergeCustomerRows(customerRows as Array<{ id: string; name?: string; area?: string | null; district?: string | null }>);
+      } else {
+        const { data: nameOnly } = await supabaseAdmin.from(customersTable).select('id,name').in('id', customerIds);
+        mergeCustomerRows(nameOnly as Array<{ id: string; name?: string }> | null);
+      }
 
       // Fallback: query the other branch table for any unresolved customers
-      const unresolvedIds = customerIds.filter((id) => !customersById[id]);
+      const unresolvedIds = customerIds.filter((id) => !customersById[id] || !customerAreaById[id]);
       if (unresolvedIds.length > 0) {
         const otherTable = customersTable === 'customers_kb' ? 'customers_kk' : 'customers_kb';
-        const { data: otherRows } = await supabaseAdmin
+        const { data: otherRows, error: otherErr } = await supabaseAdmin
           .from(otherTable)
-          .select('id,name')
+          .select('id,name,area,district')
           .in('id', unresolvedIds);
-        (otherRows || []).forEach((c) => { customersById[c.id] = c.name; });
+        if (!otherErr) {
+          mergeCustomerRows(otherRows as Array<{ id: string; name?: string; area?: string | null; district?: string | null }>);
+        } else {
+          const { data: otherName } = await supabaseAdmin.from(otherTable).select('id,name').in('id', unresolvedIds);
+          mergeCustomerRows(otherName as Array<{ id: string; name?: string }> | null);
+        }
       }
     }
 
@@ -386,6 +396,7 @@ export async function GET(request: NextRequest) {
       const items = (itemsBySaleId[sale.id] && itemsBySaleId[sale.id].length > 0)
         ? itemsBySaleId[sale.id]
         : normalizeItemsFromSaleRow(sale as Record<string, unknown>);
+      const isVoided = Boolean(sale.voided_at || sale.status === 'voided');
       const total = Number(sale.grand_total ?? sale.subtotal_amount ?? 0);
       const fallbackCustomerName =
         customersById[sale.customer_id] ||
@@ -393,7 +404,16 @@ export async function GET(request: NextRequest) {
         sale.customer ||
         extractCustomerNameFromNotes(sale.notes) ||
         null;
-      const paymentStatus = sale.status === 'pending' ? 'pending' : 'paid';
+
+      const saleRow = sale as Record<string, unknown>;
+      const areaOnSale =
+        String(saleRow.area || '').trim() ||
+        String(saleRow.district || '').trim();
+      const cid = String(sale.customer_id || '').trim();
+      const areaResolved =
+        (areaOnSale || (cid ? customerAreaById[cid] || '' : '')).trim() || null;
+
+      const paymentStatus = isVoided ? 'voided' : sale.status === 'pending' ? 'pending' : 'paid';
       const paymentReferenceNo =
         sale.billing_ref_no ||
         sale.transfer_ref_no ||
@@ -410,7 +430,7 @@ export async function GET(request: NextRequest) {
         total,
         total_amount: total,
         branch: sale.branch,
-        area: sale.area || null,
+        area: areaResolved,
         items,
         status: sale.status || 'completed',
         paymentStatus,
@@ -440,7 +460,12 @@ export async function GET(request: NextRequest) {
         proofPhotoUrls: proofPhotoUrls.length > 0 ? proofPhotoUrls : null,
         notes: sale.notes || null,
         transactionDate: sale.transaction_date || sale.created_at || null,
-        updatedAt: sale.updated_at || null
+        updatedAt: sale.updated_at || null,
+        paidAt: sale.paid_at ?? null,
+        voidedAt: sale.voided_at ?? null,
+        voidRemarks: sale.void_remarks ?? null,
+        originalGrandTotal:
+          sale.original_grand_total != null ? Number(sale.original_grand_total) : null,
       };
     });
 
@@ -491,6 +516,37 @@ export async function POST(request: NextRequest) {
         sourceSystem: 'supabase',
       });
       return NextResponse.json({ error: 'Unauthorized - only sales staff and admin can create sales' }, { status: 403 });
+    }
+
+    if (role === 'Sales') {
+      const gate = await evaluateSalesNewSaleBlocked({
+        userId: currentUser.id,
+        branch: currentUser.branch,
+      });
+      if (gate.blocked) {
+        await logAuditEvent({
+          request,
+          actor: currentUser,
+          module: 'sales',
+          action: 'create_sale',
+          entityType: 'sales_transaction',
+          status: 'denied',
+          sourceSystem: 'supabase',
+        });
+        return NextResponse.json(
+          {
+            error: gate.bodyMs,
+            code: 'DAILY_REPORT_GATE',
+            reason: gate.reason,
+            dateYmd: gate.dateYmd,
+            titleMs: gate.titleMs,
+            titleEn: gate.titleEn,
+            bodyMs: gate.bodyMs,
+            bodyEn: gate.bodyEn,
+          },
+          { status: 403 }
+        );
+      }
     }
 
     if (!supabaseAdmin) {
@@ -549,7 +605,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const invoice = validatedData.invoice?.trim() || generateInvoice(branch);
+    const requestedInvoice = validatedData.invoice?.trim();
+    /** Tolak format lama (random suffix) dan selaraskan dengan `generateUniqueInvoiceNo` */
+    if (
+      requestedInvoice &&
+      !/^INV-[A-Z0-9]{1,4}-\d{8}-\d{4}$/i.test(requestedInvoice)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Format no. invois tidak sah. Guna INV-XX-YYYYMMDD-0001 (empat digit akhir) atau kosongkan medan untuk jana automatik.',
+        },
+        { status: 400 }
+      );
+    }
+
+    let invoice: string;
+    let invoiceWasAuto: boolean;
+    if (requestedInvoice) {
+      invoice = requestedInvoice;
+      invoiceWasAuto = false;
+    } else {
+      invoice = await generateUniqueInvoiceNo(supabaseAdmin!, branch);
+      invoiceWasAuto = true;
+    }
     const isCredit = validatedData.payment_method === 'bill_to_bill';
     const requestedQuantities = validatedData.items.reduce<Record<string, number>>((acc, item) => {
       acc[item.productId] = (acc[item.productId] || 0) + Number(item.quantity || 0);
@@ -620,6 +699,47 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let refVoidedLine = '';
+    let oldVoidSaleId: string | null = null;
+    const refInv = String(validatedData.ref_voided_invoice || '').trim();
+    if (refInv) {
+      const { data: voidRow, error: voidLookupErr } = await supabaseAdmin
+        .from(SALES_TABLE)
+        .select('id, invoice, voided_at, user_id, branch')
+        .eq('invoice', refInv)
+        .maybeSingle();
+
+      if (voidLookupErr) {
+        return NextResponse.json({ error: 'Gagal semak invois rujukan.' }, { status: 500 });
+      }
+      if (!voidRow) {
+        return NextResponse.json(
+          { error: `Invois ${refInv} tidak dijumpai. Semak nombor invois.` },
+          { status: 400 }
+        );
+      }
+      if (!voidRow.voided_at) {
+        return NextResponse.json(
+          { error: 'Invois rujukan mesti sudah dibatalkan (void) oleh admin.' },
+          { status: 400 }
+        );
+      }
+      if (!branchLabelsEquivalent(String(voidRow.branch || ''), validatedData.branch)) {
+        return NextResponse.json(
+          { error: 'Invois dibatalkan mestilah dari cawangan yang sama dengan jualan ini.' },
+          { status: 400 }
+        );
+      }
+      if (role === 'Sales' && String(voidRow.user_id) !== currentUser.id) {
+        return NextResponse.json(
+          { error: 'Anda hanya boleh rujuk invoi dibatalkan untuk jualan sendiri.' },
+          { status: 403 }
+        );
+      }
+      refVoidedLine = `Ref voided invoice: ${voidRow.invoice}.`;
+      oldVoidSaleId = String(voidRow.id);
+    }
+
     const vanStockErrors: string[] = [];
     for (const item of validatedData.items) {
       const availableVanStock = vanItems[item.productId] || 0;
@@ -654,7 +774,8 @@ export async function POST(request: NextRequest) {
 
     const subtotalAmount = validatedData.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const baseNotes = String(validatedData.notes || '').trim();
-    const normalizedNotes = [baseNotes, customerFallbackNote].filter(Boolean).join(' ').trim() || null;
+    const normalizedNotes =
+      [baseNotes, customerFallbackNote, refVoidedLine].filter(Boolean).join(' ').trim().slice(0, 4000) || null;
 
     const saleData: Record<string, unknown> = {
       invoice,
@@ -703,6 +824,26 @@ export async function POST(request: NextRequest) {
       }
 
       const message = String(error.message || '');
+      const errCode = String((error as { code?: string }).code || '');
+      const dupInvoice =
+        errCode === '23505' &&
+        (message.toLowerCase().includes('invoice') || message.toLowerCase().includes('duplicate'));
+
+      if (dupInvoice && invoiceWasAuto) {
+        invoice = await generateUniqueInvoiceNo(supabaseAdmin!, branch);
+        insertPayload.invoice = invoice;
+        console.warn('[sales] Duplicate auto invoice; regenerated.');
+        continue;
+      }
+
+      if (dupInvoice && !invoiceWasAuto) {
+        await restoreVanInventory(inventoryId, vanItems, currentUser.id);
+        return NextResponse.json(
+          { error: 'Nombor invois sudah digunakan. Sila gunakan nombor lain.', details: message },
+          { status: 409 }
+        );
+      }
+
       const customerFkError = message.includes('sales_transactions_customer_id_fkey');
       if (customerFkError && insertPayload.customer_id) {
         const existingNotes = String(insertPayload.notes || '').trim();
@@ -821,6 +962,21 @@ export async function POST(request: NextRequest) {
         },
       });
       return NextResponse.json({ error: 'Failed to create sale items', details: itemsError.message }, { status: 500 });
+    }
+
+    if (oldVoidSaleId && createdSaleId) {
+      const replUpdate = await supabaseAdmin
+        .from(SALES_TABLE)
+        .update({ replacement_transaction_id: createdSaleId })
+        .eq('id', oldVoidSaleId);
+
+      if (replUpdate.error) {
+        if (isMissingColumnError(replUpdate.error, 'replacement_transaction_id')) {
+          console.warn('[sales] replacement_transaction_id column missing; skip link on voided sale.');
+        } else {
+          console.warn('[sales] could not set replacement_transaction_id on voided sale', replUpdate.error);
+        }
+      }
     }
 
     // Update customer outstanding balance if credit payment

@@ -47,11 +47,18 @@ export default function AdminReportsHub() {
   const [branchPanelReportId, setBranchPanelReportId] = useState<string | null>(null);
   const [detailsReport, setDetailsReport] = useState<DailyReport | null>(null);
   const [busyReportId, setBusyReportId] = useState<string | null>(null);
+  const [reportsLoadError, setReportsLoadError] = useState<'unauthorized' | null>(null);
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
+    setReportsLoadError(null);
     try {
       const res = await fetch('/api/daily-reports', { cache: 'no-store' });
+      if (res.status === 401) {
+        setReportsLoadError('unauthorized');
+        setReports([]);
+        return;
+      }
       const data = await res.json().catch(() => ({ reports: [] }));
       setReports(Array.isArray(data.reports) ? data.reports : []);
     } finally {
@@ -368,6 +375,17 @@ export default function AdminReportsHub() {
             </div>
           )}
 
+          {reportsLoadError === 'unauthorized' && (
+            <div className="rounded-lg border border-rose-700/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">
+              <strong className="text-rose-200">Sesi tidak sah atau tamat tempoh.</strong> API laporan memerlukan kuki log masuk — muat semula
+              halaman selepas log masuk, atau{' '}
+              <Link href="/login" className="underline font-medium text-rose-50 hover:text-white">
+                log masuk semula
+              </Link>
+              . Tanpa itu, senarai akan sentiasa kosong walaupun data wujud di Vercel.
+            </div>
+          )}
+
           {datesWithDailyData.length > 0 && (
             <div className="rounded-lg border border-slate-700 bg-slate-950/50 px-3 py-2">
               <p className="text-[11px] text-slate-500 mb-1.5">Tarikh yang ada hantaran dalam sistem:</p>
@@ -398,11 +416,29 @@ export default function AdminReportsHub() {
             </div>
           )}
 
-          {dailyQueue.length === 0 && !loading && recentDailyAllDates.length === 0 && (
-            <div className="rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-2 text-sm text-slate-300">
-              Tiada laporan harian dalam pangkalan untuk akaun/cawangan ini. Pastikan staff sudah hantar dari{' '}
-              <strong>Jualan → Laporan harian</strong>, dan environment sama (data laporan disimpan di pelayan app / KV,
-              bukan jadual jualan Supabase sahaja).
+          {dailyQueue.length === 0 && !loading && recentDailyAllDates.length === 0 && !reportsLoadError && (
+            <div className="rounded-lg border border-slate-600 bg-slate-800/50 px-3 py-3 text-sm text-slate-300 space-y-2">
+              <p>
+                Tiada laporan harian dipulangkan untuk akaun/cawangan ini. Semak perkara berikut:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-slate-400 text-xs">
+                <li>
+                  <strong className="text-slate-300">Localhost vs Vercel:</strong> data tidak dikongsi — localhost guna fail{' '}
+                  <code className="text-slate-300">data/</code> (atau Redis tempatan), production Vercel guna KV/Redis production. Hantaran di Vercel{' '}
+                  <strong className="text-slate-300">tidak akan muncul</strong> pada dev server melainkan anda salin data atau uji pada URL production yang sama.
+                </li>
+                <li>
+                  <strong className="text-slate-300">Admin cawangan:</strong> anda hanya nampak laporan yang{' '}
+                  <code className="text-slate-300">branch</code> sepadan dengan cawangan anda (Main Admin nampak semua).
+                </li>
+                <li>
+                  <strong className="text-slate-300">Tarikh:</strong> laporan dikumpul ikut tarikh borang — pilih tarikh yang sama atau guna cip / jadual &quot;Terkini&quot; di bawah.
+                </li>
+                <li>
+                  Staff perlu hantar dari <strong className="text-slate-300">Jualan → Laporan harian</strong>; data disimpan di app/KV,{' '}
+                  <strong className="text-slate-300">bukan</strong> sekadar jadual jualan Supabase.
+                </li>
+              </ul>
             </div>
           )}
 

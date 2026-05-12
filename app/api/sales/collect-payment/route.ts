@@ -145,9 +145,11 @@ export async function POST(request: NextRequest) {
       receipt_url,
     };
 
+    const paidAtIso = new Date().toISOString();
     const canonicalUpdatePayload: Record<string, unknown> = {
       status: 'completed',
       payment_method: payment_method || sale.payment_method,
+      paid_at: paidAtIso,
     };
 
     if (notes) {
@@ -167,12 +169,19 @@ export async function POST(request: NextRequest) {
     let updateError: unknown = null;
 
     if (target === TABLE_CANONICAL) {
-      const canonicalUpdate = await supabaseAdmin
-        .from(target)
-        .update(canonicalUpdatePayload)
-        .eq('id', saleId);
-
-      updateError = canonicalUpdate.error;
+      let payload: Record<string, unknown> = { ...canonicalUpdatePayload };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const canonicalUpdate = await supabaseAdmin.from(target).update(payload).eq('id', saleId);
+        updateError = canonicalUpdate.error;
+        if (!updateError) break;
+        const msg = String((updateError as { message?: string }).message || '');
+        if (attempt === 0 && 'paid_at' in payload && /paid_at/i.test(msg) && isMissingColumnError(updateError, 'paid_at')) {
+          delete payload.paid_at;
+          console.warn('[collect-payment] paid_at column missing; retrying update without it.');
+          continue;
+        }
+        break;
+      }
     } else {
       const legacyUpdate = await supabaseAdmin
         .from(target)

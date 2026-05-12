@@ -17,17 +17,39 @@ export function openDailyReportPdfWindow(row: DailyReport | Record<string, unkno
     { label: 'Balance PTCash', value: Number(r.balancePtCashManual || 0) },
   ];
   const renderSalesRows = (
-    rows: Array<{ customer: string; item: string; qn: number | string; price: number | string; amount: number | string; billNo: string }>
+    rows: Array<{
+      customer: string;
+      item: string;
+      qn: number | string;
+      price: number | string;
+      amount: number | string;
+      billNo: string;
+      isVoid?: boolean;
+    }>
   ) => {
     const normalizedRows = Array.isArray(rows) ? rows : [];
     const hasAnyValue = normalizedRows.some(
-      (row) => (row.customer || row.item || row.billNo || Number(row.amount || 0) > 0 || Number(row.qn || 0) > 0)
+      (row) =>
+        row.isVoid ||
+        row.customer ||
+        row.item ||
+        row.billNo ||
+        Number(row.amount || 0) > 0 ||
+        Number(row.qn || 0) > 0
     );
     const effectiveRows = hasAnyValue
       ? normalizedRows
       : [{ customer: '', item: '', qn: '', price: '', amount: '', billNo: '' }];
     const filledRows = effectiveRows
-      .map((row, idx) => `<tr><td>${idx + 1}</td><td>${row.customer || ''}</td><td>${row.item || ''}</td><td>${row.qn || ''}</td><td>${row.price || ''}</td><td>${row.amount || ''}</td><td>${row.billNo || ''}</td><td></td></tr>`)
+      .map((row, idx) => {
+        const amt =
+          row.isVoid === true
+            ? '0.00'
+            : row.amount !== '' && Number(row.amount) > 0
+              ? Number(row.amount).toFixed(2)
+              : '';
+        return `<tr><td>${idx + 1}</td><td>${row.customer || ''}</td><td>${row.item || ''}</td><td>${row.qn || ''}</td><td>${row.price || ''}</td><td>${amt}</td><td>${row.billNo || ''}</td><td></td></tr>`;
+      })
       .join('');
     const minRows = 8;
     const blanksNeeded = Math.max(0, minRows - effectiveRows.length);
@@ -68,7 +90,7 @@ export function openDailyReportPdfWindow(row: DailyReport | Record<string, unkno
           </div>
           <div class="meta">
             <div>Tarikh: ${r.date}<br/>Staff: ${r.userName}</div>
-            <div>Kawasan: ${r.branch}<br/>Status: ${r.status}</div>
+            <div>Kawasan: ${r.branch}<br/>Status: ${r.status}<br/><span style="font-size:9px;color:#444">VOID dipaparkan dengan RM0; jumlah ringkasan Sales tidak termasuk void.</span></div>
           </div>
 
           <table>
@@ -78,6 +100,10 @@ export function openDailyReportPdfWindow(row: DailyReport | Record<string, unkno
           <table>
             <thead><tr><th colspan="8" class="sectionTitle">Transfer Sales</th></tr><tr><th>No</th><th>Customer</th><th>Item</th><th>QN</th><th>Price</th><th>Amount</th><th>Bill No</th><th>PO By</th></tr></thead>
             <tbody>${renderSalesRows(r.salesSnapshot?.transferSales || [])}</tbody>
+          </table>
+          <table>
+            <thead><tr><th colspan="8" class="sectionTitle">Cash Paid Customer</th></tr><tr><th>No</th><th>Customer</th><th>Item</th><th>QN</th><th>Price</th><th>Amount</th><th>Bill No</th><th>PO By</th></tr></thead>
+            <tbody>${renderSalesRows(r.salesSnapshot?.cashPaidCustomer || [])}</tbody>
           </table>
           <table>
             <thead><tr><th colspan="8" class="sectionTitle">Credit Terms Customer</th></tr><tr><th>No</th><th>Customer</th><th>Item</th><th>QN</th><th>Price</th><th>Amount</th><th>Bill No</th><th>PO By</th></tr></thead>

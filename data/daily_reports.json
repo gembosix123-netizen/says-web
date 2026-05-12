@@ -34,12 +34,16 @@
       "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/banking/2026-04-22/1776799128948_dv5w7t.png"
     ],
     "cashProofUrls": [],
-    "status": "submitted_daily",
+    "status": "approved_daily",
     "source": "sales",
     "approvalStage": "daily",
     "liveSalesRefs": [],
     "submittedAt": "2026-04-21T19:18:01.870Z",
-    "updatedAt": "2026-04-21T19:18:50.860Z"
+    "updatedAt": "2026-05-12T15:18:51.418Z",
+    "reviewedBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54",
+    "reviewedAt": "2026-05-12T15:18:51.418Z",
+    "approvedDailyAt": "2026-05-12T15:18:51.418Z",
+    "approvedDailyBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54"
   },
   {
     "id": "158a79bb-b138-4cee-b3ef-483b011c4394",
@@ -78,17 +82,21 @@
     "cashProofUrls": [
       "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-04-22/1776801794304_pxedk9.png"
     ],
-    "status": "submitted_daily",
+    "status": "approved_daily",
     "source": "sales",
     "approvalStage": "daily",
     "liveSalesRefs": [],
     "submittedAt": "2026-04-21T20:03:07.511Z",
-    "updatedAt": "2026-04-21T20:03:14.759Z",
+    "updatedAt": "2026-05-12T15:18:58.802Z",
     "salesSnapshot": {
       "cashSales": [],
       "transferSales": [],
       "creditSales": []
-    }
+    },
+    "reviewedBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54",
+    "reviewedAt": "2026-05-12T15:18:58.802Z",
+    "approvedDailyAt": "2026-05-12T15:18:58.802Z",
+    "approvedDailyBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54"
   },
   {
     "id": "e17b2d2d-ee4b-4baf-a94d-51a0173d332b",
@@ -187,7 +195,7 @@
       "transferSales": [],
       "creditSales": []
     },
-    "status": "submitted_daily",
+    "status": "approved_daily",
     "source": "sales",
     "approvalStage": "daily",
     "liveSalesRefs": [
@@ -197,7 +205,11 @@
       "b59a712d-c2e6-47e0-9413-b84cc22007bb"
     ],
     "submittedAt": "2026-05-04T18:31:46.370Z",
-    "updatedAt": "2026-05-04T20:21:30.538Z"
+    "updatedAt": "2026-05-12T15:19:01.775Z",
+    "reviewedBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54",
+    "reviewedAt": "2026-05-12T15:19:01.775Z",
+    "approvedDailyAt": "2026-05-12T15:19:01.775Z",
+    "approvedDailyBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54"
   },
   {
     "id": "9bf0bfb1-7013-46f7-a261-4e3a722e52f5",
@@ -231,13 +243,17 @@
       "transferSales": [],
       "creditSales": []
     },
-    "status": "submitted_daily",
+    "status": "approved_daily",
     "source": "sales",
     "approvalStage": "daily",
     "liveSalesRefs": [],
     "submittedAt": "2026-05-11T16:06:41.506Z",
-    "updatedAt": "2026-05-11T18:20:01.204Z",
-    "branchExpensesSyncedAt": "2026-05-11T18:19:57.565Z"
+    "updatedAt": "2026-05-12T15:18:28.172Z",
+    "branchExpensesSyncedAt": "2026-05-11T18:19:57.565Z",
+    "reviewedBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54",
+    "reviewedAt": "2026-05-12T15:18:28.172Z",
+    "approvedDailyAt": "2026-05-12T15:18:28.172Z",
+    "approvedDailyBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54"
   },
   {
     "id": "984c274e-817a-419a-b295-a2d242fbddc6",
@@ -270,5 +286,36 @@
     "liveSalesRefs": [],
     "submittedAt": "2026-05-11T16:09:18.408Z",
     "updatedAt": "2026-05-11T16:09:18.408Z"
+  },
+  {
+    "id": "613e407b-a798-4e0c-a697-a19ad316791a",
+    "userId": "5ab2a890-942c-47d5-9ab4-892c62fcf4be",
+    "userName": "allankk",
+    "branch": "Kota Kinabalu",
+    "date": "2026-05-19",
+    "totalSales": 0,
+    "totalCash": 0,
+    "totalCredit": 0,
+    "totalTransfer": 0,
+    "amountBankingManual": 0,
+    "balancePtCashManual": 0,
+    "expenseLines": [],
+    "expensesTotal": 0,
+    "bankSlipUrls": [],
+    "cashProofUrls": [
+      "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-05-19/1778599301958_c4dtkq.png"
+    ],
+    "salesSnapshot": {
+      "cashSales": [],
+      "transferSales": [],
+      "cashPaidCustomer": [],
+      "creditSales": []
+    },
+    "status": "draft",
+    "source": "sales",
+    "approvalStage": "daily",
+    "liveSalesRefs": [],
+    "submittedAt": "2026-05-12T15:21:43.889Z",
+    "updatedAt": "2026-05-12T15:21:43.889Z"
   }
 ]

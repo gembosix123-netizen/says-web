@@ -7,10 +7,15 @@ import { ArrowLeft, History, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import type { DailyReport } from '@/types';
 
-function salesReportStatusLabel(status: string): string {
-  const s = String(status);
-  if (s === 'draft') return 'Draf';
-  if (s === 'submitted_daily') return 'Menunggu admin cawangan';
+/**
+ * Aliran sebenar dalam sistem:
+ * - draft = jurujual sudah hantar borang; menunggu admin cawangan isi perbelanjaan & simpan
+ * - submitted_daily = admin cawangan sudah hantar ke HQ; menunggu Main Admin
+ */
+function salesReportStatusLabel(row: { status: string }): string {
+  const s = String(row.status);
+  if (s === 'draft') return 'Menunggu admin cawangan';
+  if (s === 'submitted_daily') return 'Menunggu Main Admin (HQ)';
   if (s === 'returned_daily') return 'Dikembalikan — sila betulkan';
   if (s === 'approved_daily') return 'Diluluskan HQ';
   return s;
@@ -67,9 +72,10 @@ export default function DailyReportLibraryPage() {
       setResendingId(row.id);
       setHistoryError(null);
       try {
-        const res = await fetch('/api/daily-reports', {
+        const res = await fetch('/api/sales/daily-report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
           body: JSON.stringify({
             date: row.date,
             source: 'sales',
@@ -130,11 +136,17 @@ export default function DailyReportLibraryPage() {
             <div>
               <h2 className="text-white font-semibold">Senarai laporan anda</h2>
               <p className="text-slate-400 text-sm">
-                Status setiap tarikh. Untuk isi semula atau muat naik bukti, gunakan{' '}
+                Untuk isi semula atau muat naik bukti, gunakan{' '}
                 <Link href="/sales/daily-report" className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline">
                   borang laporan harian
                 </Link>
                 .
+              </p>
+              <p className="text-slate-500 text-xs mt-2 leading-relaxed border-l-2 border-slate-600 pl-3">
+                <strong className="text-slate-400">Nota:</strong> selepas anda tekan &quot;Hantar ke admin cawangan&quot;, rekod kekal sebagai{' '}
+                <span className="text-slate-300">draf dalam pangkalan</span> sehingga admin cawangan simpan perbelanjaan — pada skrin ini ia dipaparkan sebagai{' '}
+                <strong className="text-slate-300">Menunggu admin cawangan</strong>. Kemudian admin hantar ke HQ dan status menjadi{' '}
+                <strong className="text-slate-300">Menunggu Main Admin (HQ)</strong>.
               </p>
             </div>
           </div>
@@ -176,7 +188,7 @@ export default function DailyReportLibraryPage() {
                         <td className="px-4 py-3 font-mono text-white">{row.date}</td>
                         <td className="px-4 py-3">
                           <span className="inline-block rounded-full border border-slate-600 bg-slate-800/80 px-2.5 py-0.5 text-xs">
-                            {salesReportStatusLabel(String(row.status))}
+                            {salesReportStatusLabel(row)}
                           </span>
                         </td>
                         <td className="px-4 py-3 font-mono text-slate-400">{Number(row.totalSales ?? 0).toFixed(2)}</td>

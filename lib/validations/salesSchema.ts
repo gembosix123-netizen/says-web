@@ -109,7 +109,14 @@ export const createSaleSchema = z.object({
     .default(0),
   notes: z
     .string()
-    .max(500, 'Nota terlalu panjang')
+    .max(2000, 'Nota terlalu panjang')
+    .trim()
+    .optional()
+    .nullable(),
+  /** Nombor invois yang telah dibatalkan — API sahkan void & tambah ayat rujukan ke notes */
+  ref_voided_invoice: z
+    .string()
+    .max(80, 'Nombor invois rujukan terlalu panjang')
     .trim()
     .optional()
     .nullable(),

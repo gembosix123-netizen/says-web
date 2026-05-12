@@ -4,9 +4,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import MetricCard from '@/components/ui/MetricCard';
 import { Button } from '@/components/ui/Button';
-import { ShoppingCart, Store, TrendingUp, LogOut, User, MapPin, Check } from 'lucide-react';
+import { ShoppingCart, Store, TrendingUp, LogOut, User, MapPin, Check, Send } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { normalizeRole } from '@/lib/roles';
 
 const formatCurrency = (amount: number) =>
   `RM ${amount.toLocaleString('ms-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -265,6 +266,32 @@ export default function SalesDashboardPage() {
               </button>
             </div>
           </Card>
+
+          {normalizeRole(userInfo?.role) === 'Sales' && (
+            <Card className="border-2 border-emerald-500/35 bg-emerald-950/25">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-600/30">
+                    <Send size={20} className="text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-semibold text-lg">Laporan harian</h3>
+                    <p className="text-white/55 text-sm mt-0.5">
+                      Hantar ringkasan &amp; bukti kepada admin cawangan untuk tarikh pilihan.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="primary"
+                  className="shrink-0 bg-emerald-600 hover:bg-emerald-500 border-0 w-full md:w-auto"
+                  onClick={() => router.push('/sales/daily-report')}
+                >
+                  <Send size={18} className="mr-2" />
+                  Hantar laporan harian
+                </Button>
+              </div>
+            </Card>
+          )}
 
         {/* Main Action Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

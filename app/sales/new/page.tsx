@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { 
@@ -19,11 +19,14 @@ import {
   Camera,
   X,
   ChevronDown,
+  AlertCircle,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { supabase } from '@/lib/supabase';
+import { normalizeBranchCode } from '@/lib/invoiceNumbers';
+import { normalizeRole } from '@/lib/roles';
 
 const MAX_PAYMENT_PROOF_IMAGES = 4;
 
@@ -102,20 +105,6 @@ const RETURN_REASONS = [
   'Pelanggan Tidak Pesan',
   'Lain-lain',
 ];
-
-function normalizeBranchCode(branch = 'XX') {
-  const compact = branch
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, ' ')
-    .trim();
-
-  if (!compact) return 'XX';
-
-  const parts = compact.split(/\s+/).filter(Boolean);
-  const initials = parts.map((part) => part[0]).join('').slice(0, 4);
-  return initials || compact.slice(0, 4);
-}
 
 function generateDocumentNumber(prefix: string, branch: string) {
   const branchCode = normalizeBranchCode(branch);
@@ -271,8 +260,17 @@ export default function NewSalePage() {
   const [billingRefNo, setBillingRefNo] = useState('');
   const [transferRefNo, setTransferRefNo] = useState('');
   const [qrTxnRefNo, setQrTxnRefNo] = useState('');
+  /** Invois lama yang dibatalkan — sistem tambah ayat "Ref voided invoice: …" dalam notes */
+  const [refVoidedInvoice, setRefVoidedInvoice] = useState('');
   const [paymentProofs, setPaymentProofs] = useState<PaymentProofItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dailyReportGateBlock, setDailyReportGateBlock] = useState<{
+    titleMs: string;
+    titleEn: string;
+    bodyMs: string;
+    bodyEn: string;
+    dateYmd: string;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
   const [serviceStepError, setServiceStepError] = useState('');
@@ -295,6 +293,22 @@ export default function NewSalePage() {
     proofImageUrls: string[];
     returnedItems: Array<{ productName: string; quantity: number; reason: string }>;
   } | null>(null);
+
+  const fetchNextInvoiceNo = useCallback(async (): Promise<string> => {
+    const b = userBranch.trim();
+    const url =
+      b.length > 0
+        ? `/api/sales/invoice-number?branch=${encodeURIComponent(b)}`
+        : '/api/sales/invoice-number';
+    const res = await fetch(url, { credentials: 'same-origin' });
+    const data = (await res.json().catch(() => ({}))) as { invoiceNo?: string; error?: string };
+    if (!res.ok) {
+      throw new Error(typeof data.error === 'string' ? data.error : 'Gagal menjana nombor invois');
+    }
+    const no = String(data.invoiceNo || '').trim();
+    if (!no) throw new Error('Nombor invois kosong');
+    return no;
+  }, [userBranch]);
 
   useEffect(() => {
     fetchData();
@@ -327,12 +341,34 @@ export default function NewSalePage() {
 
   const fetchData = async () => {
     try {
+      setDailyReportGateBlock(null);
       const [customersRes, productsRes, userRes, debtsRes] = await Promise.all([
         fetch('/api/customers').then(res => res.json()),
         fetch('/api/inventory/van').then(res => res.json()),
         fetch('/api/auth/me').then(res => res.json()),
         fetch('/api/sales/collect-payment?status=pending').then(res => res.ok ? res.json() : [])
       ]);
+
+      if (normalizeRole(String(userRes?.role || '')) === 'Sales') {
+        const gRes = await fetch('/api/sales/new-sale-eligibility', {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        const gJson = await gRes.json().catch(() => ({}));
+        if (gRes.ok && gJson.blocked === true && gJson.bodyMs) {
+          const dateYmd =
+            typeof gJson.dateYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(gJson.dateYmd) ? gJson.dateYmd : '';
+          setDailyReportGateBlock({
+            titleMs: String(gJson.titleMs || ''),
+            titleEn: String(gJson.titleEn || ''),
+            bodyMs: String(gJson.bodyMs || ''),
+            bodyEn: String(gJson.bodyEn || ''),
+            dateYmd,
+          });
+          setLoading(false);
+          return;
+        }
+      }
 
       if (Array.isArray(customersRes)) setCustomers(customersRes);
       if (userRes?.branch) {
@@ -383,10 +419,23 @@ export default function NewSalePage() {
   };
 
   useEffect(() => {
-    if (userBranch && !invoiceNo) {
-      setInvoiceNo(generateDocumentNumber('INV', userBranch));
-    }
-  }, [userBranch, invoiceNo]);
+    if (!userBranch || invoiceNo) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const no = await fetchNextInvoiceNo();
+        if (!cancelled) setInvoiceNo(no);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) {
+          setInvoiceNo('');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userBranch, invoiceNo, fetchNextInvoiceNo]);
 
   useEffect(() => {
     if (!userBranch) return;
@@ -646,7 +695,16 @@ export default function NewSalePage() {
   }, [step, debtOnlyMode, selectedCustomer?.id]);
 
   const regenerateInvoiceNo = () => {
-    setInvoiceNo(generateDocumentNumber('INV', userBranch || 'XX'));
+    void (async () => {
+      try {
+        const no = await fetchNextInvoiceNo();
+        setInvoiceNo(no);
+      } catch (e) {
+        console.error(e);
+        alert('Gagal menjana nombor invois dari pelayan. Kosongkan medan atau cuba "Jana semula". Sistem akan jana automatik semasa simpan jika medan kosong.');
+        setInvoiceNo('');
+      }
+    })();
   };
 
   const regenerateReferenceNo = () => {
@@ -947,7 +1005,16 @@ export default function NewSalePage() {
     if (!selectedCustomer) return;
     if (!debtOnlyMode && cart.length === 0) return;
 
-    const resolvedInvoiceNo = invoiceNo.trim() || generateDocumentNumber('INV', userBranch || 'XX');
+    let resolvedInvoiceNo = invoiceNo.trim();
+    if (!resolvedInvoiceNo) {
+      try {
+        resolvedInvoiceNo = await fetchNextInvoiceNo();
+      } catch (e) {
+        console.error(e);
+        // Biarkan kosong — POST /api/sales akan panggil generateUniqueInvoiceNo() (format INV-XX-YYYYMMDD-0001)
+        resolvedInvoiceNo = '';
+      }
+    }
     const resolvedBillingRefNo = paymentMethod === 'bill_to_bill'
       ? billingRefNo.trim() || generateDocumentNumber('B2B', userBranch || 'XX')
       : null;
@@ -1045,10 +1112,13 @@ export default function NewSalePage() {
       })();
 
       const salePayload = {
-        invoice: resolvedInvoiceNo,
+        ...(resolvedInvoiceNo.trim() ? { invoice: resolvedInvoiceNo.trim() } : {}),
         customer_id: selectedCustomer.id,
         customer_name: selectedCustomer.name,
         area: salesArea,
+        ...(refVoidedInvoice.trim()
+          ? { ref_voided_invoice: refVoidedInvoice.trim() }
+          : {}),
         total_amount: totalAmount,
         payment_method: paymentMethod,
         receipt_no: null,
@@ -1174,6 +1244,47 @@ export default function NewSalePage() {
       setSubmitting(false);
     }
   };
+
+  if (dailyReportGateBlock) {
+    return (
+      <div className="min-h-screen bg-slate-950 p-6 flex flex-col items-center justify-center">
+        <Card className="max-w-lg w-full border border-amber-500/30 bg-slate-900 p-6">
+          <div className="flex gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400">
+              <AlertCircle size={28} strokeWidth={2.25} />
+            </div>
+            <div className="min-w-0 flex-1 space-y-3">
+              <h1 className="text-xl font-bold text-white">{dailyReportGateBlock.titleMs}</h1>
+              <p className="text-sm text-white/90 leading-relaxed">{dailyReportGateBlock.bodyMs}</p>
+              <div className="border-t border-slate-700 pt-3">
+                <p className="text-sm font-semibold text-white/90">{dailyReportGateBlock.titleEn}</p>
+                <p className="text-sm text-white/75 mt-1 leading-relaxed">{dailyReportGateBlock.bodyEn}</p>
+              </div>
+              <div className="flex flex-col gap-2 pt-2 sm:flex-row">
+                <Button variant="ghost" size="sm" type="button" onClick={() => router.push('/sales')}>
+                  Kembali ke Modul Jualan
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  type="button"
+                  className="bg-emerald-600 hover:bg-emerald-500 border-0"
+                  onClick={() => {
+                    const q = dailyReportGateBlock.dateYmd
+                      ? `?date=${encodeURIComponent(dailyReportGateBlock.dateYmd)}`
+                      : '';
+                    router.push(`/sales/daily-report${q}`);
+                  }}
+                >
+                  Buka Laporan Harian
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -1799,6 +1910,24 @@ export default function NewSalePage() {
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
                     />
                     <p className="text-xs text-white/40 mt-1">Cadangan nombor invois dijana automatik dan masih boleh diubah.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-white/60 text-sm mb-1">
+                      Invois dibatalkan (rujukan, pilihan)
+                    </label>
+                    <input
+                      type="text"
+                      value={refVoidedInvoice}
+                      onChange={(e) => setRefVoidedInvoice(e.target.value)}
+                      placeholder="cth: INV-KK-260512-3212"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-white/40 mt-1">
+                      Jika diisi, sistem sahkan invois itu sudah void dan tambah ayat{' '}
+                      <span className="text-white/60">Ref voided invoice: …</span> pada nota jualan.
+                    </p>
                   </div>
 
                   <div>

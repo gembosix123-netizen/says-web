@@ -21,6 +21,11 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
+import type { DailyReport } from '@/types';
+import {
+  shouldReadSalesDataFromLibrarySnapshot,
+  snapshotHasSaleRows,
+} from '@/lib/salesmanDailyReportLibrary';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -42,6 +47,14 @@ interface SaleRecord {
   customer_id?: string | null;
   created_at?: string;
   createdAt?: string;
+  /** Diisi bila kutipan hutang / invois kredit (POST collect-payment + kolum paid_at) */
+  paidAt?: string | null;
+  updatedAt?: string | null;
+  paymentStatus?: string | null;
+  voidedAt?: string | null;
+  voidRemarks?: string | null;
+  /** Jumlah asal sebelum void (audit) */
+  originalGrandTotal?: number | null;
   total_amount?: number | null;
   total?: number | null;
   payment_method?: string | null;
@@ -74,6 +87,8 @@ interface SaleRow {
   price: number | string;
   amount: number | string;
   billNo: string;
+  /** Baris invois dibatalkan — papar jumlah 0, tidak masuk jumlah ringkasan */
+  isVoid?: boolean;
 }
 
 interface StockRow {
@@ -92,6 +107,8 @@ interface DailyData {
   dateFormatted: string;
   cashSales: SaleRow[];
   transferSales: SaleRow[];
+  /** Tunai terima hari ini bagi invois yang dibuat hari lain (bayaran hutang / tutup kredit tunai) */
+  cashPaidCustomer: SaleRow[];
   creditSales: SaleRow[];
   stockRows: StockRow[];
   totalCash: number;
@@ -105,6 +122,72 @@ interface SessionUser {
   username?: string;
   email?: string;
   branch?: string;
+}
+
+type SnapshotSaleLine = {
+  customer?: string;
+  item?: string;
+  qn?: number | string;
+  price?: number | string;
+  amount?: number | string;
+  billNo?: string;
+  isVoid?: boolean;
+};
+
+/** Paparan jualan daripada snapshot laporan (GET perpustakaan / daily_reports). */
+function rowsFromLibrarySnapshot(lines: readonly SnapshotSaleLine[] | undefined | null): SaleRow[] {
+  if (!Array.isArray(lines) || lines.length === 0) return [];
+  let no = 1;
+  return lines.map((line) => ({
+    no: no++,
+    customer: String(line.customer ?? '-'),
+    item: String(line.item ?? '-'),
+    qn: line.qn ?? '',
+    price: line.price ?? '',
+    amount: line.amount ?? '',
+    billNo: String(line.billNo ?? ''),
+    isVoid: Boolean(line.isVoid),
+  }));
+}
+
+function saleIsVoidedForReport(s: Pick<SaleRecord, 'paymentStatus' | 'voidedAt'>) {
+  return s.paymentStatus === 'voided' || Boolean(s.voidedAt);
+}
+
+/**
+ * Tunai diterima pada tarikh laporan untuk invois yang **dicipta pada hari lain**
+ * (contoh: bayaran hutang melalui "Selesaikan Bayaran Hutang").
+ */
+function isCashDebtSettlementOnReportDay(
+  s: SaleRecord,
+  reportYmd: string,
+  startMs: number,
+  endMs: number
+): boolean {
+  const paidRaw = s.paidAt;
+  if (paidRaw) {
+    const t = new Date(paidRaw).getTime();
+    return !isNaN(t) && t >= startMs && t <= endMs;
+  }
+  const updatedRaw = s.updatedAt;
+  const createdRaw = s.created_at || s.createdAt;
+  const updatedMs = new Date(updatedRaw || '').getTime();
+  const createdDay = String(createdRaw || '').slice(0, 10);
+  if (!createdDay || createdDay === reportYmd) return false;
+  if (isNaN(updatedMs) || updatedMs < startMs || updatedMs > endMs) return false;
+  return true;
+}
+
+function toSnapshotSalesRows(rows: SaleRow[]) {
+  return rows.map(({ customer, item, qn, price, amount, billNo, isVoid }) => ({
+    customer,
+    item,
+    qn,
+    price,
+    amount,
+    billNo,
+    ...(isVoid ? { isVoid: true as const } : {}),
+  }));
 }
 
 async function uploadProofPhoto(file: File, folder: string): Promise<string> {
@@ -156,13 +239,25 @@ function SalesTable({
         </thead>
         <tbody>
           {display.map((row, i) => (
-            <tr key={i} style={{ height: '14px' }}>
+            <tr
+              key={i}
+              style={{
+                height: '14px',
+                ...(row.isVoid ? { backgroundColor: '#f3f4f6' } : {}),
+              }}
+            >
               <td className="border border-slate-300 px-0.5 text-center">{row.no > 0 ? row.no : ''}</td>
               <td className="border border-slate-300 px-1">{row.customer}</td>
               <td className="border border-slate-300 px-1">{row.item}</td>
               <td className="border border-slate-300 px-0.5 text-center">{row.qn !== '' && Number(row.qn) > 0 ? row.qn : ''}</td>
               <td className="border border-slate-300 px-1 text-right">{row.price !== '' && Number(row.price) > 0 ? Number(row.price).toFixed(2) : ''}</td>
-              <td className="border border-slate-300 px-1 text-right font-medium">{row.amount !== '' && Number(row.amount) > 0 ? Number(row.amount).toFixed(2) : ''}</td>
+              <td className="border border-slate-300 px-1 text-right font-medium">
+                {row.isVoid
+                  ? '0.00'
+                  : row.amount !== '' && Number(row.amount) > 0
+                    ? Number(row.amount).toFixed(2)
+                    : ''}
+              </td>
               <td className="border border-slate-300 px-1 text-center" style={{ fontSize: '8px', wordBreak: 'break-all' }}>{row.billNo}</td>
               <td className="border border-slate-300" />
             </tr>
@@ -230,20 +325,24 @@ function DailyReportPageInner() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [salesRes, returnsRes, vanRes, userRes] = await Promise.all([
-        fetch('/api/sales'),
+      const [salesRes, returnsRes, vanRes, userRes, savedReportsRes] = await Promise.all([
+        fetch('/api/sales?includeVoided=true'),
         fetch(`/api/exchange-returns?startDate=${date}&endDate=${date}`),
         fetch('/api/inventory/van'),
         fetch('/api/auth/me'),
+        fetch(`/api/daily-reports?source=sales&date=${encodeURIComponent(date)}`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        }),
       ]);
 
       const allSales: SaleRecord[] = await salesRes.json().catch(() => []);
       const allReturns: ReturnRecord[] = await returnsRes.json().catch(() => []);
       const vanData = await vanRes.json().catch(() => ({}));
       const userInfo = await userRes.json().catch(() => ({}));
+      const savedPayload = await savedReportsRes.json().catch(() => ({}));
       setSessionUser(userInfo);
 
-      // Filter today's sales
       const startMs = new Date(`${date}T00:00:00`).getTime();
       const endMs = new Date(`${date}T23:59:59`).getTime();
       const todaySales = (Array.isArray(allSales) ? allSales : []).filter((s) => {
@@ -251,19 +350,17 @@ function DailyReportPageInner() {
         return !isNaN(t) && t >= startMs && t <= endMs;
       });
 
-      // Van products
       const vanProducts: VanProduct[] = Array.isArray(vanData?.products) ? vanData.products : [];
 
-      // Build stock-out map from items sold today
       const stockOutMap: Record<string, number> = {};
       todaySales.forEach((sale) => {
+        if (saleIsVoidedForReport(sale)) return;
         (sale.items || []).forEach((item) => {
           const key = item.product_name || item.name || '';
           if (key) stockOutMap[key] = (stockOutMap[key] || 0) + Number(item.quantity || 0);
         });
       });
 
-      // Build return/exchange maps
       const returnMap: Record<string, number> = {};
       const exchangeMap: Record<string, number> = {};
       (Array.isArray(allReturns) ? allReturns : []).forEach((r) => {
@@ -277,7 +374,6 @@ function DailyReportPageInner() {
         }
       });
 
-      // Stock rows from van products
       const stockRows: StockRow[] = vanProducts.map((p) => ({
         name: p.name,
         stockOut: stockOutMap[p.name] || 0,
@@ -287,11 +383,76 @@ function DailyReportPageInner() {
         foc: 0,
       }));
 
-      // Helper to convert sale records into display rows (one row per item)
+      const savedList: DailyReport[] = Array.isArray(savedPayload.reports) ? savedPayload.reports : [];
+      const savedForDate =
+        savedList
+          .filter((r) => r.date === date && r.source === 'sales')
+          .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] ?? null;
+
+      const snap = savedForDate?.salesSnapshot;
+      const readFromLibrary =
+        Boolean(savedForDate) &&
+        shouldReadSalesDataFromLibrarySnapshot(savedForDate?.status) &&
+        snapshotHasSaleRows(snap);
+
+      const d = new Date(`${date}T12:00:00`);
+      const baseMeta = {
+        salesman: userInfo?.name || userInfo?.email || '-',
+        kawasan: userInfo?.branch || '-',
+        dayName: d.toLocaleDateString('ms-MY', { weekday: 'long' }),
+        dateFormatted: d.toLocaleDateString('ms-MY'),
+        stockRows,
+      };
+
+      if (readFromLibrary && snap) {
+        const totalCash = Number(savedForDate!.totalCash ?? 0);
+        const totalTransfer = Number(savedForDate!.totalTransfer ?? 0);
+        const totalCredit = Number(savedForDate!.totalCredit ?? 0);
+        const autoBanking = totalCash + totalTransfer;
+        setTodaySaleIds(
+          Array.isArray(savedForDate!.liveSalesRefs)
+            ? savedForDate!.liveSalesRefs!.map((id) => String(id)).filter(Boolean)
+            : []
+        );
+        setManualName((prev) => prev || String(userInfo?.name || userInfo?.username || userInfo?.email || ''));
+        setManualKawasan((prev) => prev || String(userInfo?.branch || ''));
+        setAmountBankingManual((prev) => prev || (autoBanking > 0 ? autoBanking.toFixed(2) : ''));
+        setData({
+          ...baseMeta,
+          cashSales: rowsFromLibrarySnapshot(snap.cashSales),
+          transferSales: rowsFromLibrarySnapshot(snap.transferSales),
+          cashPaidCustomer: rowsFromLibrarySnapshot(snap.cashPaidCustomer),
+          creditSales: rowsFromLibrarySnapshot(snap.creditSales),
+          totalCash,
+          totalTransfer,
+          totalCredit,
+        });
+      } else {
+      // Satu baris ringkas per invois void (rekod audit); jualan aktif kekal pecahan item
       const toRows = (sales: SaleRecord[]): SaleRow[] => {
         const rows: SaleRow[] = [];
         let no = 1;
         for (const sale of sales) {
+          if (saleIsVoidedForReport(sale)) {
+            const remark = String(sale.voidRemarks || '').trim();
+            const og = sale.originalGrandTotal;
+            const ogLabel =
+              og != null && Number.isFinite(Number(og)) && Number(og) > 0
+                ? ` (asal RM${Number(og).toFixed(2)})`
+                : '';
+            rows.push({
+              no: no++,
+              customer: `${sale.customer_name || '-'}`,
+              item: remark ? `[VOID] ${remark}${ogLabel}` : `[VOID — invois dibatalkan]${ogLabel}`,
+              qn: '',
+              price: '',
+              amount: 0,
+              billNo: sale.invoice || '',
+              isVoid: true,
+            });
+            continue;
+          }
+
           const items = sale.items || [];
           if (items.length === 0) {
             rows.push({
@@ -320,35 +481,41 @@ function DailyReportPageInner() {
         return rows;
       };
 
+      const activeToday = (s: SaleRecord) => !saleIsVoidedForReport(s);
+
       const cashSalesRaw = todaySales.filter((s) => s.payment_method === 'cash');
       const transferSalesRaw = todaySales.filter(
         (s) => s.payment_method === 'bank_transfer' || s.payment_method === 'qr_code'
       );
       const creditSalesRaw = todaySales.filter((s) => s.payment_method === 'bill_to_bill');
 
-      const totalCash = cashSalesRaw.reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
-      const totalTransfer = transferSalesRaw.reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
-      const totalCredit = creditSalesRaw.reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
+      const cashPaidRaw = (Array.isArray(allSales) ? allSales : []).filter((raw) => {
+        const s = raw as SaleRecord;
+        if (saleIsVoidedForReport(s)) return false;
+        if (s.payment_method !== 'cash') return false;
+        return isCashDebtSettlementOnReportDay(s, date, startMs, endMs);
+      });
+
+      const totalCash = cashSalesRaw.filter(activeToday).reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
+      const totalTransfer = transferSalesRaw.filter(activeToday).reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
+      const totalCredit = creditSalesRaw.filter(activeToday).reduce((s, r) => s + Number(r.total_amount ?? r.total ?? 0), 0);
       const autoBanking = totalCash + totalTransfer;
       setTodaySaleIds(todaySales.map((sale) => sale.id).filter(Boolean));
       setManualName((prev) => prev || String(userInfo?.name || userInfo?.username || userInfo?.email || ''));
       setManualKawasan((prev) => prev || String(userInfo?.branch || ''));
       setAmountBankingManual((prev) => prev || (autoBanking > 0 ? autoBanking.toFixed(2) : ''));
 
-      const d = new Date(`${date}T12:00:00`);
       setData({
-        salesman: userInfo?.name || userInfo?.email || '-',
-        kawasan: userInfo?.branch || '-',
-        dayName: d.toLocaleDateString('ms-MY', { weekday: 'long' }),
-        dateFormatted: d.toLocaleDateString('ms-MY'),
+        ...baseMeta,
         cashSales: toRows(cashSalesRaw),
         transferSales: toRows(transferSalesRaw),
+        cashPaidCustomer: toRows(cashPaidRaw),
         creditSales: toRows(creditSalesRaw),
-        stockRows,
         totalCash,
         totalTransfer,
         totalCredit,
       });
+      }
     } catch (err) {
       console.error('Error fetching daily report:', err);
     } finally {
@@ -363,16 +530,13 @@ function DailyReportPageInner() {
     let bankSlipUrls: string[] = [];
     let cashProofUrls: string[] = [];
 
-    // Banking slip — upload bukti sahaja
+    // Banking slip — muat naik jika ada gambar (jangan sekadar when amount > 0; jumlah boleh 0 atau auto)
     if (bankSlip.photos.length > 0) {
-      const bankAmt = amountBanking;
-      if (bankAmt > 0) {
-        try {
-          const urls = await Promise.all(bankSlip.photos.map((f) => uploadProofPhoto(f, `banking/${date}`)));
-          bankSlipUrls = urls;
-        } catch {
-          errors.push('Slip Banking: Ralat upload');
-        }
+      try {
+        const urls = await Promise.all(bankSlip.photos.map((f) => uploadProofPhoto(f, `banking/${date}`)));
+        bankSlipUrls = urls;
+      } catch {
+        errors.push('Slip Banking: Ralat upload');
       }
     }
 
@@ -407,6 +571,7 @@ function DailyReportPageInner() {
         salesSnapshot: {
           cashSales: data?.cashSales || [],
           transferSales: data?.transferSales || [],
+          cashPaidCustomer: toSnapshotSalesRows(data?.cashPaidCustomer || []),
           creditSales: data?.creditSales || [],
         },
         source: 'sales',
@@ -414,15 +579,29 @@ function DailyReportPageInner() {
         liveSalesRefs: todaySaleIds,
       };
 
-      const reportRes = await fetch('/api/daily-reports', {
+      const reportRes = await fetch('/api/sales/daily-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(reportPayload),
       });
 
       if (!reportRes.ok) {
         const json = await reportRes.json().catch(() => ({})) as { error?: string };
-        errors.push(json.error || 'Gagal hantar laporan harian ke admin');
+        if (reportRes.status === 401) {
+          errors.push('Sesi tamat — sila log masuk semula, kemudian cuba hantar lagi.');
+        } else if (reportRes.status === 403) {
+          errors.push(json.error || 'Akaun tidak dibenarkan menghantar laporan ini.');
+        } else if (reportRes.status === 409) {
+          errors.push(
+            json.error ||
+              'Laporan untuk tarikh ini sudah diproses admin/HQ. Hubungi admin jika perlu ubah.'
+          );
+        } else if (reportRes.status === 413) {
+          errors.push('Data terlalu besar — kurangkan snapshot atau hubungi admin.');
+        } else {
+          errors.push(json.error || `Gagal hantar (${reportRes.status}). Cuba lagi atau log masuk semula.`);
+        }
       }
     }
 
@@ -582,9 +761,14 @@ function DailyReportPageInner() {
               </div>
             </div>
 
+            <p className="mb-2 text-center leading-tight" style={{ fontSize: '8px', color: '#374151' }}>
+              Invois <strong>VOID</strong> kekal dipaparkan (audit) dengan jumlah RM0. Jumlah ringkasan di bahagian Sales{' '}
+              <strong>tidak termasuk</strong> transaksi dibatalkan.
+            </p>
+
             <SalesTable title="CASH SALES" rows={data?.cashSales || []} minRows={15} />
             <SalesTable title="TRANSFER SALES" rows={data?.transferSales || []} minRows={7} />
-            <SalesTable title="CASH PAID CUSTOMER" rows={[]} minRows={6} />
+            <SalesTable title="CASH PAID CUSTOMER" rows={data?.cashPaidCustomer || []} minRows={6} />
 
             {/* CHEQUE PAID */}
             <div>
@@ -922,7 +1106,11 @@ function DailyReportPageInner() {
                   <CheckCircle size={22} className="text-emerald-400 shrink-0" />
                   <div>
                     <p className="text-emerald-300 font-semibold">Laporan disimpan dan dihantar ke admin cawangan</p>
-                    <p className="text-emerald-400/70 text-sm">Admin cawangan akan isi perbelanjaan dan hantar ke HQ untuk kelulusan Main Admin.</p>
+                    <p className="text-emerald-400/70 text-sm">
+                      Admin cawangan akan isi perbelanjaan dan hantar ke HQ untuk kelulusan Main Admin. Dalam{' '}
+                      <strong className="text-emerald-300/90">Urus / sejarah</strong>, status akan dipaparkan sebagai menunggu admin cawangan (rekod teknikal:
+                      draf) — itu normal sehingga mereka simpan perbelanjaan.
+                    </p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
