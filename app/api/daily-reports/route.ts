@@ -50,12 +50,22 @@ function getApprovalStageFromStatus(status: DailyStatus): DailyReport['approvalS
   return 'daily';
 }
 
+/** When DB has stale approvalStage (e.g. still "daily" after status moved to weekly/monthly), align so UI tabs / filters match. */
+function reconcileApprovalStage(report: DailyReport, normalizedStatus: DailyStatus): DailyReport['approvalStage'] {
+  const inferred = getApprovalStageFromStatus(normalizedStatus);
+  const stored = report.approvalStage;
+  if (!stored) return inferred;
+  const order: DailyReport['approvalStage'][] = ['daily', 'weekly', 'monthly'];
+  const rank = (s: DailyReport['approvalStage']) => order.indexOf(s);
+  return rank(inferred) > rank(stored) ? inferred : stored;
+}
+
 function mapLegacyRead(report: DailyReport): DailyReport {
   const status = normalizeStatus(report.status);
   return {
     ...report,
     status,
-    approvalStage: report.approvalStage || getApprovalStageFromStatus(status),
+    approvalStage: reconcileApprovalStage(report, status),
   };
 }
 
@@ -203,6 +213,67 @@ export async function POST(request: NextRequest) {
       item.date === String(body.date) &&
       item.source === source
   );
+
+  const resend = body.resend === true;
+
+  /** Jurujual / merchandiser: hantar semula laporan yang masih menunggu admin (submitted_daily) — kemas kini timestamp / snapshot pilihan tanpa ubah aliran kerja. */
+  if (
+    resend &&
+    existing &&
+    existing.userId === user.id &&
+    String(existing.status) === 'submitted_daily' &&
+    (existing.approvalStage || 'daily') === 'daily' &&
+    ((normRole === 'Sales' && source === 'sales') || (normRole === 'Merchandiser' && source === 'merch'))
+  ) {
+    const expenseLinesResend = Array.isArray(body.expenseLines)
+      ? body.expenseLines.map((line: Record<string, unknown>) => ({
+          category: String(line.category || 'lain-lain'),
+          description: String(line.description || ''),
+          amount: Number(line.amount || 0),
+          receiptImageUrls: Array.isArray(line.receiptImageUrls)
+            ? line.receiptImageUrls.map((url) => String(url))
+            : [],
+        }))
+      : existing.expenseLines || [];
+    const salesSnapshotResend =
+      body.salesSnapshot && typeof body.salesSnapshot === 'object'
+        ? (body.salesSnapshot as DailyReport['salesSnapshot'])
+        : existing.salesSnapshot;
+
+    const resentReport: DailyReport = {
+      ...existing,
+      userName: String(body.userName ?? existing.userName ?? user.name ?? 'Unknown'),
+      branch: (body.branch || existing.branch || user.branch || 'HQ') as DailyReport['branch'],
+      totalSales: Number(body.totalSales ?? existing.totalSales ?? 0),
+      totalCash: Number(body.totalCash ?? existing.totalCash ?? 0),
+      totalCredit: Number(body.totalCredit ?? existing.totalCredit ?? 0),
+      totalTransfer: Number(body.totalTransfer ?? existing.totalTransfer ?? 0),
+      amountBankingManual: Number(body.amountBankingManual ?? existing.amountBankingManual ?? 0),
+      balancePtCashManual: Number(body.balancePtCashManual ?? existing.balancePtCashManual ?? 0),
+      expenseLines: expenseLinesResend,
+      expensesTotal:
+        expenseLinesResend.length > 0
+          ? computeExpensesTotal(expenseLinesResend)
+          : Number(existing.expensesTotal ?? computeExpensesTotal(existing.expenseLines)),
+      bankSlipUrls: Array.isArray(body.bankSlipUrls)
+        ? body.bankSlipUrls.map((url: unknown) => String(url))
+        : existing.bankSlipUrls || [],
+      cashProofUrls: Array.isArray(body.cashProofUrls)
+        ? body.cashProofUrls.map((url: unknown) => String(url))
+        : existing.cashProofUrls || [],
+      salesSnapshot: salesSnapshotResend,
+      status: 'submitted_daily',
+      approvalStage: 'daily',
+      source,
+      liveSalesRefs: Array.isArray(body.liveSalesRefs)
+        ? body.liveSalesRefs.map((id: unknown) => String(id))
+        : existing.liveSalesRefs || [],
+      updatedAt: now,
+    };
+
+    await db.dailyReports.save(resentReport);
+    return NextResponse.json({ success: true, report: resentReport }, { status: 200 });
+  }
 
   let status: DailyStatus;
   let clearBranchSync = false;

@@ -1,10 +1,26 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Printer, Calendar, RefreshCw, Upload, CheckCircle, AlertCircle, X, Camera, Send, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  ArrowLeft,
+  Printer,
+  Calendar,
+  RefreshCw,
+  Upload,
+  CheckCircle,
+  AlertCircle,
+  X,
+  Camera,
+  Send,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  Archive,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -159,8 +175,9 @@ function SalesTable({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function DailyReportPage() {
+function DailyReportPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [date, setDate] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -200,6 +217,15 @@ export default function DailyReportPage() {
     setShowDocument(true);
     setTimeout(() => window.print(), 120);
   };
+
+  useEffect(() => {
+    const d = searchParams.get('date');
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      setDate(d);
+      setSubmitDone(false);
+      setSubmitErrors([]);
+    }
+  }, [searchParams]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -463,7 +489,15 @@ export default function DailyReportPage() {
                 <p className="text-white/50 text-xs">Daily Sales Report — {data?.dateFormatted}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <Link
+                href="/sales/daily-report/library"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800/80 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-700 hover:text-white transition-colors"
+              >
+                <Archive size={16} className="text-slate-400" />
+                <span className="hidden sm:inline">Urus / sejarah</span>
+                <span className="sm:hidden">Arkib</span>
+              </Link>
               <div className="flex items-center gap-1.5">
                 <Calendar size={16} className="text-white/60 hidden sm:block" />
                 <input
@@ -924,5 +958,19 @@ export default function DailyReportPage() {
       </div>{/* end p-4 content wrapper */}
       </div>{/* end min-h-screen */}
     </>
+  );
+}
+
+export default function DailyReportPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+          <p className="text-white">Memuatkan laporan harian...</p>
+        </div>
+      }
+    >
+      <DailyReportPageInner />
+    </Suspense>
   );
 }

@@ -111,9 +111,25 @@ export default function AdminReportsHub() {
     () => reports.filter((item) => (item.approvalStage || 'daily') === 'monthly'),
     [reports]
   );
+  /** Semua nilai status yang sah untuk rekod laporan — elak laporan “hilang” jika legacy/konflik status vs peringkat. */
   const allowedDailyStatuses = useMemo(
     () =>
-      new Set<string>(['submitted_daily', 'approved_daily', 'returned_daily', 'draft', 'submitted', 'reviewed', 'approved', 'returned']),
+      new Set<string>([
+        'draft',
+        'submitted_daily',
+        'approved_daily',
+        'returned_daily',
+        'submitted_weekly',
+        'approved_weekly',
+        'returned_weekly',
+        'submitted_monthly',
+        'approved_monthly',
+        'returned_monthly',
+        'submitted',
+        'reviewed',
+        'approved',
+        'returned',
+      ]),
     []
   );
 

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, ShoppingCart, LogOut, Menu, X, Globe } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, LogOut, Menu, X, Globe, History } from 'lucide-react';
 import clsx from 'clsx';
 import SidebarHeader from '@/components/SidebarHeader';
 
@@ -83,6 +83,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
   const navItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/sales/daily-report', label: 'Daily Sales', icon: ShoppingCart },
+    { to: '/sales/daily-report/library', label: 'Urus laporan harian', icon: History },
   ];
 
   return (
