@@ -104,6 +104,41 @@ function isForeignKeyViolation(error: unknown): boolean {
   return code === '23503';
 }
 
+/**
+ * Stok van (`van_<id>`) ditolak semasa POST jualan menggunakan `currentUser.id`.
+ * Sesetengah rekod lama ada `salesman_id` tetapi `user_id` NULL — void mesti guna ID yang sama
+ * atau stok tidak akan bertambah balik.
+ */
+async function resolveSalespersonIdForVanInventory(
+  client: NonNullable<typeof supabaseAdmin>,
+  sale: Record<string, unknown>
+): Promise<string> {
+  const rawIds = [sale.user_id, (sale as { salesman_id?: unknown }).salesman_id];
+  for (const raw of rawIds) {
+    const id = String(raw ?? '').trim();
+    if (id && id !== 'null' && id !== 'undefined') return id;
+  }
+
+  const snap = String(sale.salesman_name ?? '').trim();
+  if (!snap) return '';
+
+  try {
+    const tryEq = async (column: 'name' | 'username', value: string) => {
+      const { data, error } = await client.from('users').select('id').eq(column, value).limit(2);
+      if (error || !Array.isArray(data) || data.length !== 1) return '';
+      const row = data[0] as { id?: unknown };
+      const id = String(row?.id ?? '').trim();
+      return id && id !== 'null' ? id : '';
+    };
+
+    const byName = await tryEq('name', snap);
+    if (byName) return byName;
+    return await tryEq('username', snap);
+  } catch {
+    return '';
+  }
+}
+
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   let vanRollback: { inventoryId: string; userId: string; previousItems: Record<string, number> } | null =
     null;
@@ -186,10 +221,20 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const { data: itemRows } = await supabaseAdmin
       .from(SALES_ITEMS_TABLE)
-      .select('product_id, quantity')
+      .select('product_id, quantity, product_name')
       .eq('transaction_id', saleId);
 
-    const userIdForVan = String(sale.user_id || '');
+    const rows = Array.isArray(itemRows) ? itemRows : [];
+    const hasPositiveLineItems = rows.some((row) => {
+      const qty = Number((row as { quantity?: unknown }).quantity || 0);
+      const pid = String((row as { product_id?: unknown }).product_id || '').trim();
+      return pid && Number.isFinite(qty) && qty > 0;
+    });
+
+    const userIdForVan = await resolveSalespersonIdForVanInventory(supabaseAdmin, sale);
+    let vanStockRestored = false;
+    let vanStockWarning: string | undefined;
+
     if (userIdForVan) {
       const inventoryId = `van_${userIdForVan}`;
       const currentVan = (await db.vanInventories.getById(inventoryId)) as VanInventory | null;
@@ -197,18 +242,35 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       vanRollback = { inventoryId, userId: userIdForVan, previousItems };
 
       const vanItems = { ...previousItems };
-      for (const row of itemRows || []) {
-        const pid = String(row.product_id || '');
-        const qty = Number(row.quantity || 0);
+      for (const row of rows) {
+        const pid = String((row as { product_id?: unknown }).product_id || '');
+        const qty = Number((row as { quantity?: unknown }).quantity || 0);
         if (!pid || !Number.isFinite(qty) || qty <= 0) continue;
         vanItems[pid] = (vanItems[pid] || 0) + qty;
       }
-      await db.vanInventories.save({
-        id: inventoryId,
-        userId: userIdForVan,
-        items: vanItems,
-        lastUpdated: new Date().toISOString(),
-      });
+      try {
+        await db.vanInventories.save({
+          id: inventoryId,
+          userId: userIdForVan,
+          items: vanItems,
+          lastUpdated: new Date().toISOString(),
+        });
+        vanStockRestored = true;
+      } catch (vanErr) {
+        console.error('[void sale] van inventory save failed:', vanErr);
+        vanRollback = null;
+        return NextResponse.json(
+          {
+            error: 'Gagal mengemas kini stok van. Pembatalan digugurkan.',
+            details: vanErr instanceof Error ? vanErr.message : String(vanErr),
+          },
+          { status: 500 }
+        );
+      }
+    } else if (hasPositiveLineItems) {
+      vanStockWarning =
+        'Tiada user_id / salesman_id pada invois ini; stok van tidak dikembalikan. Kemas kini rekod jualan atau hubungi HQ.';
+      console.warn('[void sale] skip van restore — missing salesperson id', { saleId, invoice: sale.invoice });
     }
 
     let balanceRollback: {
@@ -373,6 +435,48 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       }
     }
 
+    if (vanStockRestored && hasPositiveLineItems && userIdForVan) {
+      let vanOwnerLabel = userIdForVan;
+      const { data: salesUserRow } = await supabaseAdmin
+        .from('users')
+        .select('name, username')
+        .eq('id', userIdForVan)
+        .maybeSingle();
+      const su = salesUserRow as { name?: string | null; username?: string | null } | null;
+      const nm = String(su?.name ?? '').trim();
+      const un = String(su?.username ?? '').trim();
+      if (nm) vanOwnerLabel = nm;
+      else if (un) vanOwnerLabel = un;
+
+      const invRef = String(sale.invoice || saleId).trim().slice(0, 200);
+      const remarksSnippet = remarks.length > 400 ? `${remarks.slice(0, 397)}…` : remarks;
+
+      for (const row of rows) {
+        const pid = String((row as { product_id?: unknown }).product_id || '');
+        const qty = Number((row as { quantity?: unknown }).quantity || 0);
+        const pname = String((row as { product_name?: unknown }).product_name || '').trim();
+        if (!pid || !Number.isFinite(qty) || qty <= 0) continue;
+
+        const { error: movErr } = await supabaseAdmin.from('inventory_movements').insert({
+          branch: (String(saleBranch || '').trim() || 'HQ') as string,
+          actor_id: currentUser.id,
+          actor_name: (currentUser.name || currentUser.username || 'Admin') as string,
+          movement_type: 'void_sale_return',
+          product_id: pid,
+          product_name: pname || null,
+          qty,
+          from_bucket: null,
+          to_bucket: 'van',
+          source_ref: invRef || null,
+          notes: `Stok +${qty} ke van ${vanOwnerLabel}. Sebab void: ${remarksSnippet}`.slice(0, 2000),
+          movement_date: now,
+        });
+        if (movErr) {
+          console.warn('[void sale] inventory_movements void_sale_return insert failed:', movErr);
+        }
+      }
+    }
+
     await logAuditEvent({
       request,
       actor: currentUser,
@@ -392,8 +496,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     return NextResponse.json({
       success: true,
-      message: 'Invois dibatalkan. Stok van dikembalikan.',
+      message: vanStockWarning
+        ? 'Invois dibatalkan. Amaran: stok van mungkin tidak dikembalikan — semak respons.'
+        : 'Invois dibatalkan. Stok van dikembalikan.',
       saleId,
+      vanStockRestored,
+      ...(vanStockWarning ? { vanStockWarning } : {}),
     });
   } catch (error) {
     console.error('POST /api/sales/[id]/void:', error);

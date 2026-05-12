@@ -4,6 +4,8 @@ import { Plus, Save, Trash2, Users, Store } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createUserSchema, type CreateUserInput } from '@/lib/validations';
+import { normalizeRole } from '@/lib/roles';
+import SalesDailyGateAdminControls from '@/components/features/admin/SalesDailyGateAdminControls';
 
 interface UserType {
   id: string;
@@ -27,6 +29,7 @@ export default function UserManagement({ enableCreation = true }: UserManagement
   const [users, setUsers] = useState<UserType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actorRole, setActorRole] = useState<string>('');
   const [deleteReason, setDeleteReason] = useState('');
   const [deleteReferenceNo, setDeleteReferenceNo] = useState('');
 
@@ -49,7 +52,7 @@ export default function UserManagement({ enableCreation = true }: UserManagement
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/users');
+      const res = await fetch('/api/users', { credentials: 'same-origin' });
       const data = await res.json();
       setUsers(data);
     } catch (error) {
@@ -73,6 +76,10 @@ export default function UserManagement({ enableCreation = true }: UserManagement
   useEffect(() => {
     fetchUsers();
     fetchCustomers();
+    void fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => setActorRole(String(d?.role || '')))
+      .catch(() => setActorRole(''));
   }, []);
 
   const onSubmit = async (data: CreateUserInput) => {
@@ -96,6 +103,8 @@ export default function UserManagement({ enableCreation = true }: UserManagement
       alert('Error creating user');
     }
   };
+
+  const isMainAdmin = normalizeRole(actorRole) === 'Main Admin';
 
   const handleDelete = async (id: string) => {
       if (!confirm('Are you sure you want to delete this user?')) return;
@@ -274,6 +283,13 @@ export default function UserManagement({ enableCreation = true }: UserManagement
                         Assigned: {customers.find(c => c.id === user.assignedShopId)?.name || 'Unknown Shop'}
                     </div>
                 )}
+
+                <SalesDailyGateAdminControls
+                  user={{ id: user.id, name: user.name, role: user.role }}
+                  isMainAdmin={isMainAdmin}
+                  onUpdated={fetchUsers}
+                />
+
                 <div className="flex justify-end pt-2 border-t border-slate-700/50">
                     <button 
                         onClick={() => handleDelete(user.id)}

@@ -396,7 +396,11 @@ export default function AdminLiveSalesPage() {
           ...(voidOtp.trim() ? { otp: voidOtp.trim() } : {}),
         }),
       });
-      const data = await res.json().catch(() => ({})) as { error?: string; details?: string };
+      const data = await res.json().catch(() => ({})) as {
+        error?: string;
+        details?: string;
+        vanStockWarning?: string;
+      };
       if (!res.ok) {
         const base = typeof data.error === 'string' ? data.error : 'Gagal membatalkan';
         const detail =
@@ -404,6 +408,9 @@ export default function AdminLiveSalesPage() {
             ? ` ${data.details.trim()}`
             : '';
         throw new Error(`${base}${detail}`);
+      }
+      if (typeof data.vanStockWarning === 'string' && data.vanStockWarning.trim()) {
+        alert(`Invois dibatalkan.\n\nAmaran stok van:\n${data.vanStockWarning.trim()}`);
       }
       setVoidTarget(null);
       setVoidRemarks('');

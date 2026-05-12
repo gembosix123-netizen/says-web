@@ -6,12 +6,20 @@ import { buildAuditChanges, logAuditEvent } from '@/lib/audit';
 import { normalizeRole } from '@/lib/roles';
 import { getSessionUserFromRequest, type SessionUser } from '@/lib/session';
 import { canManageUsers } from '@/lib/permissions';
+import { computeSalesDailyReportGateBlock } from '@/lib/salesDailyReportGate';
 
 const ALLOWED_ROLES = ['Main Admin', 'Admin', 'Sales'] as const;
 const ALLOWED_BRANCHES = ['HQ', 'Kota Kinabalu', 'Kinabatangan'] as const;
 
 // Bcrypt salt rounds - higher is more secure but slower
 const SALT_ROUNDS = 10;
+
+function parseBypassScopeDate(row: Record<string, unknown>): string | null {
+  const raw = row.bypass_sales_daily_gate_scope_date;
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw.slice(0, 10);
+  return null;
+}
 
 function mapUser(row: Record<string, unknown>) {
   return {
@@ -21,6 +29,10 @@ function mapUser(row: Record<string, unknown>) {
     name: row.name as string,
     branch: row.branch as string,
     commissionRate: (row.commission_rate as number | undefined) ?? 0,
+    /** Main Admin: Sales boleh jual walaupun gate laporan harian tertunggak */
+    bypassSalesDailyGate: Boolean(row.bypass_sales_daily_gate),
+    /** Tarikh tertunggak paling awal semasa bypass diaktifkan — tertunggak lain tidak dilindungi */
+    bypassSalesDailyGateScopeDate: parseBypassScopeDate(row),
     created_at: row.created_at,
   };
 }
@@ -286,15 +298,44 @@ export async function PUT(request: NextRequest) {
       updates.password_hash = hashed;
     }
 
+    /** Hanya Main Admin — Sales sahaja; skop = tarikh tertunggak paling awal semasa dihidupkan. */
+    if (typeof body.bypassSalesDailyGate === 'boolean' && normalizedCurrentRole === 'Main Admin') {
+      if (targetUser.role === 'Sales') {
+        if (body.bypassSalesDailyGate === true) {
+          const core = await computeSalesDailyReportGateBlock(
+            String(userId),
+            String(targetUser.branch || '')
+          );
+          if (core.blocked !== true) {
+            return NextResponse.json(
+              {
+                error:
+                  'Tiada tertunggak laporan harian semasa untuk jurujual ini — sistem tidak menyekat jualan baharu, jadi bypass tidak diperlukan. / There is no current daily-report backlog for this salesperson, so bypass cannot be enabled.',
+              },
+              { status: 400 }
+            );
+          }
+          updates.bypass_sales_daily_gate = true;
+          updates.bypass_sales_daily_gate_scope_date = core.dateYmd;
+        } else {
+          updates.bypass_sales_daily_gate = false;
+          updates.bypass_sales_daily_gate_scope_date = null;
+        }
+      }
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields provided for update' }, { status: 400 });
     }
 
+    const targetRow = targetUser as Record<string, unknown>;
     const beforeData = {
       name: targetUser.name,
       username: targetUser.username,
       role: targetUser.role,
       branch: targetUser.branch,
+      bypassSalesDailyGate: Boolean(targetRow.bypass_sales_daily_gate),
+      bypassSalesDailyGateScopeDate: parseBypassScopeDate(targetRow),
     };
 
     const afterData = {
@@ -303,6 +344,19 @@ export async function PUT(request: NextRequest) {
       ...('username' in updates ? { username: updates.username } : {}),
       ...('role' in updates ? { role: updates.role } : {}),
       ...('branch' in updates ? { branch: updates.branch } : {}),
+      ...('bypass_sales_daily_gate' in updates
+        ? { bypassSalesDailyGate: Boolean(updates.bypass_sales_daily_gate) }
+        : {}),
+      ...('bypass_sales_daily_gate_scope_date' in updates
+        ? {
+            bypassSalesDailyGateScopeDate:
+              updates.bypass_sales_daily_gate_scope_date === null
+                ? null
+                : typeof updates.bypass_sales_daily_gate_scope_date === 'string'
+                  ? updates.bypass_sales_daily_gate_scope_date
+                  : beforeData.bypassSalesDailyGateScopeDate,
+          }
+        : {}),
     };
 
     const { error: updateError } = await supabaseAdmin
@@ -337,7 +391,24 @@ export async function PUT(request: NextRequest) {
             error: fallbackError.message,
           },
         });
-        return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
+        const raw = `${fallbackError.message || ''}`.toLowerCase();
+        let hint =
+          'Semak konsol pelayan untuk mesej Supabase penuh. / See server log for full Supabase message.';
+        if (
+          raw.includes('bypass_sales_daily_gate_scope_date') ||
+          (raw.includes('column') && raw.includes('bypass'))
+        ) {
+          hint =
+            'Jalankan migrasi SQL: migrations/20260518_users_bypass_sales_daily_gate_scope_date.sql (dan 20260517 jika perlu) pada projek Supabase anda.';
+        }
+        return NextResponse.json(
+          {
+            error: 'Gagal mengemas kini pengguna / Failed to update user',
+            details: fallbackError.message,
+            hint,
+          },
+          { status: 500 }
+        );
       }
     }
 

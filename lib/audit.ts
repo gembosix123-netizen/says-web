@@ -114,6 +114,18 @@ export async function logAuditEvent(input: AuditEventInput): Promise<void> {
       .single();
 
     if (error || !eventRow?.id) {
+      const code = (error as { code?: string } | null)?.code;
+      const msg = `${error?.message || ''}`;
+      const missingAuditTable =
+        code === 'PGRST205' ||
+        /audit_events|schema cache/i.test(msg) ||
+        /could not find the table/i.test(msg);
+      if (missingAuditTable) {
+        console.warn(
+          '[audit] Jadual audit_events tiada — langkau log audit. Jalankan migrations/20260226_add_audit_tables.sql pada Supabase. / audit_events table missing; audit skipped.'
+        );
+        return;
+      }
       console.error('Failed to write audit event:', error);
       return;
     }
@@ -134,6 +146,16 @@ export async function logAuditEvent(input: AuditEventInput): Promise<void> {
       .insert(payload);
 
     if (changesError) {
+      const code = (changesError as { code?: string }).code;
+      const msg = `${changesError.message || ''}`;
+      if (
+        code === 'PGRST205' ||
+        /audit_event_changes|schema cache/i.test(msg) ||
+        /could not find the table/i.test(msg)
+      ) {
+        console.warn('[audit] Jadual audit_event_changes tiada — langkau. / audit_event_changes missing; skipped.');
+        return;
+      }
       console.error('Failed to write audit event changes:', changesError);
     }
   } catch (error) {

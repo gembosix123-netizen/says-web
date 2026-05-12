@@ -123,14 +123,12 @@ function pickReportForDate(reports: DailyReport[], dateYmd: string): DailyReport
 }
 
 /**
- * Jurujual (Sales): sekatan jualan baharu jika ada hari dengan jualan aktif
- * tetapi laporan harian `source: sales` belum lulus peringkat harian (Main Admin).
+ * Kira sekatan tanpa ambil kira bypass HQ — untuk auto-reset bypass bila tertunggak sudah selesai.
  */
-export async function evaluateSalesNewSaleBlocked(params: {
-  userId: string;
-  branch: string | undefined | null;
-}): Promise<SalesDailyGateResult> {
-  const { userId, branch } = params;
+export async function computeSalesDailyReportGateBlock(
+  userId: string,
+  branch: string | undefined | null
+): Promise<SalesDailyGateResult> {
   if (!supabaseAdmin) {
     return { blocked: false };
   }
@@ -152,7 +150,7 @@ export async function evaluateSalesNewSaleBlocked(params: {
 
   const { data: rows, error } = await query;
   if (error) {
-    console.error('[evaluateSalesNewSaleBlocked]', error);
+    console.error('[computeSalesDailyReportGateBlock]', error);
     return { blocked: false };
   }
 
@@ -190,4 +188,69 @@ export async function evaluateSalesNewSaleBlocked(params: {
   }
 
   return { blocked: false };
+}
+
+async function clearBypassSalesDailyGate(userId: string): Promise<void> {
+  if (!supabaseAdmin) return;
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ bypass_sales_daily_gate: false, bypass_sales_daily_gate_scope_date: null })
+    .eq('id', userId)
+    .eq('bypass_sales_daily_gate', true);
+  if (error) {
+    console.warn('[evaluateSalesNewSaleBlocked] clear bypass failed:', error.message);
+  }
+}
+
+/**
+ * Jurujual (Sales): sekatan jualan baharu jika ada hari dengan jualan aktif
+ * tetapi laporan harian `source: sales` belum lulus peringkat harian (Main Admin).
+ *
+ * **Bypass HQ** (`bypass_sales_daily_gate` + `bypass_sales_daily_gate_scope_date`):
+ * hanya melindungi **episod tertunggak pada tarikh skop** (tarikh tertunggak paling awal semasa Main Admin aktifkan).
+ * Jika kepala tertunggak berubah ke tarikh lain, bypass **tidak** digunakan — jurujual perlu selesaikan atau HQ aktifkan bypass baharu.
+ * Bila tiada lagi tertunggak, bypass + skop **dipadamkan automatik**.
+ */
+export async function evaluateSalesNewSaleBlocked(params: {
+  userId: string;
+  branch: string | undefined | null;
+}): Promise<SalesDailyGateResult> {
+  const { userId, branch } = params;
+  if (!supabaseAdmin) {
+    return { blocked: false };
+  }
+
+  const { data: gateUser, error: gateUserErr } = await supabaseAdmin
+    .from('users')
+    .select('bypass_sales_daily_gate, bypass_sales_daily_gate_scope_date')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const bypassActive = !gateUserErr && gateUser?.bypass_sales_daily_gate === true;
+  const scopeRaw = (gateUser as { bypass_sales_daily_gate_scope_date?: unknown } | null)
+    ?.bypass_sales_daily_gate_scope_date;
+  const scopeDate =
+    typeof scopeRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(scopeRaw)
+      ? scopeRaw
+      : typeof scopeRaw === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(scopeRaw)
+        ? scopeRaw.slice(0, 10)
+        : null;
+
+  const core = await computeSalesDailyReportGateBlock(userId, branch);
+
+  if (!core.blocked && bypassActive) {
+    await clearBypassSalesDailyGate(userId);
+  }
+
+  if (core.blocked && bypassActive) {
+    if (!scopeDate) {
+      return core;
+    }
+    if (scopeDate !== core.dateYmd) {
+      return core;
+    }
+    return { blocked: false };
+  }
+
+  return core;
 }

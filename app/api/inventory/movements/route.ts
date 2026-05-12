@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
   const VALID_TYPES = [
     'sale_deduct', 'return_approved', 'carry_forward',
     'freezer_in', 'freezer_to_van', 'van_to_freezer',
-    'damage_write_off', 'adjustment',
+    'damage_write_off', 'adjustment', 'void_sale_return',
   ];
   if (!VALID_TYPES.includes(movement_type)) {
     return NextResponse.json({ error: 'movement_type tidak sah' }, { status: 400 });

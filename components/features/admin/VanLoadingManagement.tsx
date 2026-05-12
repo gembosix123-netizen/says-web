@@ -90,6 +90,7 @@ interface Movement {
   qty: number;
   from_bucket: string | null;
   to_bucket: string | null;
+  source_ref: string | null;
   actor_name: string | null;
   branch: string;
   notes: string | null;
@@ -105,6 +106,7 @@ const TYPE_LABEL: Record<string, string> = {
   carry_forward: 'Baki Bawa Maju',
   damage_write_off: 'Hapus Kira Rosak',
   adjustment: 'Pelarasan',
+  void_sale_return: 'Void jualan (stok balik van)',
 };
 
 const TYPE_COLOR: Record<string, string> = {
@@ -116,6 +118,7 @@ const TYPE_COLOR: Record<string, string> = {
   carry_forward: 'text-slate-400',
   damage_write_off: 'text-red-500',
   adjustment: 'text-yellow-400',
+  void_sale_return: 'text-cyan-400',
 };
 
 export default function VanLoadingManagement() {
@@ -596,6 +599,7 @@ export default function VanLoadingManagement() {
                     <th className="pb-2 px-2 text-slate-400 text-right">Qty</th>
                     <th className="pb-2 px-2 text-slate-400">Dari → Ke</th>
                     <th className="pb-2 px-2 text-slate-400">Petugas</th>
+                    <th className="pb-2 px-2 text-slate-400">Rujukan</th>
                     <th className="pb-2 px-2 text-slate-400">Nota</th>
                   </tr>
                 </thead>
@@ -613,7 +617,10 @@ export default function VanLoadingManagement() {
                       <td className="px-2 py-2 text-right font-bold text-white">{m.qty}</td>
                       <td className="px-2 py-2 text-slate-400">{[m.from_bucket, m.to_bucket].filter(Boolean).join(' → ') || '—'}</td>
                       <td className="px-2 py-2 text-slate-400">{m.actor_name || '—'}</td>
-                      <td className="px-2 py-2 text-slate-500">{m.notes || '—'}</td>
+                      <td className="px-2 py-2 text-slate-500 font-mono text-[11px] max-w-[140px] truncate" title={m.source_ref || ''}>
+                        {m.source_ref || '—'}
+                      </td>
+                      <td className="px-2 py-2 text-slate-500 max-w-[200px]">{m.notes || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
