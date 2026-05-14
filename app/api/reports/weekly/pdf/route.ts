@@ -3,6 +3,12 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { canExportReports } from '@/lib/permissions';
+import { db } from '@/lib/db';
+import type { DailyReport } from '@/types';
+import {
+  transactionIsVoided,
+  collectDailyReportExpensesInRange,
+} from '@/lib/weeklyReportShared';
 
 function getWeekRange(dateStr: string): { start: Date; end: Date; label: string } {
   const d = new Date(dateStr);
@@ -129,8 +135,15 @@ export async function GET(request: NextRequest) {
         storeCount: d.stores.size,
       }));
 
+    const voidTxIds = new Set(
+      (transactions as Array<Record<string, unknown>>)
+        .filter((t) => transactionIsVoided(t))
+        .map((t) => String(t.id)),
+    );
+
     const productMap: Record<string, { name: string; qty: number; revenue: number }> = {};
     for (const item of allItems) {
+      if (voidTxIds.has(item.transaction_id)) continue;
       const key = item.product_name || 'Unknown Product';
       if (!productMap[key]) productMap[key] = { name: key, qty: 0, revenue: 0 };
       productMap[key].qty += Number(item.quantity || 0);
@@ -149,10 +162,17 @@ export async function GET(request: NextRequest) {
     if (branch) expQuery = expQuery.eq('branch', branch);
     const { data: expenses } = await expQuery;
 
+    const startStr = start.toISOString().split('T')[0];
+    const endStr = end.toISOString().split('T')[0];
+    const dailyReportsAll = (await db.dailyReports.getAll()) as DailyReport[];
+    const dailyExpenseAgg = collectDailyReportExpensesInRange(dailyReportsAll, startStr, endStr, branch);
+
     const totalGross = dailyTrend.reduce((s, d) => s + d.gross, 0);
     const totalRefund = dailyTrend.reduce((s, d) => s + d.refund, 0);
     const totalNet = totalGross - totalRefund;
-    const totalExpense = (expenses || []).reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
+    const totalExpenseFromSupabase = (expenses || []).reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
+    const totalExpenseFromDailyReports = dailyExpenseAgg.total;
+    const totalExpense = totalExpenseFromSupabase + totalExpenseFromDailyReports;
     const netAfterExpense = totalNet - totalExpense;
 
     const dailyRowsHtml = dailyTrend
@@ -196,6 +216,7 @@ export async function GET(request: NextRequest) {
     .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; }
     .k { font-size: 11px; color: #64748b; text-transform: uppercase; }
     .v { font-size: 18px; font-weight: 700; margin-top: 4px; }
+    .subamt { font-size: 11px; color: #475569; margin-top: 6px; line-height: 1.35; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 18px; }
     th, td { border: 1px solid #e2e8f0; padding: 8px; font-size: 12px; }
     th { background: #f8fafc; text-align: left; }
@@ -211,7 +232,9 @@ export async function GET(request: NextRequest) {
     <div class="card"><div class="k">Jualan Kasar</div><div class="v">${fmtCurrency(totalGross)}</div></div>
     <div class="card"><div class="k">Refund</div><div class="v">${fmtCurrency(totalRefund)}</div></div>
     <div class="card"><div class="k">Jualan Bersih</div><div class="v">${fmtCurrency(totalNet)}</div></div>
-    <div class="card"><div class="k">Expenses</div><div class="v">${fmtCurrency(totalExpense)}</div></div>
+    <div class="card"><div class="k">Expenses (gabungan)</div><div class="v">${fmtCurrency(totalExpense)}</div>
+      <div class="subamt">Jadual Supabase: ${fmtCurrency(totalExpenseFromSupabase)}<br/>Borang laporan harian: ${fmtCurrency(totalExpenseFromDailyReports)}</div>
+    </div>
     <div class="card"><div class="k">Baki Bersih</div><div class="v">${fmtCurrency(netAfterExpense)}</div></div>
     <div class="card"><div class="k">Bil Transaksi</div><div class="v">${transactions.length}</div></div>
   </div>

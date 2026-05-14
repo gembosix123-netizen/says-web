@@ -299,8 +299,17 @@
     "totalTransfer": 0,
     "amountBankingManual": 0,
     "balancePtCashManual": 0,
-    "expenseLines": [],
-    "expensesTotal": 0,
+    "expenseLines": [
+      {
+        "category": "minyak",
+        "description": "demo sahaja",
+        "amount": 0.01,
+        "receiptImageUrls": [
+          "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/branch-expenses/2026-05-19/613e407b-a798-4e0c-a697-a19ad316791a/1778748292376_q6qjcf.png"
+        ]
+      }
+    ],
+    "expensesTotal": 0.01,
     "bankSlipUrls": [],
     "cashProofUrls": [
       "https://zrdptktxipnprdhuqcts.supabase.co/storage/v1/object/public/sales-receipts/cash-proof/2026-05-19/1778599301958_c4dtkq.png"
@@ -311,11 +320,16 @@
       "cashPaidCustomer": [],
       "creditSales": []
     },
-    "status": "draft",
+    "status": "approved_daily",
     "source": "sales",
     "approvalStage": "daily",
     "liveSalesRefs": [],
     "submittedAt": "2026-05-12T15:21:43.889Z",
-    "updatedAt": "2026-05-12T15:21:43.889Z"
+    "updatedAt": "2026-05-14T08:45:53.509Z",
+    "branchExpensesSyncedAt": "2026-05-14T08:44:53.526Z",
+    "reviewedBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54",
+    "reviewedAt": "2026-05-14T08:45:53.509Z",
+    "approvedDailyAt": "2026-05-14T08:45:53.509Z",
+    "approvedDailyBy": "efa11f8f-009f-4f55-8aef-3dd0b429ac54"
   }
 ]

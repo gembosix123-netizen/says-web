@@ -268,8 +268,8 @@ export default function SalesHubPage() {
       borderColor: 'border-emerald-500/50'
     },
     {
-      title: 'Perpustakaan laporan',
-      description: 'Sejarah & status — data laporan tersimpan di sini',
+      title: 'Arkib laporan harian',
+      description: 'Semak sejarah hantaran, status kelulusan, dan dokumen laporan yang disimpan.',
       icon: Archive,
       href: '/sales/daily-report/library',
       color: 'from-cyan-500 to-cyan-600',
@@ -614,7 +614,7 @@ export default function SalesHubPage() {
                       router.push('/sales/daily-report/library');
                     }}
                   >
-                    Perpustakaan laporan
+                    Buka arkib laporan
                   </Button>
                   <Button
                     variant="primary"

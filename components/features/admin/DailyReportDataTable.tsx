@@ -101,6 +101,7 @@ export function DailyReportDataTable({
   onOpenReportPdf = openDailyReportPdfWindow,
   showWorkflow = false,
   viewerRole = '',
+  viewerBranch = '',
   busyReportId = null,
   onEditBranchExpenses,
   onSendToHQ,
@@ -114,6 +115,8 @@ export function DailyReportDataTable({
   onOpenReportPdf?: (row: Row) => void;
   showWorkflow?: boolean;
   viewerRole?: NormalizedRole | '';
+  /** Branch admin must have a branch in session to use expense / send-to-HQ actions. */
+  viewerBranch?: string;
   busyReportId?: string | null;
   onEditBranchExpenses?: (row: Row) => void;
   onSendToHQ?: (row: Row) => void;
@@ -330,7 +333,8 @@ export function DailyReportDataTable({
                           Semak butiran
                         </button>
                       )}
-                      {(viewerRole === 'Admin' || viewerRole === 'Main Admin') &&
+                      {viewerRole === 'Admin' &&
+                        viewerBranch.trim() !== '' &&
                         (row.status === 'draft' || row.status === 'returned_daily') && (
                           <>
                             {onEditBranchExpenses && (
@@ -363,7 +367,10 @@ export function DailyReportDataTable({
                             )}
                           </>
                         )}
-                      {viewerRole === 'Main Admin' && row.status === 'submitted_daily' && (
+                      {viewerRole === 'Main Admin' &&
+                        (row.status === 'submitted_daily' ||
+                          row.status === 'submitted' ||
+                          row.status === 'reviewed') && (
                         <>
                           {onApprove && (
                             <button

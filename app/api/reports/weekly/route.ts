@@ -5,6 +5,12 @@ import { getSessionUserFromRequest } from '@/lib/session';
 import { normalizeRole } from '@/lib/roles';
 import { canExportReports } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
+import { db } from '@/lib/db';
+import type { DailyReport } from '@/types';
+import {
+  transactionIsVoided,
+  collectDailyReportExpensesInRange,
+} from '@/lib/weeklyReportShared';
 
 // ============================================================================
 // Helper: resolve week range from a date
@@ -107,6 +113,11 @@ export async function GET(request: NextRequest) {
   if (branch) expQuery = expQuery.eq('branch', branch);
   const { data: expenses } = await expQuery;
 
+  const startStr = start.toISOString().split('T')[0];
+  const endStr = end.toISOString().split('T')[0];
+  const dailyReportsAll = (await db.dailyReports.getAll()) as DailyReport[];
+  const dailyExpenseAgg = collectDailyReportExpensesInRange(dailyReportsAll, startStr, endStr, branch);
+
   // Aggregate daily summary
   const dailyMap: Record<string, { gross: number; refund: number; net: number; cash: number; credit: number; txCount: number; storeIds: Set<string> }> = {};
   for (const tx of transactions) {
@@ -144,11 +155,17 @@ export async function GET(request: NextRequest) {
 
   const totalGross = transactions.reduce((s, t) => s + Number(t.grand_total || t.subtotal_amount || 0), 0);
   const totalRefund = (returns || []).reduce((s, r) => s + Number(r.quantity || 0) * Number(r.unit_price || 0), 0);
-  const totalExpense = (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalExpenseFromSupabase = (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalExpenseFromDailyReports = dailyExpenseAgg.total;
+  const totalExpense = totalExpenseFromSupabase + totalExpenseFromDailyReports;
 
-  // Product breakdown
+  // Product breakdown (exclude voided sales — line items may retain pre-void qty/subtotal)
+  const voidTxIds = new Set(
+    transactions.filter((t) => transactionIsVoided(t as Record<string, unknown>)).map((t) => String(t.id)),
+  );
   const productMap: Record<string, { name: string; qty: number; revenue: number }> = {};
-  for (const items of Object.values(itemsMap)) {
+  for (const [txId, items] of Object.entries(itemsMap)) {
+    if (voidTxIds.has(txId)) continue;
     for (const item of items) {
       if (!productMap[item.product_name]) productMap[item.product_name] = { name: item.product_name, qty: 0, revenue: 0 };
       productMap[item.product_name].qty += Number(item.quantity || 0);
@@ -165,7 +182,10 @@ export async function GET(request: NextRequest) {
     totalGross,
     totalRefund,
     totalNet: totalGross - totalRefund,
+    totalExpenseFromSupabase,
+    totalExpenseFromDailyReports,
     totalExpense,
+    dailyExpenseReportCount: dailyExpenseAgg.matchedReportCount,
     netAfterExpense: totalGross - totalRefund - totalExpense,
     totalTransactions: transactions.length,
     dailyTrend,
@@ -322,6 +342,8 @@ function applyStyleForWeeklySheet(
   totalCols: number,
   amountColIdx: number,
   totalRowIdx: number,
+  voidAbsoluteRows: number[],
+  valueMode: 'subtotal_rm' | 'quantity',
 ) {
   const border = {
     top: { style: 'thin', color: { rgb: '000000' } },
@@ -329,6 +351,8 @@ function applyStyleForWeeklySheet(
     bottom: { style: 'thin', color: { rgb: '000000' } },
     left: { style: 'thin', color: { rgb: '000000' } },
   };
+
+  const voidSet = new Set(voidAbsoluteRows);
 
   for (let r = 0; r < totalRows; r++) {
     for (let c = 0; c < totalCols; c++) {
@@ -340,13 +364,20 @@ function applyStyleForWeeklySheet(
       const isTitle = r === 0;
       const isTotal = r === totalRowIdx;
       const isAmountCol = c === amountColIdx;
+      const isProductCol = c >= 3 && c < amountColIdx;
+      const isVoidRow = voidSet.has(r) && r > 3 && r < totalRowIdx;
+
+      const intCols = valueMode === 'quantity' && (isProductCol || (isAmountCol && !isTitle));
+      const numFmt = isNumeric
+        ? (intCols && !isHeader ? '#,##0' : '#,##0.00')
+        : 'General';
 
       ws[addr].s = {
         font: {
           name: 'Calibri',
           sz: isTitle ? 12 : 10,
           bold: isTitle || isHeader || isTotal,
-          color: { rgb: '000000' },
+          color: { rgb: isVoidRow ? 'FF0000' : '000000' },
         },
         alignment: {
           vertical: 'center',
@@ -354,7 +385,7 @@ function applyStyleForWeeklySheet(
           wrapText: false,
         },
         border,
-        numFmt: isNumeric ? '#,##0.00' : 'General',
+        numFmt,
       };
 
       if (isHeader) {
@@ -378,7 +409,12 @@ function buildWeekSheet(
   itemsMap: Record<string, Array<{ product_name: string; quantity: number; subtotal: number }>>,
   customersById: Record<string, string>,
   productCols: ProductColDef[],
-): { data: Array<Array<string | number>>; merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> } {
+  valueMode: 'subtotal_rm' | 'quantity',
+): {
+  data: Array<Array<string | number>>;
+  merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }>;
+  voidRowAbsoluteIndices: number[];
+} {
   // --- Build group spans ---
   type GroupSpan = { brand: string; startCol: number; count: number; isSingle: boolean };
   const groups: GroupSpan[] = [];
@@ -391,7 +427,8 @@ function buildWeekSheet(
     i = j;
   }
 
-  const totalCols = 3 + productCols.length + 1; // DATE + INV + CUST + products + AMOUNT
+  const totalCols = 3 + productCols.length + 1; // DATE + INV + CUST + products + AMOUNT / TOTAL PCS
+  const lastHeaderLabel = valueMode === 'quantity' ? 'TOTAL (PCS)' : 'AMOUNT (RM)';
 
   // --- Row 0: title (merged across all cols) ---
   const titleRow: Array<string | number> = [title, ...Array(totalCols - 1).fill('')];
@@ -405,7 +442,7 @@ function buildWeekSheet(
     brandRow.push(g.brand);
     for (let k = 1; k < g.count; k++) brandRow.push('');
   }
-  brandRow.push('AMOUNT (RM)');
+  brandRow.push(lastHeaderLabel);
 
   // --- Row 3: variant sub-header ---
   const variantRow: Array<string | number> = ['', '', ''];
@@ -434,37 +471,62 @@ function buildWeekSheet(
     }
   }
 
-  // --- Data rows ---
+  // --- Data rows (first data row = Excel row index 4) ---
   const dataRows: Array<Array<string | number>> = [];
   let totalAmount = 0;
   const productTotals: Record<string, number> = {};
+  const voidRowAbsoluteIndices: number[] = [];
+  const firstDataRowIdx = 4;
 
   for (const tx of transactions) {
-    const amount = Number(tx.grand_total || tx.subtotal_amount || 0);
-    totalAmount += amount;
+    const voided = transactionIsVoided(tx);
+    const absoluteRow = firstDataRowIdx + dataRows.length;
+    if (voided) voidRowAbsoluteIndices.push(absoluteRow);
+
+    const amount = voided ? 0 : Number(tx.grand_total || tx.subtotal_amount || 0);
     const txItems = itemsMap[String(tx.id)] || [];
-    // Map product → subtotal
+
     const itemAmts: Record<string, number> = {};
+    const itemQtys: Record<string, number> = {};
     for (const it of txItems) {
       itemAmts[it.product_name] = (itemAmts[it.product_name] || 0) + Number(it.subtotal || 0);
+      itemQtys[it.product_name] = (itemQtys[it.product_name] || 0) + Number(it.quantity || 0);
     }
-    const pCols = productCols.map(pc => {
-      const v = itemAmts[pc.productName] || 0;
-      productTotals[pc.productName] = (productTotals[pc.productName] || 0) + v;
+
+    const pCols = productCols.map((pc) => {
+      if (voided) return '';
+      const v = valueMode === 'quantity'
+        ? (itemQtys[pc.productName] || 0)
+        : (itemAmts[pc.productName] || 0);
+      if (!voided) {
+        productTotals[pc.productName] = (productTotals[pc.productName] || 0) + v;
+      }
       return v > 0 ? v : '';
     });
+
+    let rowTotal: number;
+    if (voided) {
+      rowTotal = 0;
+    } else if (valueMode === 'quantity') {
+      rowTotal = productCols.reduce((s, pc) => s + (itemQtys[pc.productName] || 0), 0);
+      totalAmount += rowTotal;
+    } else {
+      rowTotal = amount;
+      totalAmount += amount;
+    }
+
     dataRows.push([
       fmtDate(String(tx.transaction_date || tx.created_at || '')),
       String(tx.invoice || tx.receipt_no || tx.invoice_no || ''),
       customersById[String(tx.customer_id || '')] || String(tx.customer_name || '-'),
       ...pCols,
-      amount,
+      rowTotal,
     ]);
   }
 
-  // --- TOTAL row ---
+  const totalLabel = valueMode === 'quantity' ? 'TOTAL (PCS)' : 'TOTAL (RM)';
   const totalRow: Array<string | number> = [
-    'TOTAL (RM)', '', '',
+    totalLabel, '', '',
     ...productCols.map(pc => productTotals[pc.productName] || 0),
     totalAmount,
   ];
@@ -473,7 +535,7 @@ function buildWeekSheet(
     titleRow, blankRow, brandRow, variantRow, ...dataRows, totalRow,
   ];
 
-  return { data, merges };
+  return { data, merges, voidRowAbsoluteIndices };
 }
 
 // ============================================================================
@@ -592,6 +654,26 @@ export async function POST(request: NextRequest) {
   if (branch) expQuery = expQuery.eq('branch', branch);
   const { data: expenses } = await expQuery;
 
+  const exportStartStr = startDate.toISOString().split('T')[0];
+  const exportEndStr = endDate.toISOString().split('T')[0];
+  const dailyReportsAllPost = (await db.dailyReports.getAll()) as DailyReport[];
+  const dailyExpenseAggPost = collectDailyReportExpensesInRange(
+    dailyReportsAllPost,
+    exportStartStr,
+    exportEndStr,
+    branch,
+  );
+  const totalExpenseFromSupabasePost = (expenses || []).reduce(
+    (s: number, e: Record<string, unknown>) => s + Number(e.amount || 0),
+    0,
+  );
+  const totalExpenseFromDailyReportsPost = dailyExpenseAggPost.total;
+  const totalExpenseCombinedPost = totalExpenseFromSupabasePost + totalExpenseFromDailyReportsPost;
+
+  const voidTxIdsPost = new Set(
+    transactions.filter((t) => transactionIsVoided(t)).map((t) => String(t.id)),
+  );
+
   // ──────────────────────────────────────────────────────────────────────────
   // Build product column definitions (sorted by brand → variant)
   // Uses product code to group: "MB1KG" → brand="MB", variant="1KG"
@@ -626,7 +708,9 @@ export async function POST(request: NextRequest) {
   // ──────────────────────────────────────────────────────────────────────────
   const wb = XLSX.utils.book_new();
 
-  // ── For each week, generate 3 sheets (CASH · TRANSFER · CREDIT) ──
+  // ── For each week: RM sheets (by payment) + matching PCS sheets ──
+  const paySheetShort: Record<string, string> = { CASH: 'CASH', TRANSFER: 'TRF', CREDIT: 'CR' };
+
   for (const week of weeks) {
     const weekTx = transactions.filter((t) => {
       const d = new Date(String(t.transaction_date || t.created_at || ''));
@@ -647,19 +731,32 @@ export async function POST(request: NextRequest) {
       weekItemsMap[it.transaction_id].push(it);
     }
 
-    const payGroups: Array<{ name: string; filter: (m: string) => boolean }> = [
-      { name: `WEEK ${week.weekNum}`,             filter: (m) => paymentCategory(m) === 'cash'     },
-      { name: `WEEK ${week.weekNum} (TRANSFER)`,  filter: (m) => paymentCategory(m) === 'transfer'  },
-      { name: `WEEK ${week.weekNum} (CREDIT)`,    filter: (m) => paymentCategory(m) === 'credit'    },
+    const payGroups: Array<{
+      rmSheetName: string;
+      payKey: 'CASH' | 'TRANSFER' | 'CREDIT';
+      filter: (m: string) => boolean;
+    }> = [
+      { rmSheetName: `WEEK ${week.weekNum}`, payKey: 'CASH', filter: (m) => paymentCategory(m) === 'cash' },
+      { rmSheetName: `WEEK ${week.weekNum} (TRANSFER)`, payKey: 'TRANSFER', filter: (m) => paymentCategory(m) === 'transfer' },
+      { rmSheetName: `WEEK ${week.weekNum} (CREDIT)`, payKey: 'CREDIT', filter: (m) => paymentCategory(m) === 'credit' },
     ];
 
-    // Determine month abbreviation for sheet title
     const weekStartLabel = week.start.toLocaleDateString('en-MY', { month: 'short', year: 'numeric' }).toUpperCase();
-    for (const pg of payGroups) {
-      const filtered = weekTx.filter((t) => pg.filter(String(t.payment_method || '')));
-      const sheetTitle = `WEEKLY SALES REPORT (${weekStartLabel} - WEEK ${week.weekNum})`;
 
-      const { data, merges } = buildWeekSheet(sheetTitle, filtered, weekItemsMap, customersById, productCols);
+    const appendStyledSheet = (
+      sheetName: string,
+      sheetTitle: string,
+      filteredTx: Array<Record<string, unknown>>,
+      valueMode: 'subtotal_rm' | 'quantity',
+    ) => {
+      const { data, merges, voidRowAbsoluteIndices } = buildWeekSheet(
+        sheetTitle,
+        filteredTx,
+        weekItemsMap,
+        customersById,
+        productCols,
+        valueMode,
+      );
       const ws = XLSX.utils.aoa_to_sheet(data);
       ws['!merges'] = merges;
       ws['!cols'] = [
@@ -667,15 +764,26 @@ export async function POST(request: NextRequest) {
         ...productCols.map(() => ({ wch: 11 })),
         { wch: 14 },
       ];
-      // Row heights: title row taller
       ws['!rows'] = [{ hpx: 20 }, { hpx: 6 }, { hpx: 16 }, { hpx: 16 }];
 
       const totalCols = 3 + productCols.length + 1;
       const amountColIdx = totalCols - 1;
       const totalRowIdx = data.length - 1;
-      applyStyleForWeeklySheet(ws, data.length, totalCols, amountColIdx, totalRowIdx);
+      applyStyleForWeeklySheet(ws, data.length, totalCols, amountColIdx, totalRowIdx, voidRowAbsoluteIndices, valueMode);
 
-      XLSX.utils.book_append_sheet(wb, ws, pg.name);
+      const safeName = sheetName.slice(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, safeName);
+    };
+
+    for (const pg of payGroups) {
+      const filtered = weekTx.filter((t) => pg.filter(String(t.payment_method || '')));
+      const titleRm = `WEEKLY SALES REPORT BY PAYMENT — RM (${weekStartLabel} - WEEK ${week.weekNum} ${pg.payKey})`;
+      const titleQty = `REPORT BY QUANTITY — PCS (${weekStartLabel} - WEEK ${week.weekNum} ${pg.payKey})`;
+
+      appendStyledSheet(pg.rmSheetName, titleRm, filtered, 'subtotal_rm');
+
+      const pcsName = `W${week.weekNum} ${paySheetShort[pg.payKey]} PCS`;
+      appendStyledSheet(pcsName, titleQty, filtered, 'quantity');
     }
   }
 
@@ -683,16 +791,31 @@ export async function POST(request: NextRequest) {
   const tGross   = transactions.reduce((s, t) => s + Number(t.grand_total || t.subtotal_amount || 0), 0);
   const tRefund  = (returns || []).reduce((s: number, r: Record<string, unknown>) =>
     s + Number(r.quantity || 0) * Number(r.unit_price || 0), 0);
-  const totalExp = (expenses || []).reduce((s: number, e: Record<string, unknown>) => s + Number(e.amount || 0), 0);
-
   type ProdRev = { name: string; rev: number };
   const topProds: ProdRev[] = Object.values(
-    allItems.reduce<Record<string, ProdRev>>((acc, i) => {
-      if (!acc[i.product_name]) acc[i.product_name] = { name: i.product_name, rev: 0 };
-      acc[i.product_name].rev += Number(i.subtotal || 0);
-      return acc;
-    }, {})
-  ).sort((a, b) => b.rev - a.rev).slice(0, 10);
+    allItems
+      .filter((i) => !voidTxIdsPost.has(i.transaction_id))
+      .reduce<Record<string, ProdRev>>((acc, i) => {
+        if (!acc[i.product_name]) acc[i.product_name] = { name: i.product_name, rev: 0 };
+        acc[i.product_name].rev += Number(i.subtotal || 0);
+        return acc;
+      }, {}),
+  )
+    .sort((a, b) => b.rev - a.rev)
+    .slice(0, 10);
+
+  type ProdQty = { name: string; qty: number };
+  const topPcs: ProdQty[] = Object.values(
+    allItems
+      .filter((i) => !voidTxIdsPost.has(i.transaction_id))
+      .reduce<Record<string, ProdQty>>((acc, i) => {
+        if (!acc[i.product_name]) acc[i.product_name] = { name: i.product_name, qty: 0 };
+        acc[i.product_name].qty += Number(i.quantity || 0);
+        return acc;
+      }, {}),
+  )
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 10);
 
   const summaryData: Array<Array<string | number>> = [
     [`WEEKLY SALES REPORT — ${reportMonthLabel}  |  Branch: ${branch || 'All Branches'}`],
@@ -702,12 +825,15 @@ export async function POST(request: NextRequest) {
     ['Jualan Kasar (Gross)', fmt(tGross)],
     ['Refund Diluluskan', fmt(tRefund)],
     ['Jualan Bersih (Net)', fmt(tGross - tRefund)],
-    ['Jumlah Expenses', fmt(totalExp)],
-    ['Net Selepas Expenses', fmt(tGross - tRefund - totalExp)],
+    ['Expenses — jadual Supabase (approved/paid)', fmt(totalExpenseFromSupabasePost)],
+    ['Perbelanjaan — borang laporan harian', fmt(totalExpenseFromDailyReportsPost)],
+    ['Jumlah Expenses (gabungan)', fmt(totalExpenseCombinedPost)],
+    ['Net Selepas Expenses', fmt(tGross - tRefund - totalExpenseCombinedPost)],
     [],
     ['Jumlah Transaksi', transactions.length],
     ['Bil Refund', (returns || []).length],
-    ['Bil Expenses', (expenses || []).length],
+    ['Bil rekod expenses (Supabase)', (expenses || []).length],
+    ['Bil borang harian berperbelanjaan', dailyExpenseAggPost.matchedReportCount],
     [],
     ...weeks.map((w) => {
       const wTx = transactions.filter((t) => {
@@ -724,6 +850,9 @@ export async function POST(request: NextRequest) {
     [],
     ['TOP PRODUK', 'HASIL (RM)'],
     ...topProds.map((p) => [p.name, fmt(p.rev)]),
+    [],
+    ['TOP PRODUK', 'QTY (PCS)'],
+    ...topPcs.map((p) => [p.name, p.qty]),
   ];
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
   wsSummary['!cols'] = [{ wch: 50 }, { wch: 80 }];
@@ -749,7 +878,7 @@ export async function POST(request: NextRequest) {
   wsRefund['!cols'] = [{ wch: 13 }, { wch: 18 }, { wch: 26 }, { wch: 22 }, { wch: 7 }, { wch: 18 }, { wch: 12 }, { wch: 18 }];
   XLSX.utils.book_append_sheet(wb, wsRefund, 'REFUND LOG');
 
-  // ── EXPENSES sheet ──
+  // ── EXPENSES sheet (Supabase + ringkasan laporan harian) ──
   const expRows: Array<Array<string | number>> = [
     [`COMPANY EXPENSES — ${reportMonthLabel}`],
     [],
@@ -764,7 +893,22 @@ export async function POST(request: NextRequest) {
       String(e.approved_by_name || '-'),
     ]),
     [],
-    ['TOTAL', '', '', '', totalExp, '', ''],
+    ['JUMLAH (SUPABASE)', '', '', '', totalExpenseFromSupabasePost, '', ''],
+    [],
+    ['PERBELANJAAN LAPORAN HARIAN (RINGKASAN)'],
+    ['TARIKH', 'CAWANGAN', 'JURUJUAL', 'JUMLAH (RM)', '', '', ''],
+    ...dailyExpenseAggPost.rows.slice(0, 120).map((row) => [
+      row.date,
+      row.branch,
+      row.userName,
+      Number(row.amount),
+      '',
+      '',
+      '',
+    ]),
+    [],
+    ['JUMLAH (LAPORAN HARIAN)', '', '', totalExpenseFromDailyReportsPost, '', '', ''],
+    ['JUMLAH GABUNGAN EXPENSES', '', '', totalExpenseCombinedPost, '', '', ''],
   ];
   const wsExp = XLSX.utils.aoa_to_sheet(expRows);
   wsExp['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 14 }, { wch: 28 }, { wch: 14 }, { wch: 12 }, { wch: 18 }];

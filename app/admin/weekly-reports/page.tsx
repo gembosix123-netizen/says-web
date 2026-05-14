@@ -24,7 +24,10 @@ type WeeklyData = {
   totalGross: number;
   totalRefund: number;
   totalNet: number;
+  totalExpenseFromSupabase?: number;
+  totalExpenseFromDailyReports?: number;
   totalExpense: number;
+  dailyExpenseReportCount?: number;
   netAfterExpense: number;
   totalTransactions: number;
   dailyTrend: DailyTrend[];
@@ -146,12 +149,31 @@ export default function WeeklyReportsPage() {
     setExportingMonth(false);
   }
 
-  const kpiCards = data
+  const kpiCards: Array<{
+    label: string;
+    value: React.ReactNode;
+    icon: React.ReactNode;
+    delta: null;
+  }> = data
     ? [
         { label: 'Jualan Kasar', value: fmt(data.totalGross), icon: <ShoppingCart className="h-5 w-5 text-indigo-500" />, delta: null },
         { label: 'Refund Diluluskan', value: fmt(data.totalRefund), icon: <TrendingDown className="h-5 w-5 text-red-500" />, delta: null },
         { label: 'Jualan Bersih', value: fmt(data.totalNet), icon: <TrendingUp className="h-5 w-5 text-green-500" />, delta: null },
-        { label: 'Expenses', value: fmt(data.totalExpense), icon: <DollarSign className="h-5 w-5 text-amber-500" />, delta: null },
+        {
+          label: 'Expenses',
+          value: (
+            <div className="space-y-0.5">
+              <p className="font-bold text-sm">{fmt(data.totalExpense)}</p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal leading-snug">
+                Supabase: {fmt(data.totalExpenseFromSupabase ?? 0)}
+                <br />
+                Laporan harian: {fmt(data.totalExpenseFromDailyReports ?? 0)}
+              </p>
+            </div>
+          ),
+          icon: <DollarSign className="h-5 w-5 text-amber-500" />,
+          delta: null,
+        },
         { label: 'Baki Bersih', value: fmt(data.netAfterExpense), icon: <DollarSign className="h-5 w-5 text-blue-500" />, delta: null },
         { label: 'Bil Transaksi', value: String(data.totalTransactions), icon: <ShoppingCart className="h-5 w-5 text-slate-500" />, delta: null },
       ]
@@ -199,7 +221,7 @@ export default function WeeklyReportsPage() {
 
       {/* Full-month Excel export panel */}
       <div className="flex flex-wrap items-center gap-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3">
-        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Export bulanan (WEEK 1 / TRANSFER / CREDIT …):</span>
+        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Export bulanan (RM + PCS setiap minggu / tunai·transfer·kredit):</span>
         <input
           type="month"
           value={selectedMonth}
@@ -229,7 +251,11 @@ export default function WeeklyReportsPage() {
           {kpiCards.map((card) => (
             <div key={card.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2">{card.icon}<p className="text-xs text-slate-500">{card.label}</p></div>
-              <p className="font-bold text-sm">{card.value}</p>
+              {typeof card.value === 'string' || typeof card.value === 'number' ? (
+                <p className="font-bold text-sm">{card.value}</p>
+              ) : (
+                <div className="text-sm">{card.value}</div>
+              )}
             </div>
           ))}
         </div>

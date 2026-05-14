@@ -205,6 +205,7 @@ const dictionary: Translations = {
   reports: { ms: 'Laporan', en: 'Reports' },
   audit_center: { ms: 'Pusat Audit', en: 'Audit Center' },
   stock_grants: { ms: 'Lulusan Stok', en: 'Stock approvals' },
+  hq_approvals: { ms: 'Kelulusan HQ', en: 'HQ approvals' },
   settings: { ms: 'Tetapan', en: 'Settings' },
   logout: { ms: 'Log Keluar', en: 'Logout' },
   user_info: { ms: 'Info Pengguna', en: 'User Info' },

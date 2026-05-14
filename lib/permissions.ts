@@ -94,14 +94,14 @@ export function canApproveExpenseRecords(role: NormalizedRole): boolean {
   return role === 'Main Admin';
 }
 
-/** Branch admin: save expenses into daily report draft / returned. */
+/** Branch admin only: save expenses into daily report draft / returned (Main Admin does not edit branch expenses). */
 export function canSaveBranchDailyReport(role: NormalizedRole): boolean {
-  return role === 'Main Admin' || role === 'Admin';
+  return role === 'Admin';
 }
 
-/** Branch admin: forward draft to HQ (submitted_daily). */
+/** Branch admin only: forward draft to Main Admin (submitted_daily). */
 export function canForwardDailyReportToHQ(role: NormalizedRole): boolean {
-  return role === 'Main Admin' || role === 'Admin';
+  return role === 'Admin';
 }
 
 /** Final approve or return daily-stage report at HQ. */

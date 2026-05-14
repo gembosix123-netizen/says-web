@@ -43,6 +43,7 @@ export default function AdminReportsHub() {
   const [loading, setLoading] = useState(true);
   const [dailyViewDate, setDailyViewDate] = useState(() => toLocalDateInput(new Date()));
   const [viewerRole, setViewerRole] = useState<NormalizedRole | ''>('');
+  const [viewerBranch, setViewerBranch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [branchPanelReportId, setBranchPanelReportId] = useState<string | null>(null);
   const [detailsReport, setDetailsReport] = useState<DailyReport | null>(null);
@@ -72,8 +73,9 @@ export default function AdminReportsHub() {
 
   useEffect(() => {
     void (async () => {
-      const { role } = await fetchViewerInfo();
+      const { role, branch } = await fetchViewerInfo();
       setViewerRole(role);
+      setViewerBranch(branch);
     })();
   }, []);
 
@@ -370,7 +372,8 @@ export default function AdminReportsHub() {
             <div className="rounded-lg border border-sky-800/50 bg-sky-950/35 px-3 py-2.5 text-[11px] text-sky-100/90 leading-relaxed">
               <strong className="text-sky-200">Aliran:</strong> pada baris <strong>Draf</strong> / <strong>Tolak</strong> (pulangan),{' '}
               <strong>Isi perbelanjaan</strong> dahulu, simpan ke laporan, kemudian <strong>Hantar ke Main Admin</strong>{' '}
-              (butang aktif selepas simpan perbelanjaan). <strong>Main Admin:</strong> tapis <strong>Pending</strong>, kemudian{' '}
+              (butang aktif selepas simpan perbelanjaan) — <strong>admin cawangan sahaja</strong>.{' '}
+              <strong>Main Admin:</strong> tapis <strong>Pending</strong>, kemudian{' '}
               <strong>Lulus</strong> / <strong>Tolak</strong> pada lajur Tindakan.
             </div>
           )}
@@ -488,6 +491,7 @@ export default function AdminReportsHub() {
 
           {branchPanelReport &&
             showWorkflow &&
+            viewerRole === 'Admin' &&
             (branchPanelReport.status === 'draft' || branchPanelReport.status === 'returned_daily') && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -513,6 +517,7 @@ export default function AdminReportsHub() {
             onOpenReportPdf={(row) => openDailyReportPdfWindow(row as DailyReport)}
             showWorkflow={showWorkflow}
             viewerRole={viewerRole}
+            viewerBranch={viewerBranch}
             busyReportId={busyReportId}
             onEditBranchExpenses={(row) => setBranchPanelReportId(row.id)}
             onSendToHQ={(row) => void handleSendToHQ(row as DailyReport)}
@@ -534,6 +539,7 @@ export default function AdminReportsHub() {
                 onOpenReportPdf={(row) => openDailyReportPdfWindow(row as DailyReport)}
                 showWorkflow={showWorkflow}
                 viewerRole={viewerRole}
+                viewerBranch={viewerBranch}
                 busyReportId={busyReportId}
                 onEditBranchExpenses={(row) => setBranchPanelReportId(row.id)}
                 onSendToHQ={(row) => void handleSendToHQ(row as DailyReport)}
@@ -635,6 +641,7 @@ export default function AdminReportsHub() {
             onOpenReportPdf={(row) => openDailyReportPdfWindow(row as DailyReport)}
             showWorkflow={showWorkflow}
             viewerRole={viewerRole}
+            viewerBranch={viewerBranch}
             busyReportId={busyReportId}
             onEditBranchExpenses={(row) => setBranchPanelReportId(row.id)}
             onSendToHQ={(row) => void handleSendToHQ(row as DailyReport)}

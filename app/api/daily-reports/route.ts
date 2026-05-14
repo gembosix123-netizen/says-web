@@ -158,8 +158,10 @@ export async function GET(request: NextRequest) {
     if (r === 'Sales' || r === 'Merchandiser') {
       return report.userId === user.id;
     }
-    if (r === 'Admin' && user.branch) {
-      return branchLabelsEquivalent(report.branch, user.branch);
+    if (r === 'Admin') {
+      const br = String(user.branch || '').trim();
+      if (!br) return false;
+      return branchLabelsEquivalent(report.branch, br);
     }
     return true;
   });
@@ -393,7 +395,14 @@ export async function PUT(request: NextRequest) {
     if (!canSaveBranchDailyReport(normRole)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    if (normRole === 'Admin' && user.branch && !branchLabelsEquivalent(existing.branch, user.branch)) {
+    const adminBranch = String(user.branch || '').trim();
+    if (!adminBranch) {
+      return NextResponse.json(
+        { error: 'Sesi admin cawangan tiada cawangan — tidak boleh simpan perbelanjaan.' },
+        { status: 403 }
+      );
+    }
+    if (!branchLabelsEquivalent(existing.branch, adminBranch)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const stage = existing.approvalStage || 'daily';
@@ -437,9 +446,16 @@ export async function PUT(request: NextRequest) {
       const st = String(existing.status);
       if (st === 'draft' || st === 'returned_daily') {
         if (!canForwardDailyReportToHQ(normRole)) {
-          return NextResponse.json({ error: 'Hanya admin cawangan boleh hantar ke HQ.' }, { status: 403 });
+          return NextResponse.json({ error: 'Hanya admin cawangan boleh hantar ke Main Admin.' }, { status: 403 });
         }
-        if (normRole === 'Admin' && user.branch && !branchLabelsEquivalent(existing.branch, user.branch)) {
+        const adminBranchFwd = String(user.branch || '').trim();
+        if (!adminBranchFwd) {
+          return NextResponse.json(
+            { error: 'Sesi admin cawangan tiada cawangan — tidak boleh hantar laporan.' },
+            { status: 403 }
+          );
+        }
+        if (!branchLabelsEquivalent(existing.branch, adminBranchFwd)) {
           return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
         if (!existing.branchExpensesSyncedAt) {

@@ -139,6 +139,11 @@ export function middleware(request: NextRequest) {
         if (pathname.startsWith('/admin/stock-grants') && role !== 'Main Admin') {
           return NextResponse.redirect(new URL('/unauthorized', request.url));
         }
+
+        // HQ approval center (laporan pending + capaian stok) — Main Admin only
+        if (pathname.startsWith('/admin/approvals') && role !== 'Main Admin') {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
       }
       
       // Sales routes - only Sales role can create sales (not Merchandiser)
