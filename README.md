@@ -101,6 +101,8 @@ npm run seed:supabase              # Seed Supabase with dev data
 |------|-------|
 | `ARCHITECTURE_OVERVIEW.md` | Component hierarchy & data flow |
 | `PROJECT_STRUCTURE.md` | Folder & file layout |
+| `docs/system-workflow-plan.md` | End-to-end system workflow plan |
+| `docs/void-invoice-workflow-plan.md` | Void invoice & replacement workflow plan |
 | `SECURITY_IMPLEMENTATION.md` | Rate limiting, bcrypt, RBAC |
 | `AUDIT_RBAC_POLICY_MATRIX.md` | Role access matrix (source of truth) |
 | `BRANCH_PERMISSIONS_GUIDE.md` | Branch-based access control |
