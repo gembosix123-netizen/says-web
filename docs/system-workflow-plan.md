@@ -5,6 +5,8 @@ Dokumen ini dibuat selepas semakan repo. Pelan workflow sedia ada yang ditemui i
 untuk aliran void invois/gantian. Dokumen ini pula menerangkan workflow sistem secara menyeluruh
 berdasarkan modul dan kod semasa.
 
+Versi visual ringkas untuk presentation/client: [`system-workflow-visual.md`](system-workflow-visual.md).
+
 ---
 
 ## 1. Skop sistem
